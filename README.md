@@ -5,7 +5,7 @@
 
 Galois is an extremely high performance matching engine written in Rust, typically used for the crypto currency exchange service.
 
-Galois use Event Sourcing pattern to handle tens of thousands of orders per second or event better, depending on the performance of persistence. Basic architecture is shown below.
+Galois use Event Sourcing pattern to handle tens of thousands of orders per second or even better, depending on the performance of persistence. Basic architecture is shown below.
 
 ```
                   core dump(disk)
@@ -20,7 +20,7 @@ event(mysql)  >>  |  galois  |  >> match results(mysql)/best n price(redis)
                        
 ```
 
-If you would like to use Galois in your product, you should implement the order/user management known as broker, as well as the crypto coin withdraw/deposition.
+If you would like to use Galois in your product, you should implement the order/user management known as broker, as well as the blockchain client to handle crypto coin withdraw/deposition.
 
 ## Getting Started
 
@@ -32,13 +32,16 @@ If you would like to use Galois in your product, you should implement the order/
 ### Build & Run
 
 ```
-git clone git@github.com:UINB-Tech/galois.git
+git clone git@github.com:uinb/galois.git
 cd galois
 cargo default nightly
 cargo build --release
 
-# init MySQL
+# init mysql
 mysql -u {user_name} -p {database} < sql/init.sql
+
+# start redis
+redis-server
 
 # modify the configuration file galois.toml before start
 target/release/galois -c galois.toml
