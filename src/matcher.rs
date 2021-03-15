@@ -30,13 +30,8 @@ pub enum Role {
     Maker,
 }
 
-pub trait IntoCode {
-
-    fn into_code(self) -> u32;
-}
-
-impl IntoCode for Role {
-    fn into_code(self) -> u32 {
+impl Into<u32> for Role {
+    fn into(self) -> u32 {
         match self {
             Role::Maker => 0,
             Role::Taker => 1,
@@ -44,8 +39,8 @@ impl IntoCode for Role {
     }
 }
 
-impl IntoCode for AskOrBid {
-    fn into_code(self) -> u32 {
+impl Into<u32> for AskOrBid {
+    fn into(self) ->u32 {
         match self {
             AskOrBid::Ask => 0,
             AskOrBid::Bid => 1,
@@ -53,8 +48,8 @@ impl IntoCode for AskOrBid {
     }
 }
 
-impl IntoCode for State {
-    fn into_code(self) -> u32 {
+impl Into<u32> for State {
+    fn into(self) -> u32 {
         match self {
             State::Submitted => 0,
             State::Canceled => 1,
