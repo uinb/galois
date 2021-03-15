@@ -398,7 +398,7 @@ fn do_inspect(inspection: &Inspection, data: &Data) {
                     available: Decimal::new(0, 0),
                     frozen: Decimal::new(0, 0),
                 })
-                .unwrap(),
+                    .unwrap(),
                 Some(a) => serde_json::to_vec(a).unwrap(),
             };
             server::publish(server::Message::with_payload(session, req_id, v));
@@ -443,7 +443,7 @@ pub fn test() {
             available: Decimal::new(0, 0),
             frozen: Decimal::new(0, 0),
         })
-        .unwrap()
+            .unwrap()
     );
     assert_eq!(true, Decimal::zero().is_sign_positive());
     assert_eq!(false, Decimal::zero().is_sign_negative());

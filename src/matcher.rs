@@ -40,7 +40,7 @@ impl Into<u32> for Role {
 }
 
 impl Into<u32> for AskOrBid {
-    fn into(self) ->u32 {
+    fn into(self) -> u32 {
         match self {
             AskOrBid::Ask => 0,
             AskOrBid::Bid => 1,
@@ -352,7 +352,7 @@ mod test {
                 1,
                 1001,
                 Decimal::from_str("0.1").unwrap(),
-                Decimal::from_str("100").unwrap()
+                Decimal::from_str("100").unwrap(),
             ),
             mr.maker.first().unwrap()
         );
@@ -361,7 +361,7 @@ mod test {
                 1,
                 1002,
                 Decimal::from_str("0.1").unwrap(),
-                Decimal::from_str("100").unwrap()
+                Decimal::from_str("100").unwrap(),
             ),
             mr.maker.get(1).unwrap()
         );

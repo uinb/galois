@@ -13,19 +13,21 @@
 // limitations under the License.
 
 
-use crate::{config::C, core::*, db::DB, event::*, orderbook::AskOrBid};
-use log;
-use mysql::{prelude::*, *};
-use rust_decimal::{prelude::Zero, Decimal};
-use serde::{Deserialize, Serialize};
-use serde_json;
 use std::{
+    sync::Arc,
     sync::atomic::{AtomicBool, Ordering},
     sync::mpsc::Sender,
-    sync::Arc,
     thread,
     time::{Duration, SystemTime},
 };
+
+use log;
+use mysql::{*, prelude::*};
+use rust_decimal::{Decimal, prelude::Zero};
+use serde::{Deserialize, Serialize};
+use serde_json;
+
+use crate::{config::C, core::*, db::DB, event::*, orderbook::AskOrBid};
 
 pub const ASK_LIMIT: u32 = 0;
 pub const BID_LIMIT: u32 = 1;
@@ -284,7 +286,9 @@ pub enum Fusion {
 }
 
 unsafe impl Send for Sequence {}
+
 unsafe impl Send for Command {}
+
 unsafe impl Send for Fusion {}
 
 impl Command {
@@ -428,7 +432,7 @@ fn fetch_sequence_from(id: u64) -> Vec<Sequence> {
             timestamp: f_timestamp,
         },
     )
-    .unwrap_or(vec![])
+        .unwrap_or(vec![])
 }
 
 pub fn insert_nop(id: u64) -> Option<bool> {
