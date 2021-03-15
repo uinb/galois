@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
+#![feature(type_ascription)]
 #![feature(map_first_last)]
 #![feature(drain_filter)]
+
 mod assets;
 mod clearing;
 mod config;

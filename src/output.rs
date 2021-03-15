@@ -21,6 +21,7 @@ use serde_json;
 use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, Sender};
 use std::thread;
+use std::convert::Into;
 use std::time::Duration;
 
 use crate::{core::*, db::DB, db::REDIS, matcher::*, orderbook::AskOrBid, orderbook::Depth};
@@ -108,9 +109,9 @@ fn flush(symbol: &Symbol, pending: &mut Vec<Output>) {
                 "event_id" => p.event_id,
                 "order_id" => p.order_id,
                 "user_id" => p.user_id,
-                "state" => p.state.into_code(),
-                "role" => p.role.into_code(),
-                "ask_or_bid" => p.ask_or_bid.into_code(),
+                "state" => p.state.into(): u32,
+                "role" => p.role.into(): u32,
+                "ask_or_bid" => p.ask_or_bid.into(): u32,
                 "price" => p.price,
                 "quote" => p.quote,
                 "base" => p.base,
