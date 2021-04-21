@@ -12,18 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use std::{
-    sync::Arc,
     sync::atomic::{AtomicBool, Ordering},
     sync::mpsc::Sender,
+    sync::Arc,
     thread,
     time::{Duration, SystemTime},
 };
 
 use log;
-use mysql::{*, prelude::*};
-use rust_decimal::{Decimal, prelude::Zero};
+use mysql::{prelude::*, *};
+use rust_decimal::{prelude::Zero, Decimal};
 use serde::{Deserialize, Serialize};
 use serde_json;
 
@@ -432,7 +431,7 @@ fn fetch_sequence_from(id: u64) -> Vec<Sequence> {
             timestamp: f_timestamp,
         },
     )
-        .unwrap_or(vec![])
+    .unwrap_or(vec![])
 }
 
 pub fn insert_nop(id: u64) -> Option<bool> {

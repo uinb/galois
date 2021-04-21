@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use crate::{config, core};
 use chrono::prelude::DateTime;
 use chrono::Utc;
@@ -113,6 +112,9 @@ mod test {
             .join("310")
             .with_extension(&format)
             .with_extension("gz");
-        assert_eq!(std::cmp::Ordering::Greater, super::get_id(&f0).cmp(&super::get_id(&f1)));
+        assert_eq!(
+            std::cmp::Ordering::Greater,
+            super::get_id(&f0).cmp(&super::get_id(&f1))
+        );
     }
 }

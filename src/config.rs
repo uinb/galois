@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use argparse::{ArgumentParser, Store, StoreTrue};
 use lazy_static::lazy_static;
 use log4rs;
@@ -92,7 +91,10 @@ fn init_config_file() -> Config {
         match env::var_os("PBE_KEY") {
             Some(val) => {
                 let des = decrypt(val.to_str().unwrap(), content);
-                let (f, t) = (cfg.mysql.url.find("ENC(").unwrap(), cfg.mysql.url.find(")").unwrap());
+                let (f, t) = (
+                    cfg.mysql.url.find("ENC(").unwrap(),
+                    cfg.mysql.url.find(")").unwrap(),
+                );
                 cfg.mysql.url.replace_range(f..=t, &des.unwrap());
             }
             None => panic!("$PBE_KEY is not defined in the environment."),

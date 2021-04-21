@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use crate::orderbook::{AskOrBid, Order, OrderBook, OrderPage};
 use rust_decimal::{prelude::Zero, Decimal};
 
