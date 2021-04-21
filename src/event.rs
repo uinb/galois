@@ -99,102 +99,101 @@ fn handle_limit(
     sender: &Sender<Vec<output::Output>>,
 ) -> bool {
     let orderbook = data.orderbooks.get_mut(symbol);
-    if orderbook.is_none() {
-        return false;
-    }
-    let orderbook = orderbook.unwrap();
-    if !orderbook.open {
-        return false;
-    }
-    if amount < orderbook.min_amount {
-        return false;
-    }
-    if price.scale() > orderbook.quote_scale {
-        return false;
-    }
-    if amount.scale() > orderbook.base_scale {
-        return false;
-    }
     let account = data.accounts.get_mut(&user);
-    if account.is_none() {
-        return false;
-    }
-    match ask_or_bid {
-        AskOrBid::Bid => {
-            // check quote account
-            let account = account.unwrap().get_mut(&symbol.1);
-            if account.is_none() {
+    match (orderbook, account) {
+        (Some(orderbook), Some(account)) => {
+            if !orderbook.open
+                || amount < orderbook.min_amount
+                || price.scale() > orderbook.quote_scale
+                || amount.scale() > orderbook.base_scale
+            {
                 return false;
             }
-            let account = account.unwrap();
-            let vol = price * amount;
-            if account.available < vol {
-                return false;
+            match ask_or_bid {
+                AskOrBid::Bid => {
+                    // check quote account
+                    if let Some(account) = account.get_mut(&symbol.1) {
+                        let vol = price * amount;
+                        if account.available < vol {
+                            return false;
+                        }
+                        account.available -= vol;
+                        account.frozen += vol;
+                    } else {
+                        return false;
+                    }
+                }
+                AskOrBid::Ask => {
+                    // check base account
+                    if let Some(account) = account.get_mut(&symbol.0) {
+                        if account.available < amount {
+                            return false;
+                        }
+                        account.available -= amount;
+                        account.frozen += amount;
+                    } else {
+                        return false;
+                    }
+                }
             }
-            account.available -= vol;
-            account.frozen += vol;
+
+            if let Some(mr) = execute_limit(orderbook, user, order, price, amount, ask_or_bid) {
+                let cr = clearing::clear(
+                    &mut data.accounts,
+                    event_id,
+                    symbol,
+                    orderbook.taker_fee,
+                    orderbook.maker_fee,
+                    &mr,
+                    time,
+                );
+                // FIXME
+                sender.send(cr).unwrap();
+            }
+            true
         }
-        AskOrBid::Ask => {
-            // check base account
-            let account = account.unwrap().get_mut(&symbol.0);
-            if account.is_none() {
-                return false;
-            }
-            let account = account.unwrap();
-            if account.available < amount {
-                return false;
-            }
-            account.available -= amount;
-            account.frozen += amount;
-        }
+        _ => false,
     }
-    let mr = execute_limit(orderbook, user, order, price, amount, ask_or_bid);
-    if mr.is_some() {
-        let cr = clearing::clear(
-            &mut data.accounts,
-            event_id,
-            symbol,
-            orderbook.taker_fee,
-            orderbook.maker_fee,
-            &mr.unwrap(),
-            time,
-        );
-        // FIXME
-        sender.send(cr).unwrap();
-    }
-    true
 }
 
 pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>>, data: Data) {
     let mut data = data;
-    thread::spawn(move || loop {
-        let fusion = recv.recv().unwrap();
-        match fusion {
-            // come from request or inner counter
-            sequence::Fusion::R(watch) => {
-                if !watch.cmd.validate() {
-                    log::info!("illegal request {:?}", watch);
-                    server::publish(server::Message::with_payload(
-                        watch.session,
-                        watch.req_id,
-                        vec![],
-                    ));
-                    continue;
+    thread::spawn(move || -> anyhow::Result<()> {
+        loop {
+            let fusion = recv.recv().unwrap();
+            match fusion {
+                // come from request or inner counter
+                sequence::Fusion::R(watch) => {
+                    if !watch.cmd.validate() {
+                        log::info!("illegal request {:?}", watch);
+                        server::publish(server::Message::with_payload(
+                            watch.session,
+                            watch.req_id,
+                            vec![],
+                        ));
+                        continue;
+                    }
+                    let inspection = watch
+                        .to_inspection()
+                        .ok_or(anyhow::anyhow!("Watch::to_inspection error"))?;
+
+                    do_inspect(&inspection, &data)?;
                 }
-                let inspection = watch.to_inspection();
-                do_inspect(&inspection, &data);
-            }
-            sequence::Fusion::W(seq) => {
-                if !seq.cmd.validate() {
-                    log::info!("illegal sequence {:?}", seq);
-                    sequence::update_sequence_status(seq.id, sequence::ERROR);
-                    continue;
-                }
-                let event = seq.to_event();
-                let (_, ok) = handle_event(&event, &mut data, &sender);
-                if !ok {
-                    log::info!("execute sequence {:?} failed", seq);
-                    sequence::update_sequence_status(seq.id, sequence::ERROR);
+                sequence::Fusion::W(seq) => {
+                    if !seq.cmd.validate() {
+                        log::info!("illegal sequence {:?}", seq);
+                        sequence::update_sequence_status(seq.id, sequence::ERROR);
+                        continue;
+                    }
+                    let event = seq
+                        .to_event()
+                        .ok_or(anyhow::anyhow!("Sequence::to_event error"))?;
+
+                    let (_, ok) = handle_event(&event, &mut data, &sender);
+                    if !ok {
+                        log::info!("execute sequence {:?} failed", seq);
+                        sequence::update_sequence_status(seq.id, sequence::ERROR);
+                    }
                 }
             }
         }
@@ -230,23 +229,20 @@ fn handle_event(
             // 1. check order's owner
             match data.orderbooks.get_mut(&symbol) {
                 Some(orderbook) => {
-                    let mr = cancel(orderbook, order);
-                    if mr.is_some() {
+                    if let Some(mr) = cancel(orderbook, order) {
                         let cr = clearing::clear(
                             &mut data.accounts,
                             id,
                             &symbol,
                             Decimal::zero(),
                             Decimal::zero(),
-                            mr.as_ref().unwrap(),
+                            &mr,
                             time,
                         );
                         // FIXME
                         sender.send(cr).unwrap();
-                        (id, true)
-                    } else {
-                        (id, true)
                     }
+                    (id, true)
                 }
                 None => (id, true),
             }
@@ -261,22 +257,19 @@ fn handle_event(
                 }
                 None => vec![],
             };
-            mr.iter()
-                .filter(|r| r.is_some())
-                .map(|r| r.as_ref().unwrap())
-                .for_each(|r| {
-                    let cr = clearing::clear(
-                        &mut data.accounts,
-                        id,
-                        &symbol,
-                        Decimal::zero(),
-                        Decimal::zero(),
-                        &r,
-                        time,
-                    );
-                    // FIXME
-                    sender.send(cr).unwrap();
-                });
+            mr.into_iter().filter_map(|s| s).for_each(|r| {
+                let cr = clearing::clear(
+                    &mut data.accounts,
+                    id,
+                    &symbol,
+                    Decimal::zero(),
+                    Decimal::zero(),
+                    &r,
+                    time,
+                );
+                // FIXME
+                sender.send(cr).unwrap();
+            });
             (id, true)
         }
         &Event::Open(id, symbol, _) => {
@@ -375,7 +368,7 @@ fn handle_event(
     }
 }
 
-fn do_inspect(inspection: &Inspection, data: &Data) {
+fn do_inspect(inspection: &Inspection, data: &Data) -> anyhow::Result<()> {
     match inspection {
         &Inspection::QueryOrder(symbol, order_id, session, req_id) => {
             match data.orderbooks.get(&symbol) {
@@ -398,14 +391,14 @@ fn do_inspect(inspection: &Inspection, data: &Data) {
                     frozen: Decimal::new(0, 0),
                 })
                 .unwrap(),
-                Some(a) => serde_json::to_vec(a).unwrap(),
+                Some(a) => serde_json::to_vec(a)?,
             };
             server::publish(server::Message::with_payload(session, req_id, v));
         }
         &Inspection::QueryAccounts(user_id, session, req_id) => {
             let v = match data.accounts.get(&user_id) {
-                None => serde_json::to_vec(&Accounts::new()).unwrap(),
-                Some(all) => serde_json::to_vec(all).unwrap(),
+                None => serde_json::to_vec(&Accounts::new())?,
+                Some(all) => serde_json::to_vec(all)?,
             };
             server::publish(server::Message::with_payload(session, req_id, v));
         }
@@ -419,6 +412,7 @@ fn do_inspect(inspection: &Inspection, data: &Data) {
         }
         &Inspection::ConfirmAll(from, exclude) => sequence::confirm(from, exclude),
     }
+    Ok(())
 }
 
 #[test]

@@ -58,18 +58,21 @@ pub fn add_to_available(
     currency: u32,
     amount: Decimal,
 ) -> bool {
-    if !accounts.contains_key(&user) {
-        let mut account = new_account();
-        account.insert(currency, init_wallet(amount));
-        accounts.insert(user, account);
-    } else {
-        let accounts = accounts.get_mut(&user).unwrap();
-        if accounts.contains_key(&currency) {
-            accounts.get_mut(&currency).unwrap().available += amount;
-        } else {
-            accounts.insert(currency, init_wallet(amount));
-        }
-    }
+    accounts
+        .entry(user)
+        .and_modify(|user_account| {
+            user_account
+                .entry(currency)
+                .and_modify(|account| {
+                    account.available += amount;
+                })
+                .or_insert(init_wallet(amount));
+        })
+        .or_insert_with(|| {
+            let mut new_account = new_account();
+            new_account.insert(currency, init_wallet(amount));
+            new_account
+        });
     true
 }
 

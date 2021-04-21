@@ -17,10 +17,10 @@ use lazy_static::lazy_static;
 use log4rs;
 use magic_crypt::{new_magic_crypt, MagicCryptError, MagicCryptTrait};
 use serde::Deserialize;
-use std::fs;
 use toml;
 
 use std::env;
+use std::fs;
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
@@ -66,11 +66,11 @@ pub struct RedisConfig {
 }
 
 lazy_static! {
-    pub static ref C: Config = init_config_file();
+    pub static ref C: Config = init_config_file().unwrap();
     pub static ref ENABLE_START_FROM_GENESIS: bool = true;
 }
 
-fn init_config_file() -> Config {
+fn init_config_file() -> anyhow::Result<Config> {
     let mut file = String::new();
     // FIXME
     let mut from_genesis = false;
@@ -82,20 +82,28 @@ fn init_config_file() -> Config {
             .add_option(&["-g"], StoreTrue, "start from genesis");
         args.parse_args_or_exit();
     }
-    let mut cfg: Config = toml::from_str(&fs::read_to_string(file).unwrap()).unwrap();
+    let mut cfg: Config = toml::from_str(&fs::read_to_string(file)?)?;
     // FIXME
-    let opts = mysql::Opts::from_url(&cfg.mysql.url).unwrap();
-    let pass = opts.get_pass().unwrap();
+    let opts = mysql::Opts::from_url(&cfg.mysql.url)?;
+    let pass = opts
+        .get_pass()
+        .ok_or(anyhow::anyhow!("passphrase not exist"))?;
     if pass.starts_with("ENC(") && pass.ends_with(")") {
         let content = pass.trim_start_matches("ENC(").trim_end_matches(")");
         match env::var_os("PBE_KEY") {
             Some(val) => {
-                let des = decrypt(val.to_str().unwrap(), content);
+                let des = decrypt(val.to_str().unwrap(), content)?;
                 let (f, t) = (
-                    cfg.mysql.url.find("ENC(").unwrap(),
-                    cfg.mysql.url.find(")").unwrap(),
+                    cfg.mysql
+                        .url
+                        .find("ENC(")
+                        .ok_or(anyhow::anyhow!("ENC( not found in passphrase"))?,
+                    cfg.mysql
+                        .url
+                        .find(")")
+                        .ok_or(anyhow::anyhow!(") not found in passphrase"))?,
                 );
-                cfg.mysql.url.replace_range(f..=t, &des.unwrap());
+                cfg.mysql.url.replace_range(f..=t, &des);
             }
             None => panic!("$PBE_KEY is not defined in the environment."),
         }
@@ -106,10 +114,9 @@ fn init_config_file() -> Config {
                 .appenders_lossy(&log4rs::file::Deserializers::default())
                 .0,
         )
-        .build(cfg.log.root())
-        .unwrap();
-    log4rs::init_config(log_conf).unwrap();
-    cfg
+        .build(cfg.log.root())?;
+    log4rs::init_config(log_conf)?;
+    Ok(cfg)
 }
 
 #[test]

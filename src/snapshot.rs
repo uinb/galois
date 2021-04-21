@@ -17,7 +17,7 @@ use chrono::prelude::DateTime;
 use chrono::Utc;
 use log;
 use std::time::{Duration, UNIX_EPOCH};
-use std::{fs, io, path, thread};
+use std::{fs, path, thread};
 
 /// dump snapshot at id(executed)
 pub fn dump(id: u64, time: u64, data: &core::Data) {
@@ -49,7 +49,7 @@ fn get_id(path: &path::Path) -> u64 {
 }
 
 /// return the id(not executed yet), and the snapshot
-pub fn load() -> io::Result<(u64, core::Data)> {
+pub fn load() -> anyhow::Result<(u64, core::Data)> {
     let dir = fs::read_dir(&config::C.sequence.coredump_dir)?;
     let file_path = dir
         .map(|e| e.unwrap())
@@ -65,14 +65,11 @@ pub fn load() -> io::Result<(u64, core::Data)> {
                 event_id,
                 event_id + 1
             );
-            Ok((event_id + 1, core::Data::from_raw(fs::File::open(f)?)))
+            Ok((event_id + 1, core::Data::from_raw(fs::File::open(f)?)?))
         }
         None => match *config::ENABLE_START_FROM_GENESIS {
             true => Ok((1, core::Data::new())),
-            false => Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "missing snapshot, add `-g` to start from genesis",
-            )),
+            false => Err(anyhow::anyhow!("missing snapshot, add `-g` to start from genesis")),
         },
     }
 }

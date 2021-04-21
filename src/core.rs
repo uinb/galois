@@ -60,16 +60,17 @@ impl Data {
         }
     }
 
-    pub fn from_raw(file: File) -> Self {
+    pub fn from_raw(file: File) -> anyhow::Result<Self> {
         let reader = BufReader::new(file);
         let mut decompress = ZlibDecoder::new(reader);
-        bincode::deserialize_from(&mut decompress).unwrap()
+        Ok(bincode::deserialize_from(&mut decompress)?)
     }
 
-    pub fn into_raw(&self, file: File) {
+    pub fn into_raw(&self, file: File) -> anyhow::Result<()> {
         let writer = BufWriter::new(file);
         let mut compress = ZlibEncoder::new(writer, Compression::best());
-        bincode::serialize_into(&mut compress, &self).unwrap();
+        bincode::serialize_into(&mut compress, &self)?;
+        Ok(())
     }
 }
 
@@ -104,7 +105,12 @@ pub fn test_dump() {
             false,
         ),
     );
-    test.into_raw(File::create("/tmp/bin.gz").unwrap());
-    let de = Data::from_raw(File::open("/tmp/bin.gz").unwrap());
+
+    let temp_dir = tempdir::TempDir::new("/tmp").unwrap();
+    let file_path = temp_dir.path().join("bin.gz");
+    let temp_file = File::create(&file_path).unwrap();
+    test.into_raw(temp_file).unwrap();
+
+    let de = Data::from_raw(File::open(&file_path).unwrap()).unwrap();
     assert_eq!(test, de);
 }
