@@ -71,11 +71,11 @@ impl OrderPage {
         }
     }
 
-    pub fn as_level(&self, base_precision: u32, quote_precision: u32, total: Decimal) -> Level {
+    pub fn as_level(&self, base_scale: u32, quote_scale: u32, total: Decimal) -> Level {
         let mut amount = self.amount;
         let mut price = self.price;
-        amount.rescale(base_precision);
-        price.rescale(quote_precision);
+        amount.rescale(base_scale);
+        price.rescale(quote_scale);
         (price, amount, total + amount)
     }
 
@@ -104,8 +104,8 @@ pub struct OrderBook {
     pub asks: Tape,
     pub bids: Tape,
     pub indices: Index,
-    pub base_precision: u32,
-    pub quote_precision: u32,
+    pub base_scale: u32,
+    pub quote_scale: u32,
     pub taker_fee: Decimal,
     pub maker_fee: Decimal,
     pub min_amount: Decimal,
@@ -124,8 +124,8 @@ pub struct Depth {
 
 impl OrderBook {
     pub fn new(
-        base_precision: u32,
-        quote_precision: u32,
+        base_scale: u32,
+        quote_scale: u32,
         taker_fee: Decimal,
         maker_fee: Decimal,
         min_amount: Decimal,
@@ -136,8 +136,8 @@ impl OrderBook {
             asks: Tape::new(),
             bids: Tape::new(),
             indices: Index::with_capacity(DEFAULT_PAGE_SIZE),
-            base_precision: base_precision,
-            quote_precision: quote_precision,
+            base_scale: base_scale,
+            quote_scale: quote_scale,
             taker_fee: taker_fee,
             maker_fee: maker_fee,
             min_amount: min_amount,
@@ -152,13 +152,13 @@ impl OrderBook {
         let mut bids = Vec::<Level>::new();
         let mut ask_total = Decimal::zero();
         for (_, ask) in self.asks.iter().take(level) {
-            let level = ask.as_level(self.base_precision, self.quote_precision, ask_total);
+            let level = ask.as_level(self.base_scale, self.quote_scale, ask_total);
             ask_total = level.2;
             asks.push(level);
         }
         let mut bid_total = Decimal::zero();
         for (_, bid) in self.bids.iter().rev().take(level) {
-            let level = bid.as_level(self.base_precision, self.quote_precision, bid_total);
+            let level = bid.as_level(self.base_scale, self.quote_scale, bid_total);
             bid_total = level.2;
             bids.push(level);
         }

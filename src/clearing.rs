@@ -893,15 +893,15 @@ pub mod test {
 
     #[test]
     pub fn test_output() {
-        let base_precision = 6;
-        let quote_precision = 2;
+        let base_scale = 6;
+        let quote_scale = 2;
         let taker_fee = Decimal::from_str("0.001").unwrap();
         let maker_fee = Decimal::from_str("-0.0005").unwrap();
         let min_amount = Decimal::from_str("0.01").unwrap();
         let min_vol = Decimal::from_str("10").unwrap();
         let mut book = OrderBook::new(
-            base_precision,
-            quote_precision,
+            base_scale,
+            quote_scale,
             taker_fee,
             maker_fee,
             min_amount,
@@ -967,15 +967,15 @@ pub mod test {
 
     #[test]
     pub fn test_dealing_rights() {
-        let base_precision = 6;
-        let quote_precision = 2;
+        let base_scale = 6;
+        let quote_scale = 2;
         let taker_fee = Decimal::from_str("0.001").unwrap();
         let maker_fee = Decimal::from_str("-0.0005").unwrap();
         let min_amount = Decimal::from_str("0.01").unwrap();
         let min_vol = Decimal::from_str("10").unwrap();
         let mut book = OrderBook::new(
-            base_precision,
-            quote_precision,
+            base_scale,
+            quote_scale,
             taker_fee,
             maker_fee,
             min_amount,
@@ -1051,15 +1051,15 @@ pub mod test {
 
     #[test]
     pub fn test_dealing_rights_on_taker_ask() {
-        let base_precision = 6;
-        let quote_precision = 2;
+        let base_scale = 6;
+        let quote_scale = 2;
         let taker_fee = Decimal::from_str("0.001").unwrap();
         let maker_fee = Decimal::from_str("-0.0005").unwrap();
         let min_amount = Decimal::from_str("0.01").unwrap();
         let min_vol = Decimal::from_str("10").unwrap();
         let mut book = OrderBook::new(
-            base_precision,
-            quote_precision,
+            base_scale,
+            quote_scale,
             taker_fee,
             maker_fee,
             min_amount,

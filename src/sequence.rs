@@ -112,8 +112,8 @@ impl Sequence {
             NEW_SYMBOL => Event::NewSymbol(
                 self.id,
                 self.cmd.symbol().unwrap(),
-                self.cmd.base_precision.unwrap(),
-                self.cmd.quote_precision.unwrap(),
+                self.cmd.base_scale.unwrap(),
+                self.cmd.quote_scale.unwrap(),
                 self.cmd.taker_fee.unwrap(),
                 self.cmd.maker_fee.unwrap(),
                 self.cmd.min_amount.unwrap(),
@@ -124,8 +124,8 @@ impl Sequence {
             UPDATE_SYMBOL => Event::UpdateSymbol(
                 self.id,
                 self.cmd.symbol().unwrap(),
-                self.cmd.base_precision.unwrap(),
-                self.cmd.quote_precision.unwrap(),
+                self.cmd.base_scale.unwrap(),
+                self.cmd.quote_scale.unwrap(),
                 self.cmd.taker_fee.unwrap(),
                 self.cmd.maker_fee.unwrap(),
                 self.cmd.min_amount.unwrap(),
@@ -151,8 +151,8 @@ impl Sequence {
                 vol: None,
                 amount: None,
                 price: None,
-                base_precision: None,
-                quote_precision: None,
+                base_scale: None,
+                quote_scale: None,
                 taker_fee: None,
                 maker_fee: None,
                 min_amount: None,
@@ -214,8 +214,8 @@ impl Watch {
                 vol: None,
                 amount: None,
                 price: None,
-                base_precision: None,
-                quote_precision: None,
+                base_scale: None,
+                quote_scale: None,
                 taker_fee: None,
                 maker_fee: None,
                 min_amount: None,
@@ -241,8 +241,8 @@ impl Watch {
                 vol: None,
                 amount: None,
                 price: None,
-                base_precision: None,
-                quote_precision: None,
+                base_scale: None,
+                quote_scale: None,
                 taker_fee: None,
                 maker_fee: None,
                 min_amount: None,
@@ -266,8 +266,8 @@ pub struct Command {
     vol: Option<Decimal>,
     pub(crate) amount: Option<Decimal>,
     price: Option<Decimal>,
-    base_precision: Option<u32>,
-    quote_precision: Option<u32>,
+    base_scale: Option<u32>,
+    quote_scale: Option<u32>,
     taker_fee: Option<Decimal>,
     maker_fee: Option<Decimal>,
     min_amount: Option<Decimal>,
@@ -323,8 +323,8 @@ impl Command {
             }
             NEW_SYMBOL | UPDATE_SYMBOL => {
                 self.symbol().is_some()
-                    && self.base_precision.is_some()
-                    && self.quote_precision.is_some()
+                    && self.base_scale.is_some()
+                    && self.quote_scale.is_some()
                     && self.taker_fee.is_some()
                     && self.maker_fee.is_some()
                     && self.min_amount.is_some()

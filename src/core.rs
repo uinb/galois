@@ -38,7 +38,7 @@ pub type Symbol = (Base, Quote);
 pub type EventId = u64;
 pub type OrderId = u64;
 pub type Fee = Decimal;
-pub type Precision = u32;
+pub type Scale = u32;
 pub type Timestamp = u64;
 
 pub type Accounts = HashMap<UserId, HashMap<Currency, Account>>;
