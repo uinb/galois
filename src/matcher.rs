@@ -296,15 +296,15 @@ mod test {
 
     #[test]
     pub fn test_trade() {
-        let base_precision = 5;
-        let quote_precision = 1;
+        let base_scale = 5;
+        let quote_scale = 1;
         let taker_fee = Decimal::from_str("0.001").unwrap();
         let maker_fee = Decimal::from_str("0.001").unwrap();
         let min_amount = Decimal::from_str("1").unwrap();
         let min_vol = Decimal::from_str("1").unwrap();
         let mut book = OrderBook::new(
-            base_precision,
-            quote_precision,
+            base_scale,
+            quote_scale,
             taker_fee,
             maker_fee,
             min_amount,

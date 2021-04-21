@@ -48,8 +48,8 @@ pub enum Event {
     NewSymbol(
         EventId,
         Symbol,
-        Precision,
-        Precision,
+        Scale,
+        Scale,
         Fee, // Taker
         Fee, // Maker
         Amount,
@@ -60,8 +60,8 @@ pub enum Event {
     UpdateSymbol(
         EventId,
         Symbol,
-        Precision,
-        Precision,
+        Scale,
+        Scale,
         Fee, // Taker
         Fee, // Maker
         Amount,
@@ -85,7 +85,7 @@ pub enum Inspection {
 /// 0. symbol exists
 /// 1. check symbol open
 /// 2. check amount >= symbol_min_amount
-/// 3. check precision
+/// 3. check scale
 /// 4. check account
 fn handle_limit(
     event_id: u64,
@@ -110,10 +110,10 @@ fn handle_limit(
     if amount < orderbook.min_amount {
         return false;
     }
-    if price.scale() > orderbook.quote_precision {
+    if price.scale() > orderbook.quote_scale {
         return false;
     }
-    if amount.scale() > orderbook.base_precision {
+    if amount.scale() > orderbook.base_scale {
         return false;
     }
     let account = data.accounts.get_mut(&user);
@@ -319,8 +319,8 @@ fn handle_event(
         &Event::NewSymbol(
             id,
             symbol,
-            base_precision,
-            quote_precision,
+            base_scale,
+            quote_scale,
             taker_fee,
             maker_fee,
             min_amount,
@@ -330,8 +330,8 @@ fn handle_event(
         ) => {
             if !data.orderbooks.contains_key(&symbol) {
                 let orderbook = OrderBook::new(
-                    base_precision,
-                    quote_precision,
+                    base_scale,
+                    quote_scale,
                     taker_fee,
                     maker_fee,
                     min_amount,
@@ -347,8 +347,8 @@ fn handle_event(
         &Event::UpdateSymbol(
             id,
             symbol,
-            base_precision,
-            quote_precision,
+            base_scale,
+            quote_scale,
             taker_fee,
             maker_fee,
             min_amount,
@@ -357,8 +357,8 @@ fn handle_event(
             _,
         ) => match data.orderbooks.get_mut(&symbol) {
             Some(orderbook) => {
-                orderbook.base_precision = base_precision;
-                orderbook.quote_precision = quote_precision;
+                orderbook.base_scale = base_scale;
+                orderbook.quote_scale = quote_scale;
                 orderbook.taker_fee = taker_fee;
                 orderbook.maker_fee = maker_fee;
                 orderbook.min_amount = min_amount;
