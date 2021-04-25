@@ -1,5 +1,6 @@
 # Galois
 [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg)](#LICENSE)
+[![GitHub Workflow Status (branch)](https://img.shields.io/github/workflow/status/uinb/galois/Rust%20CI/master)](https://github.com/uinb/galois/actions?query=branch%3Amaster)
 
 ## Introduction
 

@@ -106,7 +106,7 @@ pub fn test_dump() {
         ),
     );
 
-    let temp_dir = tempdir::TempDir::new("/tmp").unwrap();
+    let temp_dir = tempdir::TempDir::new(".").unwrap();
     let file_path = temp_dir.path().join("bin.gz");
     let temp_file = File::create(&file_path).unwrap();
     test.into_raw(temp_file).unwrap();
