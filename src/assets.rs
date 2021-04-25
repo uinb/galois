@@ -23,18 +23,14 @@ pub struct Account {
     pub frozen: Decimal,
 }
 
-pub fn get_mut<'a>(
-    accounts: &'a mut Accounts,
-    user: u64,
-    currency: u32,
-) -> Option<&'a mut Account> {
+pub fn get_mut(accounts: &mut Accounts, user: u64, currency: u32) -> Option<&mut Account> {
     match accounts.get_mut(&user) {
         None => None,
         Some(account) => account.get_mut(&currency),
     }
 }
 
-pub fn get<'a>(accounts: &'a Accounts, user: u64, currency: u32) -> Option<&'a Account> {
+pub fn get(accounts: &Accounts, user: u64, currency: u32) -> Option<&Account> {
     match accounts.get(&user) {
         None => None,
         Some(account) => account.get(&currency),
@@ -47,7 +43,7 @@ fn new_account() -> HashMap<Currency, Account> {
 
 fn init_wallet(available: Decimal) -> Account {
     Account {
-        available: available,
+        available,
         frozen: Zero::zero(),
     }
 }
@@ -66,7 +62,7 @@ pub fn add_to_available(
                 .and_modify(|account| {
                     account.available += amount;
                 })
-                .or_insert(init_wallet(amount));
+                .or_insert_with(|| init_wallet(amount));
         })
         .or_insert_with(|| {
             let mut new_account = new_account();
@@ -109,6 +105,7 @@ pub fn deduct_frozen(accounts: &mut Accounts, user: u64, currency: u32, amount: 
     }
 }
 
+#[allow(dead_code)]
 pub fn freeze(accounts: &mut Accounts, user: u64, currency: u32, amount: Decimal) -> bool {
     match get_mut(accounts, user, currency) {
         None => false,
@@ -142,8 +139,7 @@ pub fn unfreeze(accounts: &mut Accounts, user: u64, currency: u32, amount: Decim
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::core::*;
-    use rust_decimal::{prelude::Zero, Decimal};
+    use rust_decimal::Decimal;
     use serde_json;
     use std::str::FromStr;
 

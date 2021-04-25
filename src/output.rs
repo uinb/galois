@@ -13,10 +13,8 @@
 // limitations under the License.
 
 use mysql::{prelude::*, *};
-use redis;
 use redis::Commands;
 use rust_decimal::Decimal;
-use serde_json;
 use std::collections::HashMap;
 use std::convert::Into;
 use std::sync::mpsc::{Receiver, Sender};

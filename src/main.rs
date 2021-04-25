@@ -15,6 +15,10 @@
 #![feature(type_ascription)]
 #![feature(map_first_last)]
 #![feature(drain_filter)]
+#![allow(clippy::from_over_into)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::wrong_self_convention)]
+#![allow(clippy::map_entry)]
 
 mod assets;
 mod clearing;
@@ -29,7 +33,6 @@ mod sequence;
 mod server;
 mod snapshot;
 
-use lazy_static;
 use std::sync::{atomic, mpsc, Arc};
 
 fn main() {

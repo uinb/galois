@@ -17,7 +17,6 @@ use crate::{
 };
 use rust_decimal::{prelude::Zero, Decimal};
 use serde::{Deserialize, Serialize};
-use serde_json;
 use std::{
     sync::mpsc::{Receiver, Sender},
     thread,
@@ -156,8 +155,7 @@ fn handle_limit(
     }
 }
 
-pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>>, data: Data) {
-    let mut data = data;
+pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>>, mut data: Data) {
     thread::spawn(move || -> anyhow::Result<()> {
         loop {
             let fusion = recv.recv().unwrap();
@@ -175,9 +173,9 @@ pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>
                     }
                     let inspection = watch
                         .to_inspection()
-                        .ok_or(anyhow::anyhow!("Watch::to_inspection error"))?;
+                        .ok_or_else(|| anyhow::anyhow!("Watch::to_inspection error"))?;
 
-                    do_inspect(&inspection, &data)?;
+                    do_inspect(inspection, &data)?;
                 }
                 sequence::Fusion::W(seq) => {
                     if !seq.cmd.validate() {
@@ -187,9 +185,9 @@ pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>
                     }
                     let event = seq
                         .to_event()
-                        .ok_or(anyhow::anyhow!("Sequence::to_event error"))?;
+                        .ok_or_else(|| anyhow::anyhow!("Sequence::to_event error"))?;
 
-                    let (_, ok) = handle_event(&event, &mut data, &sender);
+                    let (_, ok) = handle_event(event, &mut data, &sender);
                     if !ok {
                         log::info!("execute sequence {:?} failed", seq);
                         sequence::update_sequence_status(seq.id, sequence::ERROR);
@@ -201,18 +199,18 @@ pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>
 }
 
 fn handle_event(
-    event: &Event,
+    event: Event,
     data: &mut Data,
     sender: &Sender<Vec<output::Output>>,
 ) -> (u64, bool) {
     match event {
-        &Event::Limit(id, symbol, user, order, price, amount, ask_or_bid, time) => {
+        Event::Limit(id, symbol, user, order, price, amount, ask_or_bid, time) => {
             let ok = handle_limit(
                 id, data, &symbol, price, amount, user, order, ask_or_bid, time, &sender,
             );
             (id, ok)
         }
-        &Event::Market(id, symbol, user, order, vol, ask_or_bid, time) => {
+        Event::Market(id, _symbol, _user, _order, _vol, _ask_or_bid, _time) => {
             // 0. symbol exsits
             // 1. check symbol open
             // 2. check symbol permit market order
@@ -224,7 +222,7 @@ fn handle_event(
             // clear(&mut data.accounts, mr);
             (id, false)
         }
-        &Event::Cancel(id, symbol, user, order, time) => {
+        Event::Cancel(id, symbol, _user, order, time) => {
             // 0. symbol exsits
             // 1. check order's owner
             match data.orderbooks.get_mut(&symbol) {
@@ -247,17 +245,17 @@ fn handle_event(
                 None => (id, true),
             }
         }
-        &Event::CancelAll(id, symbol, time) => {
+        Event::CancelAll(id, symbol, time) => {
             let mr = match data.orderbooks.get_mut(&symbol) {
                 Some(orderbook) => {
-                    let ids = orderbook.indices.keys().map(|k| *k).collect::<Vec<_>>();
+                    let ids = orderbook.indices.keys().copied().collect::<Vec<_>>();
                     ids.into_iter()
                         .map(|id| cancel(orderbook, id))
                         .collect::<Vec<_>>()
                 }
                 None => vec![],
             };
-            mr.into_iter().filter_map(|s| s).for_each(|r| {
+            mr.into_iter().flatten().for_each(|r| {
                 let cr = clearing::clear(
                     &mut data.accounts,
                     id,
@@ -272,7 +270,7 @@ fn handle_event(
             });
             (id, true)
         }
-        &Event::Open(id, symbol, _) => {
+        Event::Open(id, symbol, _) => {
             let orderbook = data.orderbooks.get_mut(&symbol);
             match orderbook {
                 None => (id, false),
@@ -282,7 +280,7 @@ fn handle_event(
                 }
             }
         }
-        &Event::Close(id, symbol, _) => {
+        Event::Close(id, symbol, _) => {
             let orderbook = data.orderbooks.get_mut(&symbol);
             match orderbook {
                 None => (id, false),
@@ -292,23 +290,23 @@ fn handle_event(
                 }
             }
         }
-        &Event::OpenAll(id, _) => {
+        Event::OpenAll(id, _) => {
             data.orderbooks.iter_mut().for_each(|(_, v)| v.open = true);
             (id, true)
         }
-        &Event::CloseAll(id, _) => {
+        Event::CloseAll(id, _) => {
             data.orderbooks.iter_mut().for_each(|(_, v)| v.open = false);
             (id, true)
         }
-        &Event::TransferOut(id, user, currency, amount, _) => {
+        Event::TransferOut(id, user, currency, amount, _) => {
             let ok = assets::deduct_available(&mut data.accounts, user, currency, amount);
             (id, ok)
         }
-        &Event::TransferIn(id, user, currency, amount, _) => {
+        Event::TransferIn(id, user, currency, amount, _) => {
             let ok = assets::add_to_available(&mut data.accounts, user, currency, amount);
             (id, ok)
         }
-        &Event::NewSymbol(
+        Event::NewSymbol(
             id,
             symbol,
             base_scale,
@@ -336,7 +334,7 @@ fn handle_event(
                 (id, false)
             }
         }
-        &Event::UpdateSymbol(
+        Event::UpdateSymbol(
             id,
             symbol,
             base_scale,
@@ -360,7 +358,7 @@ fn handle_event(
             }
             None => (id, false),
         },
-        &Event::Dump(id, time) => {
+        Event::Dump(id, time) => {
             snapshot::dump(id, time, &data);
             // tricky way, return u64::MAX to update nothing
             (u64::MAX, true)
@@ -368,13 +366,13 @@ fn handle_event(
     }
 }
 
-fn do_inspect(inspection: &Inspection, data: &Data) -> anyhow::Result<()> {
+fn do_inspect(inspection: Inspection, data: &Data) -> anyhow::Result<()> {
     match inspection {
-        &Inspection::QueryOrder(symbol, order_id, session, req_id) => {
+        Inspection::QueryOrder(symbol, order_id, session, req_id) => {
             match data.orderbooks.get(&symbol) {
                 Some(orderbook) => {
                     let v = match orderbook.find_order(order_id) {
-                        Some(order) => serde_json::to_vec(order).unwrap_or(vec![]),
+                        Some(order) => serde_json::to_vec(order).unwrap_or_default(),
                         None => vec![],
                     };
                     server::publish(server::Message::with_payload(session, req_id, v));
@@ -384,7 +382,7 @@ fn do_inspect(inspection: &Inspection, data: &Data) -> anyhow::Result<()> {
                 }
             }
         }
-        &Inspection::QueryBalance(user_id, currency, session, req_id) => {
+        Inspection::QueryBalance(user_id, currency, session, req_id) => {
             let v = match assets::get(&data.accounts, user_id, currency) {
                 None => serde_json::to_vec(&assets::Account {
                     available: Decimal::new(0, 0),
@@ -395,14 +393,14 @@ fn do_inspect(inspection: &Inspection, data: &Data) -> anyhow::Result<()> {
             };
             server::publish(server::Message::with_payload(session, req_id, v));
         }
-        &Inspection::QueryAccounts(user_id, session, req_id) => {
+        Inspection::QueryAccounts(user_id, session, req_id) => {
             let v = match data.accounts.get(&user_id) {
                 None => serde_json::to_vec(&Accounts::new())?,
                 Some(all) => serde_json::to_vec(all)?,
             };
             server::publish(server::Message::with_payload(session, req_id, v));
         }
-        &Inspection::UpdateDepth => {
+        Inspection::UpdateDepth => {
             let writing = data
                 .orderbooks
                 .iter()
@@ -410,7 +408,7 @@ fn do_inspect(inspection: &Inspection, data: &Data) -> anyhow::Result<()> {
                 .collect::<Vec<_>>();
             output::write_depth(writing);
         }
-        &Inspection::ConfirmAll(from, exclude) => sequence::confirm(from, exclude),
+        Inspection::ConfirmAll(from, exclude) => sequence::confirm(from, exclude),
     }
     Ok(())
 }

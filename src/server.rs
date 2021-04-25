@@ -25,7 +25,6 @@ use chashmap::CHashMap;
 use futures::channel::mpsc;
 use futures::sink::SinkExt;
 use lazy_static::lazy_static;
-use serde_json;
 use std::borrow::BorrowMut;
 use std::net::Shutdown;
 use std::str;
@@ -53,9 +52,9 @@ pub struct Message {
 impl Message {
     pub fn with_payload(session: u64, req_id: u64, payload: Vec<u8>) -> Self {
         Self {
-            session: session,
-            req_id: req_id,
-            payload: payload,
+            session,
+            req_id,
+            payload,
         }
     }
 
@@ -97,6 +96,7 @@ fn get_len(header: u64) -> usize {
     ((header & _PAYLOAD_MASK) >> 32) as usize
 }
 
+#[allow(dead_code)]
 fn get_checksum(header: u64) -> u16 {
     ((header & _CHK_SUM_MASK) >> 16) as u16
 }
@@ -174,9 +174,9 @@ async fn handle_req(upstream: &mut Sender<Fusion>, session: u64, req_id: u64, js
     }
     upstream
         .send(Fusion::R(Watch {
-            session: session,
-            req_id: req_id,
-            cmd: cmd,
+            session,
+            req_id,
+            cmd,
         }))
         .unwrap();
 }
@@ -188,13 +188,11 @@ async fn read_loop(cmd_acc: Sender<Fusion>, session: u64, stream: Arc<TcpStream>
     loop {
         let mut header = [0u8; 8];
         let mut req_id = [0u8; 8];
-        match stream.read_exact(&mut header).await {
-            Err(_) => break,
-            Ok(_) => {}
+        if stream.read_exact(&mut header).await.is_err() {
+            break;
         }
-        match stream.read_exact(&mut req_id).await {
-            Err(_) => break,
-            Ok(_) => {}
+        if stream.read_exact(&mut req_id).await.is_err() {
+            break;
         }
         let header = u64::from_be_bytes(header);
         if !check_magic(header) {
@@ -202,9 +200,8 @@ async fn read_loop(cmd_acc: Sender<Fusion>, session: u64, stream: Arc<TcpStream>
         }
         let req_id = u64::from_be_bytes(req_id);
         let mut tmp = vec![0u8; get_len(header)];
-        match stream.read_exact(&mut tmp).await {
-            Err(_) => break,
-            Ok(_) => {}
+        if stream.read_exact(&mut tmp).await.is_err() {
+            break;
         }
         buf.extend_from_slice(&tmp[..]);
         if !has_next_frame(header) {
