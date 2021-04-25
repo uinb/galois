@@ -12,18 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use std::{
-    sync::Arc,
     sync::atomic::{AtomicBool, Ordering},
     sync::mpsc::Sender,
+    sync::Arc,
     thread,
     time::{Duration, SystemTime},
 };
 
 use log;
-use mysql::{*, prelude::*};
-use rust_decimal::{Decimal, prelude::Zero};
+use mysql::{prelude::*, *};
+use rust_decimal::{prelude::Zero, Decimal};
 use serde::{Deserialize, Serialize};
 use serde_json;
 
@@ -63,79 +62,83 @@ impl Sequence {
         self.status == ERROR
     }
 
-    pub fn to_event(&self) -> Event {
+    pub fn to_event(&self) -> Option<Event> {
         match self.cmd.cmd {
-            ASK_LIMIT => Event::Limit(
+            ASK_LIMIT => Some(Event::Limit(
                 self.id,
-                self.cmd.symbol().unwrap(),
-                self.cmd.user_id.unwrap(),
-                self.cmd.order_id.unwrap(),
-                self.cmd.price.unwrap(),
-                self.cmd.amount.unwrap(),
+                self.cmd.symbol()?,
+                self.cmd.user_id?,
+                self.cmd.order_id?,
+                self.cmd.price?,
+                self.cmd.amount?,
                 AskOrBid::Ask,
                 self.timestamp,
-            ),
-            BID_LIMIT => Event::Limit(
+            )),
+            BID_LIMIT => Some(Event::Limit(
                 self.id,
-                self.cmd.symbol().unwrap(),
-                self.cmd.user_id.unwrap(),
-                self.cmd.order_id.unwrap(),
-                self.cmd.price.unwrap(),
-                self.cmd.amount.unwrap(),
+                self.cmd.symbol()?,
+                self.cmd.user_id?,
+                self.cmd.order_id?,
+                self.cmd.price?,
+                self.cmd.amount?,
                 AskOrBid::Bid,
                 self.timestamp,
-            ),
-            CANCEL => Event::Cancel(
+            )),
+            CANCEL => Some(Event::Cancel(
                 self.id,
-                self.cmd.symbol().unwrap(),
-                self.cmd.user_id.unwrap(),
-                self.cmd.order_id.unwrap(),
+                self.cmd.symbol()?,
+                self.cmd.user_id?,
+                self.cmd.order_id?,
                 self.timestamp,
-            ),
-            CANCEL_ALL => Event::CancelAll(self.id, self.cmd.symbol().unwrap(), self.timestamp),
-            OPEN => Event::Open(self.id, self.cmd.symbol().unwrap(), self.timestamp),
-            CLOSE => Event::Close(self.id, self.cmd.symbol().unwrap(), self.timestamp),
-            OPEN_ALL => Event::OpenAll(self.id, self.timestamp),
-            CLOSE_ALL => Event::CloseAll(self.id, self.timestamp),
-            TRANSFER_OUT => Event::TransferOut(
+            )),
+            CANCEL_ALL => Some(Event::CancelAll(
                 self.id,
-                self.cmd.user_id.unwrap(),
-                self.cmd.currency.unwrap(),
-                self.cmd.amount.unwrap(),
+                self.cmd.symbol()?,
                 self.timestamp,
-            ),
-            TRANSFER_IN => Event::TransferIn(
+            )),
+            OPEN => Some(Event::Open(self.id, self.cmd.symbol()?, self.timestamp)),
+            CLOSE => Some(Event::Close(self.id, self.cmd.symbol()?, self.timestamp)),
+            OPEN_ALL => Some(Event::OpenAll(self.id, self.timestamp)),
+            CLOSE_ALL => Some(Event::CloseAll(self.id, self.timestamp)),
+            TRANSFER_OUT => Some(Event::TransferOut(
                 self.id,
-                self.cmd.user_id.unwrap(),
-                self.cmd.currency.unwrap(),
-                self.cmd.amount.unwrap(),
+                self.cmd.user_id?,
+                self.cmd.currency?,
+                self.cmd.amount?,
                 self.timestamp,
-            ),
-            NEW_SYMBOL => Event::NewSymbol(
+            )),
+            TRANSFER_IN => Some(Event::TransferIn(
                 self.id,
-                self.cmd.symbol().unwrap(),
-                self.cmd.base_scale.unwrap(),
-                self.cmd.quote_scale.unwrap(),
-                self.cmd.taker_fee.unwrap(),
-                self.cmd.maker_fee.unwrap(),
-                self.cmd.min_amount.unwrap(),
-                self.cmd.min_vol.unwrap(),
-                self.cmd.enable_market_order.unwrap(),
+                self.cmd.user_id?,
+                self.cmd.currency?,
+                self.cmd.amount?,
                 self.timestamp,
-            ),
-            UPDATE_SYMBOL => Event::UpdateSymbol(
+            )),
+            NEW_SYMBOL => Some(Event::NewSymbol(
                 self.id,
-                self.cmd.symbol().unwrap(),
-                self.cmd.base_scale.unwrap(),
-                self.cmd.quote_scale.unwrap(),
-                self.cmd.taker_fee.unwrap(),
-                self.cmd.maker_fee.unwrap(),
-                self.cmd.min_amount.unwrap(),
-                self.cmd.min_vol.unwrap(),
-                self.cmd.enable_market_order.unwrap(),
+                self.cmd.symbol()?,
+                self.cmd.base_scale?,
+                self.cmd.quote_scale?,
+                self.cmd.taker_fee?,
+                self.cmd.maker_fee?,
+                self.cmd.min_amount?,
+                self.cmd.min_vol?,
+                self.cmd.enable_market_order?,
                 self.timestamp,
-            ),
-            DUMP => Event::Dump(self.id, self.timestamp),
+            )),
+            UPDATE_SYMBOL => Some(Event::UpdateSymbol(
+                self.id,
+                self.cmd.symbol()?,
+                self.cmd.base_scale?,
+                self.cmd.quote_scale?,
+                self.cmd.taker_fee?,
+                self.cmd.maker_fee?,
+                self.cmd.min_amount?,
+                self.cmd.min_vol?,
+                self.cmd.enable_market_order?,
+                self.timestamp,
+            )),
+            DUMP => Some(Event::Dump(self.id, self.timestamp)),
             _ => unreachable!(),
         }
     }
@@ -177,27 +180,27 @@ pub struct Watch {
 }
 
 impl Watch {
-    pub fn to_inspection(&self) -> Inspection {
+    pub fn to_inspection(&self) -> Option<Inspection> {
         match self.cmd.cmd {
-            QUERY_ORDER => Inspection::QueryOrder(
-                self.cmd.symbol().unwrap(),
-                self.cmd.order_id.unwrap(),
+            QUERY_ORDER => Some(Inspection::QueryOrder(
+                self.cmd.symbol()?,
+                self.cmd.order_id?,
                 self.session,
                 self.req_id,
-            ),
-            QUERY_BALANCE => Inspection::QueryBalance(
-                self.cmd.user_id.unwrap(),
-                self.cmd.currency.unwrap(),
+            )),
+            QUERY_BALANCE => Some(Inspection::QueryBalance(
+                self.cmd.user_id?,
+                self.cmd.currency?,
                 self.session,
                 self.req_id,
-            ),
-            QUERY_ACCOUNTS => {
-                Inspection::QueryAccounts(self.cmd.user_id.unwrap(), self.session, self.req_id)
-            }
-            UPDATE_DEPTH => Inspection::UpdateDepth,
-            CONFIRM_ALL => {
-                Inspection::ConfirmAll(self.cmd.from.unwrap(), self.cmd.exclude.unwrap())
-            }
+            )),
+            QUERY_ACCOUNTS => Some(Inspection::QueryAccounts(
+                self.cmd.user_id?,
+                self.session,
+                self.req_id,
+            )),
+            UPDATE_DEPTH => Some(Inspection::UpdateDepth),
+            CONFIRM_ALL => Some(Inspection::ConfirmAll(self.cmd.from?, self.cmd.exclude?)),
             _ => unreachable!(),
         }
     }
@@ -293,10 +296,7 @@ unsafe impl Send for Fusion {}
 
 impl Command {
     pub fn symbol(&self) -> Option<Symbol> {
-        match self.base.is_some() && self.quote.is_some() {
-            false => None,
-            true => Some((self.base.unwrap(), self.quote.unwrap())),
-        }
+        Some((self.base?, self.quote?))
     }
 
     pub fn is_read(&self) -> bool {
@@ -309,15 +309,12 @@ impl Command {
     /// ONLY CHECK DATA FORMAT!!!
     pub fn validate(&self) -> bool {
         match self.cmd {
-            ASK_LIMIT | BID_LIMIT => {
-                self.symbol().is_some()
-                    && self.user_id.is_some()
-                    && self.order_id.is_some()
-                    && self.price.is_some()
-                    && self.price.unwrap().is_sign_positive()
-                    && self.amount.is_some()
-                    && self.amount.unwrap().is_sign_positive()
-            }
+            ASK_LIMIT | BID_LIMIT => match (self.user_id, self.order_id, self.price, self.amount) {
+                (Some(_user_id), Some(_order_id), Some(price), Some(amount)) => {
+                    price.is_sign_positive() && amount.is_sign_positive()
+                }
+                _ => false,
+            },
             CANCEL => self.symbol().is_some() && self.user_id.is_some() && self.order_id.is_some(),
             CANCEL_ALL => self.symbol().is_some(),
             OPEN | CLOSE => self.symbol().is_some(),
@@ -326,22 +323,35 @@ impl Command {
                 self.user_id.is_some() && self.currency.is_some() && self.amount.is_some()
             }
             NEW_SYMBOL | UPDATE_SYMBOL => {
-                self.symbol().is_some()
-                    && self.base_scale.is_some()
-                    && self.quote_scale.is_some()
-                    && self.taker_fee.is_some()
-                    && self.maker_fee.is_some()
-                    && self.min_amount.is_some()
-                    && self.min_amount.unwrap().is_sign_positive()
-                    && self.min_vol.is_some()
-                    && self.min_vol.unwrap().is_sign_positive()
-                    && self.enable_market_order.is_some()
-                    // taker_fee must be positive or zero, while maker_fee can be zero or negative
-                    && self.taker_fee.unwrap() >= Decimal::zero()
-                    // taker_fee + maker_fee must be positive or zero
-                    && self.taker_fee.unwrap() + self.maker_fee.unwrap() >= Decimal::zero()
-                    // taker_fee >= maker_fee
-                    && self.taker_fee.unwrap() >= self.maker_fee.unwrap().abs()
+                match (
+                    self.base_scale,
+                    self.quote_scale,
+                    self.taker_fee,
+                    self.maker_fee,
+                    self.min_amount,
+                    self.min_vol,
+                    self.enable_market_order,
+                ) {
+                    (
+                        Some(_base_scale),
+                        Some(_quote_scale),
+                        Some(taker_fee),
+                        Some(maker_fee),
+                        Some(min_amount),
+                        Some(min_vol),
+                        Some(_enable_market_order),
+                    ) => {
+                        min_amount.is_sign_positive()
+                            && min_vol.is_sign_positive()
+                            // taker_fee must be positive or zero, while maker_fee can be zero or negative
+                            && taker_fee >= Decimal::zero()
+                            // taker_fee + maker_fee must be positive or zero
+                            && taker_fee + maker_fee >= Decimal::zero()
+                            // taker_fee >= maker_fee
+                            && taker_fee >= maker_fee
+                    }
+                    _ => false,
+                }
             }
             QUERY_ORDER => self.symbol().is_some() && self.order_id.is_some(),
             QUERY_BALANCE => self.currency.is_some() && self.user_id.is_some(),
@@ -432,7 +442,7 @@ fn fetch_sequence_from(id: u64) -> Vec<Sequence> {
             timestamp: f_timestamp,
         },
     )
-        .unwrap_or(vec![])
+    .unwrap_or(vec![])
 }
 
 pub fn insert_nop(id: u64) -> Option<bool> {

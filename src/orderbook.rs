@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use crate::core::*;
 use linked_hash_map::LinkedHashMap;
 use rust_decimal::{prelude::Zero, Decimal};
@@ -178,28 +177,22 @@ impl OrderBook {
     }
 
     fn _insert(tape: &mut Tape, index: &mut Index, order: Order) {
-        if tape.contains_key(&order.price) {
-            index.insert(order.id, order.price);
-            let page = tape.get_mut(&order.price).unwrap();
-            page.amount += &order.unfilled;
-            page.orders.insert(order.id, order);
-        } else {
-            index.insert(order.id, order.price);
-            tape.insert(order.price, OrderPage::with_init_order(order));
-        }
+        index.insert(order.id, order.price);
+        tape.entry(order.price)
+            .and_modify(|page| {
+                page.amount += order.unfilled;
+                page.orders.insert(order.id, order.clone());
+            })
+            .or_insert_with(|| OrderPage::with_init_order(order));
     }
 
     pub fn remove_from_tape(tape: &mut Tape, order_id: u64, price: Decimal) -> Option<Order> {
-        if tape.contains_key(&price) {
-            let page = tape.get_mut(&price).unwrap();
-            let removed = page.remove(order_id);
-            if page.is_empty() {
-                tape.remove(&price);
-            }
-            removed
-        } else {
-            None
+        let page = tape.get_mut(&price)?;
+        let removed = page.remove(order_id);
+        if page.is_empty() {
+            tape.remove(&price);
         }
+        removed
     }
 
     pub fn get_best_match(
@@ -227,24 +220,14 @@ impl OrderBook {
     }
 
     pub fn find_order(&self, order_id: u64) -> Option<&Order> {
-        let price = self.indices.get(&order_id);
-        if price.is_none() {
-            return None;
-        }
-        let price = price.unwrap();
-        let best_ask = self.get_best_ask();
-        if best_ask.is_some() && *price >= best_ask.unwrap() {
-            match self.asks.get(&price) {
-                None => None,
-                Some(page) => page.get(&order_id),
-            }
+        let price = self.indices.get(&order_id)?;
+        let best_ask = self.get_best_ask()?;
+        if *price >= best_ask {
+            self.asks.get(&price).and_then(|page| page.get(&order_id))
         } else {
-            let best_bid = self.get_best_bid();
-            if best_bid.is_some() && *price <= best_bid.unwrap() {
-                match self.bids.get(&price) {
-                    None => None,
-                    Some(page) => page.get(&order_id),
-                }
+            let best_bid = self.get_best_bid()?;
+            if *price <= best_bid {
+                self.bids.get(&price).and_then(|page| page.get(&order_id))
             } else {
                 None
             }

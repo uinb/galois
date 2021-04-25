@@ -24,10 +24,10 @@ mod db;
 mod event;
 mod matcher;
 mod orderbook;
+mod output;
 mod sequence;
 mod server;
 mod snapshot;
-mod output;
 
 use lazy_static;
 use std::sync::{atomic, mpsc, Arc};

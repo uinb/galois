@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use crate::orderbook::{AskOrBid, Order, OrderBook, OrderPage};
 use rust_decimal::{prelude::Zero, Decimal};
 
@@ -181,8 +180,29 @@ pub fn execute_limit(
                 false => None,
             };
         }
-        let best = book.get_best_match(&ask_or_bid);
-        if best.is_none() {
+        if let Some(mut best) = book.get_best_match(&ask_or_bid) {
+            if !can_trade(*best.key(), price, &ask_or_bid) {
+                let order = Order::new(order_id, user_id, price, unfilled);
+                book.insert(order, &ask_or_bid);
+                return match !makers.is_empty() {
+                    true => Some(Match {
+                        maker: makers,
+                        taker: Taker::taker_placed(user_id, order_id, price, unfilled, ask_or_bid),
+                    }),
+                    false => None,
+                };
+            }
+            let page = best.get_mut();
+            let (remain, mut v) = take(page, unfilled);
+            if page.is_empty() {
+                best.remove();
+            }
+            v.iter().filter(|m| m.state == State::Filled).for_each(|m| {
+                book.indices.remove(&m.order_id);
+            });
+            unfilled = remain;
+            makers.append(&mut v);
+        } else {
             let order = Order::new(order_id, user_id, price, unfilled);
             book.insert(order, &ask_or_bid);
             return match !makers.is_empty() {
@@ -193,33 +213,10 @@ pub fn execute_limit(
                 false => None,
             };
         }
-        let mut best = best.unwrap();
-        if !can_trade(*best.key(), price, &ask_or_bid) {
-            let order = Order::new(order_id, user_id, price, unfilled);
-            book.insert(order, &ask_or_bid);
-            return match !makers.is_empty() {
-                true => Some(Match {
-                    maker: makers,
-                    taker: Taker::taker_placed(user_id, order_id, price, unfilled, ask_or_bid),
-                }),
-                false => None,
-            };
-        }
-        let page = best.get_mut();
-        let (remain, mut v) = take(page, unfilled);
-        if page.is_empty() {
-            best.remove();
-        }
-        v.iter().filter(|m| m.state == State::Filled).for_each(|m| {
-            book.indices.remove(&m.order_id);
-        });
-        unfilled = remain;
-        makers.append(&mut v);
     }
 }
 
-fn take(page: &mut OrderPage, taker: Decimal) -> (Decimal, Vec<Maker>) {
-    let mut taker = taker;
+fn take(page: &mut OrderPage, mut taker: Decimal) -> (Decimal, Vec<Maker>) {
     let mut matches = Vec::<Maker>::new();
     while taker != Decimal::zero() && !page.is_empty() {
         let mut oldest = page.orders.entries().next().unwrap();
@@ -258,16 +255,10 @@ fn can_trade(best_price: Decimal, taker_price: Decimal, ask_or_bid: &AskOrBid) -
 }
 
 pub fn cancel(book: &mut OrderBook, order_id: u64) -> Option<Match> {
-    let price = book.indices.remove(&order_id);
-    match price {
-        None => None,
-        Some(price) => {
-            let best_ask = book.get_best_ask();
-            let best_bid = book.get_best_bid();
-            if best_ask.is_none() && best_bid.is_none() {
-                return None;
-            }
-            let (from, removed) = if best_ask.is_some() && price >= best_ask.unwrap() {
+    let price = book.indices.remove(&order_id)?;
+    match (book.get_best_ask(), book.get_best_bid()) {
+        (Some(best_ask), _) => {
+            let (from, removed) = if price >= best_ask {
                 (
                     AskOrBid::Ask,
                     OrderBook::remove_from_tape(&mut book.asks, order_id, price),
@@ -278,14 +269,12 @@ pub fn cancel(book: &mut OrderBook, order_id: u64) -> Option<Match> {
                     OrderBook::remove_from_tape(&mut book.bids, order_id, price),
                 )
             };
-            match removed {
-                Some(order) => Some(Match {
-                    maker: vec![],
-                    taker: Taker::cancel(order.user, order_id, order.price, order.unfilled, from),
-                }),
-                None => None,
-            }
+            removed.map(|order| Match {
+                maker: vec![],
+                taker: Taker::cancel(order.user, order_id, order.price, order.unfilled, from),
+            })
         }
+        _ => None,
     }
 }
 
