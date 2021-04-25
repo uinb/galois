@@ -30,67 +30,51 @@ If you would like to use Galois in your product, you should implement the order/
 - MySQL: persist the events and output the match result
 - Redis: output the best n price of the orderbook
 
-### Build & Run
+### Quick Start
+
+Download the binary release and extract to any directory you prefer. Then modify the `galois.toml` especially the mysql and redis configurations, as well as the snapshot directory.
 
 ```
-git clone git@github.com:uinb/galois.git
-cd galois
-cargo default nightly
-cargo build --release
-
 # init mysql
-mysql -u {user_name} -p {database} < sql/init.sql
+mysql -u {user_name} -p {database} < init.sql
 
 # start redis
 redis-server
 
-# modify the configuration file galois.toml before start
-target/release/galois -c galois.toml
+galois -c galois.toml
 ```
 
-Galois is now waiting for the incoming events and execute.
-
-### Some of the Instructions
+Galois is now waiting for the incoming events and execute. Before you can execute orders, you need to issue a new pair and create a mysql table to receive the matching result outputs.
 
 ```
-mysql-schema：f_id, f_cmd, f_status, f_timestamp
+# create a table to receive outputs from galois, 100 and 101 represent the base currency code and the quote currency code.
+create table t_clearing_result_100_101 like t_clearing_result;
+# tell galois to create a new trading pair 101/100 with base_scale=4, quote_scale=4 and other parameters.
+insert into t_sequence(f_cmd) values('{"base":101,"quote":100,"base_scale":4,"quote_scale":4,"taker_fee":"0.002","maker_fee":"0.002","min_amount":"0.1","min_vol":"10","enable_market_order":false,"cmd":12}');
+# tell galois to open 101/100
+insert into t_sequence(f_cmd) values('{"quote":100, "base":101, "cmd":5}');
+commit;
+```
 
-f_cmd(json)
-    cmd: u32,    
-    order_id: Option<u64>,
-    user_id: Option<u64>,    
-    base: Option<u32>,
-    quote: Option<u32>,
-    currency: Option<u32>,
-    vol: Option<Decimal>,
-    amount: Option<Decimal>,
-    price: Option<Decimal>,
-    base_scale: Option<u32>,
-    quote_scale: Option<u32>,
-    taker_fee: Option<Decimal>,
-    maker_fee: Option<Decimal>,
-    min_amount: Option<Decimal>,
-    min_vol: Option<Decimal>,
-    enable_market_order: Option<bool>,
+### Instructions
 
-ASK_LIMIT | BID_LIMIT =>
-    require:            
-      base,quote,user_id,order_id,price,amount;
-      price/amount is positive;
-      order_id exists;
-      (base/quote) symbol exsits and open;
-       
-CANCEL =>
-    require:
-      base,quote,user_id,order_id;
-      order_id exists;
-      order_id belongs to user_id;
-      (base/quote) symbol exsits and open;
-            
-TRANSFER_OUT | TRANSFER_IN => 
-    require:
-      user_id,currency,amount
-     
+```
+ASK_LIMIT = 0;
+BID_LIMIT = 1;
+CANCEL = 4;
+CANCEL_ALL = 5;
+OPEN = 6;
+CLOSE = 7;
+OPEN_ALL = 8;
+CLOSE_ALL = 9;
+TRANSFER_OUT = 10;
+TRANSFER_IN = 11;
+NEW_SYMBOL = 12;
+UPDATE_SYMBOL = 13;
+QUERY_ORDER = 14;
+QUERY_BALANCE = 15;
+QUERY_ACCOUNTS = 16;
+DUMP = 17;
 ```
 
 ## License
