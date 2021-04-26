@@ -40,10 +40,10 @@ pub struct Order {
 impl Order {
     pub fn new(id: u64, user: u64, price: Decimal, unfilled: Decimal) -> Self {
         Self {
-            id: id,
-            user: user,
-            price: price,
-            unfilled: unfilled,
+            id,
+            user,
+            price,
+            unfilled,
         }
     }
 }
@@ -64,9 +64,9 @@ impl OrderPage {
         let mut orders = LinkedHashMap::<u64, Order>::new();
         orders.insert(order.id, order);
         Self {
-            orders: orders,
-            amount: amount,
-            price: price,
+            orders,
+            amount,
+            price,
         }
     }
 
@@ -83,9 +83,9 @@ impl OrderPage {
     }
 
     pub fn remove(&mut self, order_id: u64) -> Option<Order> {
-        self.orders.remove(&order_id).and_then(|x| {
+        self.orders.remove(&order_id).map(|x| {
             self.amount -= x.unfilled;
-            Some(x)
+            x
         })
     }
 
@@ -135,13 +135,13 @@ impl OrderBook {
             asks: Tape::new(),
             bids: Tape::new(),
             indices: Index::with_capacity(DEFAULT_PAGE_SIZE),
-            base_scale: base_scale,
-            quote_scale: quote_scale,
-            taker_fee: taker_fee,
-            maker_fee: maker_fee,
-            min_amount: min_amount,
-            min_vol: min_vol,
-            enable_market_order: enable_market_order,
+            base_scale,
+            quote_scale,
+            taker_fee,
+            maker_fee,
+            min_amount,
+            min_vol,
+            enable_market_order,
             open: true,
         }
     }
@@ -162,17 +162,17 @@ impl OrderBook {
             bids.push(level);
         }
         Depth {
-            asks: asks,
-            bids: bids,
+            asks,
+            bids,
             depth: level,
-            symbol: symbol,
+            symbol,
         }
     }
 
-    pub fn insert(&mut self, order: Order, ask_or_bid: &AskOrBid) {
+    pub fn insert(&mut self, order: Order, ask_or_bid: AskOrBid) {
         match ask_or_bid {
-            &AskOrBid::Ask => Self::_insert(&mut self.asks, &mut self.indices, order),
-            &AskOrBid::Bid => Self::_insert(&mut self.bids, &mut self.indices, order),
+            AskOrBid::Ask => Self::_insert(&mut self.asks, &mut self.indices, order),
+            AskOrBid::Bid => Self::_insert(&mut self.bids, &mut self.indices, order),
         }
     }
 
@@ -197,26 +197,20 @@ impl OrderBook {
 
     pub fn get_best_match(
         &mut self,
-        ask_or_bid: &AskOrBid,
+        ask_or_bid: AskOrBid,
     ) -> Option<OccupiedEntry<Decimal, OrderPage>> {
         match ask_or_bid {
-            &AskOrBid::Bid => self.asks.first_entry(),
-            &AskOrBid::Ask => self.bids.last_entry(),
+            AskOrBid::Bid => self.asks.first_entry(),
+            AskOrBid::Ask => self.bids.last_entry(),
         }
     }
 
     pub fn get_best_ask(&self) -> Option<Decimal> {
-        match self.asks.first_key_value() {
-            Some((price, _)) => Some(*price),
-            None => None,
-        }
+        self.asks.last_key_value().map(|(price, _)| *price)
     }
 
     pub fn get_best_bid(&self) -> Option<Decimal> {
-        match self.bids.last_key_value() {
-            Some((price, _)) => Some(*price),
-            None => None,
-        }
+        self.bids.last_key_value().map(|(price, _)| *price)
     }
 
     pub fn find_order(&self, order_id: u64) -> Option<&Order> {

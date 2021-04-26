@@ -20,17 +20,17 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use log;
 use mysql::{prelude::*, *};
 use rust_decimal::{prelude::Zero, Decimal};
 use serde::{Deserialize, Serialize};
-use serde_json;
 
 use crate::{config::C, core::*, db::DB, event::*, orderbook::AskOrBid};
 
 pub const ASK_LIMIT: u32 = 0;
 pub const BID_LIMIT: u32 = 1;
+#[allow(dead_code)]
 pub const ASK_MARKET: u32 = 2;
+#[allow(dead_code)]
 pub const BID_MARKET: u32 = 3;
 pub const CANCEL: u32 = 4;
 pub const CANCEL_ALL: u32 = 5;
@@ -167,7 +167,7 @@ impl Sequence {
                 exclude: None,
             },
             status: 0,
-            timestamp: timestamp,
+            timestamp,
         }
     }
 }
@@ -300,10 +300,7 @@ impl Command {
     }
 
     pub fn is_read(&self) -> bool {
-        match self.cmd {
-            QUERY_ACCOUNTS | QUERY_BALANCE | QUERY_ORDER => true,
-            _ => false,
-        }
+        matches!(self.cmd, QUERY_ACCOUNTS | QUERY_BALANCE | QUERY_ORDER)
     }
 
     /// ONLY CHECK DATA FORMAT!!!
@@ -437,12 +434,12 @@ fn fetch_sequence_from(id: u64) -> Vec<Sequence> {
         |(f_id, f_cmd, f_status, f_timestamp): (u64, String, u32, u64)| Sequence {
             id: f_id,
             cmd: serde_json::from_str(&f_cmd)
-                .unwrap_or(serde_json::from_str(r#"{"cmd":999999}"#).unwrap()),
+                .unwrap_or_else(|_| serde_json::from_str(r#"{"cmd":999999}"#).unwrap()),
             status: f_status,
             timestamp: f_timestamp,
         },
     )
-    .unwrap_or(vec![])
+    .unwrap_or_default()
 }
 
 pub fn insert_nop(id: u64) -> Option<bool> {

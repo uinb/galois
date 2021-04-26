@@ -17,6 +17,7 @@ use rust_decimal::{prelude::Zero, Decimal};
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum State {
+    #[allow(dead_code)]
     Submitted,
     Canceled,
     Filled,
@@ -71,11 +72,11 @@ pub struct Taker {
 impl Taker {
     pub fn taker_filled(user_id: u64, order_id: u64, price: Decimal, ask_or_bid: AskOrBid) -> Self {
         Self {
-            user_id: user_id,
-            order_id: order_id,
-            price: price,
+            user_id,
+            order_id,
+            price,
             unfilled: Decimal::zero(),
-            ask_or_bid: ask_or_bid,
+            ask_or_bid,
             state: State::Filled,
         }
     }
@@ -88,11 +89,11 @@ impl Taker {
         ask_or_bid: AskOrBid,
     ) -> Self {
         Self {
-            user_id: user_id,
-            order_id: order_id,
-            price: price,
-            unfilled: unfilled,
-            ask_or_bid: ask_or_bid,
+            user_id,
+            order_id,
+            price,
+            unfilled,
+            ask_or_bid,
             state: State::PartialFilled,
         }
     }
@@ -105,11 +106,11 @@ impl Taker {
         ask_or_bid: AskOrBid,
     ) -> Self {
         Self {
-            user_id: user_id,
-            order_id: order_id,
-            price: price,
-            unfilled: unfilled,
-            ask_or_bid: ask_or_bid,
+            user_id,
+            order_id,
+            price,
+            unfilled,
+            ask_or_bid,
             state: State::Canceled,
         }
     }
@@ -127,20 +128,20 @@ pub struct Maker {
 impl Maker {
     pub fn maker_filled(user_id: u64, order_id: u64, price: Decimal, filled: Decimal) -> Self {
         Self {
-            user_id: user_id,
-            order_id: order_id,
-            price: price,
-            filled: filled,
+            user_id,
+            order_id,
+            price,
+            filled,
             state: State::Filled,
         }
     }
 
     pub fn maker_so_far(user_id: u64, order_id: u64, price: Decimal, filled: Decimal) -> Self {
         Self {
-            user_id: user_id,
-            order_id: order_id,
-            price: price,
-            filled: filled,
+            user_id,
+            order_id,
+            price,
+            filled,
             state: State::PartialFilled,
         }
     }
@@ -180,10 +181,10 @@ pub fn execute_limit(
                 false => None,
             };
         }
-        if let Some(mut best) = book.get_best_match(&ask_or_bid) {
-            if !can_trade(*best.key(), price, &ask_or_bid) {
+        if let Some(mut best) = book.get_best_match(ask_or_bid) {
+            if !can_trade(*best.key(), price, ask_or_bid) {
                 let order = Order::new(order_id, user_id, price, unfilled);
-                book.insert(order, &ask_or_bid);
+                book.insert(order, ask_or_bid);
                 return match !makers.is_empty() {
                     true => Some(Match {
                         maker: makers,
@@ -204,7 +205,7 @@ pub fn execute_limit(
             makers.append(&mut v);
         } else {
             let order = Order::new(order_id, user_id, price, unfilled);
-            book.insert(order, &ask_or_bid);
+            book.insert(order, ask_or_bid);
             return match !makers.is_empty() {
                 true => Some(Match {
                     maker: makers,
@@ -247,10 +248,10 @@ fn take(page: &mut OrderPage, mut taker: Decimal) -> (Decimal, Vec<Maker>) {
     (taker, matches)
 }
 
-fn can_trade(best_price: Decimal, taker_price: Decimal, ask_or_bid: &AskOrBid) -> bool {
+fn can_trade(best_price: Decimal, taker_price: Decimal, ask_or_bid: AskOrBid) -> bool {
     match ask_or_bid {
-        &AskOrBid::Ask => best_price >= taker_price,
-        &AskOrBid::Bid => best_price <= taker_price,
+        AskOrBid::Ask => best_price >= taker_price,
+        AskOrBid::Bid => best_price <= taker_price,
     }
 }
 
@@ -307,11 +308,11 @@ mod test {
         assert_eq!(true, mr.is_none());
         assert_eq!(
             Decimal::from_str("0.1").unwrap(),
-            *book.get_best_match(&AskOrBid::Ask).unwrap().key()
+            *book.get_best_match(AskOrBid::Ask).unwrap().key()
         );
         assert_eq!(
             Decimal::from_str("100").unwrap(),
-            book.get_best_match(&AskOrBid::Ask).unwrap().get().amount
+            book.get_best_match(AskOrBid::Ask).unwrap().get().amount
         );
         assert_eq!(true, book.indices.contains_key(&1001));
 
@@ -321,11 +322,11 @@ mod test {
         assert_eq!(true, mr.is_none());
         assert_eq!(
             Decimal::from_str("0.1").unwrap(),
-            *book.get_best_match(&AskOrBid::Ask).unwrap().key()
+            *book.get_best_match(AskOrBid::Ask).unwrap().key()
         );
         assert_eq!(
             Decimal::from_str("1100").unwrap(),
-            book.get_best_match(&AskOrBid::Ask).unwrap().get().amount
+            book.get_best_match(AskOrBid::Ask).unwrap().get().amount
         );
         assert_eq!(true, book.indices.contains_key(&1002));
 
@@ -357,11 +358,11 @@ mod test {
         assert_eq!(Taker::taker_filled(1, 1003, price, AskOrBid::Ask), mr.taker);
         assert_eq!(
             Decimal::from_str("0.1").unwrap(),
-            *book.get_best_match(&AskOrBid::Ask).unwrap().key()
+            *book.get_best_match(AskOrBid::Ask).unwrap().key()
         );
         assert_eq!(
             Decimal::from_str("900").unwrap(),
-            book.get_best_match(&AskOrBid::Ask).unwrap().get().amount
+            book.get_best_match(AskOrBid::Ask).unwrap().get().amount
         );
 
         let price = Decimal::from_str("0.12").unwrap();
@@ -370,11 +371,11 @@ mod test {
         assert_eq!(true, mr.is_none());
         assert_eq!(
             Decimal::from_str("0.12").unwrap(),
-            *book.get_best_match(&AskOrBid::Bid).unwrap().key()
+            *book.get_best_match(AskOrBid::Bid).unwrap().key()
         );
         assert_eq!(
             Decimal::from_str("100").unwrap(),
-            book.get_best_match(&AskOrBid::Bid).unwrap().get().amount
+            book.get_best_match(AskOrBid::Bid).unwrap().get().amount
         );
         assert_eq!(true, book.indices.contains_key(&1004));
 

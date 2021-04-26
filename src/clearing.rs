@@ -39,7 +39,7 @@ pub fn clear(
                 // revert base
                 assets::unfreeze(accounts, mr.taker.user_id, base, mr.taker.unfilled);
                 vec![Output {
-                    event_id: event_id,
+                    event_id,
                     order_id: mr.taker.order_id,
                     user_id: mr.taker.user_id,
                     symbol: *symbol,
@@ -63,7 +63,7 @@ pub fn clear(
                     mr.taker.unfilled * mr.taker.price,
                 );
                 vec![Output {
-                    event_id: event_id,
+                    event_id,
                     order_id: mr.taker.order_id,
                     user_id: mr.taker.user_id,
                     symbol: *symbol,
@@ -102,7 +102,7 @@ pub fn clear(
                             assets::deduct_available(accounts, m.user_id, base, charge_fee);
                             assets::add_to_available(accounts, SYSTEM, base, charge_fee);
                             cr.push(Output {
-                                event_id: event_id,
+                                event_id,
                                 order_id: m.order_id,
                                 user_id: m.user_id,
                                 symbol: *symbol,
@@ -128,7 +128,7 @@ pub fn clear(
                                 quote_decr * maker_fee.abs(),
                             );
                             cr.push(Output {
-                                event_id: event_id,
+                                event_id,
                                 order_id: m.order_id,
                                 user_id: m.user_id,
                                 symbol: *symbol,
@@ -167,7 +167,7 @@ pub fn clear(
                         );
                     }
                     cr.push(Output {
-                        event_id: event_id,
+                        event_id,
                         order_id: mr.taker.order_id,
                         user_id: mr.taker.user_id,
                         symbol: *symbol,
@@ -209,7 +209,7 @@ pub fn clear(
                             assets::deduct_available(accounts, m.user_id, quote, charge_fee);
                             assets::add_to_available(accounts, SYSTEM, quote, charge_fee);
                             cr.push(Output {
-                                event_id: event_id,
+                                event_id,
                                 order_id: m.order_id,
                                 user_id: m.user_id,
                                 symbol: *symbol,
@@ -234,7 +234,7 @@ pub fn clear(
                                 m.filled * maker_fee.abs(),
                             );
                             cr.push(Output {
-                                event_id: event_id,
+                                event_id,
                                 order_id: m.order_id,
                                 user_id: m.user_id,
                                 symbol: *symbol,
@@ -284,7 +284,7 @@ pub fn clear(
                         assets::unfreeze(accounts, mr.taker.user_id, quote, return_quote);
                     }
                     cr.push(Output {
-                        event_id: event_id,
+                        event_id,
                         order_id: mr.taker.order_id,
                         user_id: mr.taker.user_id,
                         symbol: *symbol,

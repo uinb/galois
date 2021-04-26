@@ -15,7 +15,7 @@
 use crate::{config, core};
 use chrono::prelude::DateTime;
 use chrono::Utc;
-use log;
+
 use std::time::{Duration, UNIX_EPOCH};
 use std::{fs, path, thread};
 
@@ -25,17 +25,17 @@ pub fn dump(id: u64, time: u64, data: &core::Data) {
     let timestamp = UNIX_EPOCH + Duration::from_secs(time);
     let datetime = DateTime::<Utc>::from(timestamp);
     let format = datetime.format("%Y-%m-%dT%H:%M:%S").to_string();
-    thread::spawn(move || {
+    thread::spawn(move || -> anyhow::Result<()> {
         let f = path::Path::new(&config::C.sequence.coredump_dir)
             .join(id.to_string())
             .with_extension(format!("{}.gz", format));
         let file = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
-            .open(f)
-            .unwrap();
-        data.into_raw(file);
+            .open(f)?;
+        data.into_raw(file)?;
         log::info!("snapshot dumped at sequence {}", id);
+        Ok(())
     });
 }
 
@@ -69,7 +69,9 @@ pub fn load() -> anyhow::Result<(u64, core::Data)> {
         }
         None => match *config::ENABLE_START_FROM_GENESIS {
             true => Ok((1, core::Data::new())),
-            false => Err(anyhow::anyhow!("missing snapshot, add `-g` to start from genesis")),
+            false => Err(anyhow::anyhow!(
+                "missing snapshot, add `-g` to start from genesis"
+            )),
         },
     }
 }

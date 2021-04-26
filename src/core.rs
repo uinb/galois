@@ -12,11 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{
-    assets::Account,
-    orderbook::{Order, OrderBook},
-};
-use bincode;
+use crate::{assets::Account, orderbook::OrderBook};
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -76,6 +72,7 @@ impl Data {
 
 #[test]
 pub fn test_dump() {
+    use crate::orderbook::Order;
     let order = Order::new(0, 0, Decimal::new(1, 0), Decimal::new(1, 0));
     let v = bincode::serialize(&order).unwrap();
     let des: Order = bincode::deserialize(&v).unwrap();

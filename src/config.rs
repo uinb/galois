@@ -14,10 +14,8 @@
 
 use argparse::{ArgumentParser, Store, StoreTrue};
 use lazy_static::lazy_static;
-use log4rs;
 use magic_crypt::{new_magic_crypt, MagicCryptError, MagicCryptTrait};
 use serde::Deserialize;
-use toml;
 
 use std::env;
 use std::fs;
@@ -36,6 +34,7 @@ pub fn decrypt(key: &str, content: &str) -> Result<String, MagicCryptError> {
     mc.decrypt_base64_to_string(content)
 }
 
+#[allow(dead_code)]
 pub fn encrypt(key: &str, content: &str) -> String {
     let mc = new_magic_crypt!(key, 64);
     mc.encrypt_str_to_base64(content)
@@ -87,9 +86,9 @@ fn init_config_file() -> anyhow::Result<Config> {
     let opts = mysql::Opts::from_url(&cfg.mysql.url)?;
     let pass = opts
         .get_pass()
-        .ok_or(anyhow::anyhow!("passphrase not exist"))?;
-    if pass.starts_with("ENC(") && pass.ends_with(")") {
-        let content = pass.trim_start_matches("ENC(").trim_end_matches(")");
+        .ok_or_else(|| anyhow::anyhow!("passphrase not exist"))?;
+    if pass.starts_with("ENC(") && pass.ends_with(')') {
+        let content = pass.trim_start_matches("ENC(").trim_end_matches(')');
         match env::var_os("PBE_KEY") {
             Some(val) => {
                 let des = decrypt(val.to_str().unwrap(), content)?;
@@ -97,11 +96,11 @@ fn init_config_file() -> anyhow::Result<Config> {
                     cfg.mysql
                         .url
                         .find("ENC(")
-                        .ok_or(anyhow::anyhow!("ENC( not found in passphrase"))?,
+                        .ok_or_else(|| anyhow::anyhow!("ENC( not found in passphrase"))?,
                     cfg.mysql
                         .url
-                        .find(")")
-                        .ok_or(anyhow::anyhow!(") not found in passphrase"))?,
+                        .find(')')
+                        .ok_or_else(|| anyhow::anyhow!(") not found in passphrase"))?,
                 );
                 cfg.mysql.url.replace_range(f..=t, &des);
             }
