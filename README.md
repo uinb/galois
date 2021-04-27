@@ -32,7 +32,7 @@ If you would like to use Galois in your product, you should implement the order/
 
 ### Quick Start
 
-Download the binary release and extract to any directory you prefer. Then modify the `galois.toml` especially the mysql and redis configurations, as well as the snapshot directory.
+Download the binary release and extract to any directory you prefer. Then `cp galois.toml.example galois.toml` and modify the `galois.toml` especially the mysql and redis configurations, as well as the snapshot directory.
 
 ```
 # init mysql
