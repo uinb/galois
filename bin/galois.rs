@@ -17,6 +17,7 @@ use galois::{config, event, output, sequence, server, snapshot};
 use std::sync::{atomic, mpsc, Arc};
 
 fn main() {
+    print_banner();
     lazy_static::initialize(&config::C);
     lazy_static::initialize(&config::ENABLE_START_FROM_GENESIS);
     let (id, coredump) = snapshot::load().unwrap();
@@ -27,4 +28,21 @@ fn main() {
     event::init(event_rx, output_tx, coredump);
     sequence::init(event_tx.clone(), id, ready.clone());
     server::init(event_tx, ready);
+}
+
+fn print_banner() {
+    let banner = r#"
+
+                 **       **
+   *******     ******     **               **
+  ***               **    **     *****     **    ******
+ **              *****    **   ***   ***        **    *
+ **            *******    **   **     **   **   **
+ **    *****  **    **    **   *       *   **    **
+  **     ***  **    **    **   **     **   **     ****
+   *********   **  ****   **    *******    **        **
+      *    *    ****  *   **      ***      **    ** ***
+                                                  ****
+"#;
+    println!("{}", banner);
 }
