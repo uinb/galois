@@ -141,7 +141,7 @@ fn write(mut cr: Vec<Output>, buf: &mut HashMap<Symbol, (u64, Vec<Output>)>) {
     }
     let pending = pending.unwrap();
     let prepare_write_event_id = cr.last().unwrap().event_id;
-    if prepare_write_event_id <= pending.0 {
+    if prepare_write_event_id < pending.0 {
         return;
     }
     pending.0 = prepare_write_event_id;
