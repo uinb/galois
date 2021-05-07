@@ -9,6 +9,10 @@ repository = "https://github.com/UINB-Tech/"
 description = "High performance matching system"
 readme = "README.md"
 
+[[bin]]
+name = "galois"
+path = "bin/galois.rs"
+
 [dependencies.rust_decimal]
 version = "1.7.0"
 features = ["serde-bincode"]
