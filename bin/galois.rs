@@ -12,26 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(type_ascription)]
-#![feature(map_first_last)]
-#![feature(drain_filter)]
-#![allow(clippy::from_over_into)]
-#![allow(clippy::too_many_arguments)]
-#![allow(clippy::wrong_self_convention)]
-#![allow(clippy::map_entry)]
-
-mod assets;
-mod clearing;
-mod config;
-mod core;
-mod db;
-mod event;
-mod matcher;
-mod orderbook;
-mod output;
-mod sequence;
-mod server;
-mod snapshot;
+use galois::{config, event, output, sequence, server, snapshot};
 
 use std::sync::{atomic, mpsc, Arc};
 
