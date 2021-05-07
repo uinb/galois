@@ -2,7 +2,7 @@
 bind_addr = "127.0.0.1:8097"
 
 [mysql]
-url = "mysql://root:lniRil8B1yacpQ8JugOA@localhost:3306/galois"
+url = "mysql://username:password@localhost:3306/galois"
 
 [redis]
 url = "redis://localhost:6379/0"
