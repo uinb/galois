@@ -81,7 +81,7 @@ impl Taker {
         }
     }
 
-    pub fn taker_placed(
+    pub const fn taker_placed(
         user_id: u64,
         order_id: u64,
         price: Decimal,
@@ -98,7 +98,7 @@ impl Taker {
         }
     }
 
-    pub fn cancel(
+    pub const fn cancel(
         user_id: u64,
         order_id: u64,
         price: Decimal,
@@ -126,7 +126,12 @@ pub struct Maker {
 }
 
 impl Maker {
-    pub fn maker_filled(user_id: u64, order_id: u64, price: Decimal, filled: Decimal) -> Self {
+    pub const fn maker_filled(
+        user_id: u64,
+        order_id: u64,
+        price: Decimal,
+        filled: Decimal,
+    ) -> Self {
         Self {
             user_id,
             order_id,
@@ -136,7 +141,12 @@ impl Maker {
         }
     }
 
-    pub fn maker_so_far(user_id: u64, order_id: u64, price: Decimal, filled: Decimal) -> Self {
+    pub const fn maker_so_far(
+        user_id: u64,
+        order_id: u64,
+        price: Decimal,
+        filled: Decimal,
+    ) -> Self {
         Self {
             user_id,
             order_id,

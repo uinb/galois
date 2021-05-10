@@ -24,7 +24,7 @@ use mysql::{prelude::*, *};
 use rust_decimal::{prelude::Zero, Decimal};
 use serde::{Deserialize, Serialize};
 
-use crate::{config::C, core::*, db::DB, event::*, orderbook::AskOrBid};
+use crate::{config::C, core::Symbol, db::DB, event::*, orderbook::AskOrBid};
 
 pub const ASK_LIMIT: u32 = 0;
 pub const BID_LIMIT: u32 = 1;
@@ -58,7 +58,8 @@ pub struct Sequence {
 }
 
 impl Sequence {
-    pub fn rejected(&self) -> bool {
+    #[must_use]
+    pub const fn rejected(&self) -> bool {
         self.status == ERROR
     }
 
@@ -143,7 +144,7 @@ impl Sequence {
         }
     }
 
-    pub fn new_dump_sequence(at: u64, timestamp: u64) -> Self {
+    pub const fn new_dump_sequence(at: u64, timestamp: u64) -> Self {
         Self {
             id: at,
             cmd: Command {
@@ -205,7 +206,7 @@ impl Watch {
         }
     }
 
-    pub fn new_update_depth_watch() -> Self {
+    pub const fn new_update_depth_watch() -> Self {
         Self {
             session: 0,
             req_id: 0,
@@ -232,7 +233,7 @@ impl Watch {
         }
     }
 
-    pub fn new_confirm_watch(from: u64, exclude: u64) -> Self {
+    pub const fn new_confirm_watch(from: u64, exclude: u64) -> Self {
         Self {
             session: 0,
             req_id: 0,
@@ -299,11 +300,13 @@ impl Command {
         Some((self.base?, self.quote?))
     }
 
-    pub fn is_read(&self) -> bool {
+    #[must_use]
+    pub const fn is_read(&self) -> bool {
         matches!(self.cmd, QUERY_ACCOUNTS | QUERY_BALANCE | QUERY_ORDER)
     }
 
     /// ONLY CHECK DATA FORMAT!!!
+    #[must_use]
     pub fn validate(&self) -> bool {
         match self.cmd {
             ASK_LIMIT | BID_LIMIT => match (self.user_id, self.order_id, self.price, self.amount) {
@@ -361,56 +364,53 @@ impl Command {
 
 pub fn init(sender: Sender<Fusion>, id: u64, startup: Arc<AtomicBool>) {
     let mut id = id;
-    let mut counter = 0usize;
+    let mut counter = 0_usize;
     let event_sender = sender.clone();
     thread::spawn(move || loop {
         let seq = fetch_sequence_from(id);
-        match seq.is_empty() {
-            true => {
-                startup.store(true, Ordering::Relaxed);
-                thread::sleep(Duration::from_millis(C.sequence.fetch_intervel_ms));
-            }
-            false => {
-                let from = if id == 0 { 0 } else { id - 1 };
-                for s in seq.into_iter() {
-                    // found break point
-                    if id != s.id {
-                        log::info!("expecting {}, but {} found", id, s.id);
-                        let rs = insert_nop(id);
-                        match rs {
-                            // it means sequence rollback, {id} is void, adjust id = id + 1
-                            Some(true) => {
-                                id += 1;
-                            }
-                            // it means sequence commit, abort current batch and retry
-                            Some(false) => {}
-                            // other error
-                            None => {}
+        if seq.is_empty() {
+            startup.store(true, Ordering::Relaxed);
+            thread::sleep(Duration::from_millis(C.sequence.fetch_intervel_ms));
+        } else {
+            let from = if id == 0 { 0 } else { id - 1 };
+            for s in seq.into_iter() {
+                // found break point
+                if id != s.id {
+                    log::info!("expecting {}, but {} found", id, s.id);
+                    let rs = insert_nop(id);
+                    match rs {
+                        // it means sequence rollback, {id} is void, adjust id = id + 1
+                        Some(true) => {
+                            id += 1;
                         }
-                        break;
+                        // it means sequence commit, abort current batch and retry
+                        Some(false) => {}
+                        // other error
+                        None => {}
                     }
-                    if s.rejected() {
-                        id += 1;
-                        continue;
-                    }
-                    event_sender.send(Fusion::W(s)).unwrap();
-                    counter += 1;
-                    if counter >= C.sequence.checkpoint {
-                        counter = 0;
-                        let t = SystemTime::now()
-                            .duration_since(SystemTime::UNIX_EPOCH)
-                            .unwrap()
-                            .as_secs();
-                        event_sender
-                            .send(Fusion::W(Sequence::new_dump_sequence(id, t)))
-                            .unwrap();
-                    }
-                    id += 1;
+                    break;
                 }
-                event_sender
-                    .send(Fusion::R(Watch::new_confirm_watch(from, id)))
-                    .unwrap();
+                if s.rejected() {
+                    id += 1;
+                    continue;
+                }
+                event_sender.send(Fusion::W(s)).unwrap();
+                counter += 1;
+                if counter >= C.sequence.checkpoint {
+                    counter = 0;
+                    let t = SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs();
+                    event_sender
+                        .send(Fusion::W(Sequence::new_dump_sequence(id, t)))
+                        .unwrap();
+                }
+                id += 1;
             }
+            event_sender
+                .send(Fusion::R(Watch::new_confirm_watch(from, id)))
+                .unwrap();
         }
     });
     thread::spawn(move || loop {
