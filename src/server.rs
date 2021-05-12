@@ -50,6 +50,7 @@ pub struct Message {
 }
 
 impl Message {
+    #[must_use]
     pub fn with_payload(session: u64, req_id: u64, payload: Vec<u8>) -> Self {
         Self {
             session,
@@ -82,13 +83,13 @@ impl Message {
 
 /// header = 0x0316<2bytes payload len><2bytes cheskcum><2bytes flag>
 
-const _MAGIC_N_MASK: u64 = 0x0316000000000000;
-const _PAYLOAD_MASK: u64 = 0x0000ffff00000000;
-const _CHK_SUM_MASK: u64 = 0x00000000ffff0000;
-const _ERR_RSP_MASK: u64 = 0x0000000000000001;
-const _NXT_FRM_MASK: u64 = 0x0000000000000002;
+const _MAGIC_N_MASK: u64 = 0x0316_0000_0000_0000;
+const _PAYLOAD_MASK: u64 = 0x0000_ffff_0000_0000;
+const _CHK_SUM_MASK: u64 = 0x0000_0000_ffff_0000;
+const _ERR_RSP_MASK: u64 = 0x0000_0000_0000_0001;
+const _NXT_FRM_MASK: u64 = 0x0000_0000_0000_0002;
 
-fn check_magic(header: u64) -> bool {
+const fn check_magic(header: u64) -> bool {
     (header & _MAGIC_N_MASK) == _MAGIC_N_MASK
 }
 
@@ -97,11 +98,11 @@ fn get_len(header: u64) -> usize {
 }
 
 #[allow(dead_code)]
-fn get_checksum(header: u64) -> u16 {
+const fn get_checksum(header: u64) -> u16 {
     ((header & _CHK_SUM_MASK) >> 16) as u16
 }
 
-fn has_next_frame(header: u64) -> bool {
+const fn has_next_frame(header: u64) -> bool {
     (header & _NXT_FRM_MASK) == _NXT_FRM_MASK
 }
 
@@ -117,7 +118,7 @@ async fn accept(
 ) -> Result<()> {
     let listener = TcpListener::bind(addr).await?;
     let mut incoming = listener.incoming();
-    let mut session = 0u64;
+    let mut session = 0_u64;
     while let Some(stream) = incoming.next().await {
         if ready.load(Ordering::Relaxed) {
             let stream = stream?;
@@ -186,8 +187,8 @@ async fn read_loop(cmd_acc: Sender<Fusion>, session: u64, stream: Arc<TcpStream>
     let mut stream = &*stream;
     let mut buf = Vec::<u8>::with_capacity(4096);
     loop {
-        let mut header = [0u8; 8];
-        let mut req_id = [0u8; 8];
+        let mut header = [0_u8; 8];
+        let mut req_id = [0_u8; 8];
         if stream.read_exact(&mut header).await.is_err() {
             break;
         }
@@ -199,7 +200,7 @@ async fn read_loop(cmd_acc: Sender<Fusion>, session: u64, stream: Arc<TcpStream>
             break;
         }
         let req_id = u64::from_be_bytes(req_id);
-        let mut tmp = vec![0u8; get_len(header)];
+        let mut tmp = vec![0_u8; get_len(header)];
         if stream.read_exact(&mut tmp).await.is_err() {
             break;
         }

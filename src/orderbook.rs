@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::core::*;
+use crate::core::Symbol;
 use linked_hash_map::LinkedHashMap;
 use rust_decimal::{prelude::Zero, Decimal};
 use serde::{Deserialize, Serialize};
@@ -38,7 +38,7 @@ pub struct Order {
 }
 
 impl Order {
-    pub fn new(id: u64, user: u64, price: Decimal, unfilled: Decimal) -> Self {
+    pub const fn new(id: u64, user: u64, price: Decimal, unfilled: Decimal) -> Self {
         Self {
             id,
             user,
@@ -89,8 +89,8 @@ impl OrderPage {
         })
     }
 
-    pub fn get(&self, order_id: &u64) -> Option<&Order> {
-        self.orders.get(order_id)
+    pub fn get(&self, order_id: u64) -> Option<&Order> {
+        self.orders.get(&order_id)
     }
 }
 
@@ -217,11 +217,11 @@ impl OrderBook {
         let price = self.indices.get(&order_id)?;
         let best_ask = self.get_best_ask()?;
         if *price >= best_ask {
-            self.asks.get(&price).and_then(|page| page.get(&order_id))
+            self.asks.get(price).and_then(|page| page.get(order_id))
         } else {
             let best_bid = self.get_best_bid()?;
             if *price <= best_bid {
-                self.bids.get(&price).and_then(|page| page.get(&order_id))
+                self.bids.get(price).and_then(|page| page.get(order_id))
             } else {
                 None
             }

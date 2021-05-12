@@ -31,7 +31,7 @@ fn main() {
 }
 
 fn print_banner() {
-    let banner = r#"
+    const BANNER: &str = r#"
 
                  **       **
    *******     ******     **               **
@@ -44,5 +44,5 @@ fn print_banner() {
       *    *    ****  *   **      ***      **    ** ***
                                                   ****
 "#;
-    println!("{}", banner);
+    println!("{}", BANNER);
 }

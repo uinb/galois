@@ -73,7 +73,7 @@ pub fn init(sender: Sender<Vec<Output>>, recv: Receiver<Vec<Output>>) {
     });
 }
 
-fn get_max_record(symbol: &Symbol) -> u64 {
+fn get_max_record(symbol: Symbol) -> u64 {
     let sql = format!(
         "SELECT coalesce(MAX(f_event_id), 0) from t_clearing_result_{}_{}",
         symbol.0, symbol.1
@@ -88,7 +88,7 @@ fn get_max_record(symbol: &Symbol) -> u64 {
     id.or(Some(0)).unwrap()
 }
 
-fn flush(symbol: &Symbol, pending: &mut Vec<Output>) {
+fn flush(symbol: Symbol, pending: &mut Vec<Output>) {
     let sql = format!(
         "INSERT IGNORE INTO t_clearing_result_{}_{}(f_event_id,f_order_id,f_user_id,f_status,f_role,f_ask_or_bid,f_price,f_quote,f_base,f_quote_fee,f_base_fee,f_timestamp) VALUES (:event_id,:order_id,:user_id,:state,:role,:ask_or_bid,:price,:quote,:base,:quote_fee,:base_fee,FROM_UNIXTIME(:timestamp))",
         symbol.0, symbol.1
@@ -128,7 +128,7 @@ fn flush(symbol: &Symbol, pending: &mut Vec<Output>) {
 
 fn flush_all(buf: &mut HashMap<Symbol, (u64, Vec<Output>)>) {
     for (symbol, pending) in buf.iter_mut() {
-        flush(symbol, &mut pending.1);
+        flush(*symbol, &mut pending.1);
     }
 }
 
@@ -136,7 +136,7 @@ fn write(mut cr: Vec<Output>, buf: &mut HashMap<Symbol, (u64, Vec<Output>)>) {
     let symbol = cr.first().unwrap().symbol;
     let pending = buf.get_mut(&symbol);
     if pending.is_none() {
-        buf.insert(symbol, (get_max_record(&symbol), cr));
+        buf.insert(symbol, (get_max_record(symbol), cr));
         return;
     }
     let pending = pending.unwrap();
@@ -147,6 +147,6 @@ fn write(mut cr: Vec<Output>, buf: &mut HashMap<Symbol, (u64, Vec<Output>)>) {
     pending.0 = prepare_write_event_id;
     pending.1.append(&mut cr);
     if pending.1.len() >= 100 {
-        flush(&symbol, &mut pending.1);
+        flush(symbol, &mut pending.1);
     }
 }

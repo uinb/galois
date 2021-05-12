@@ -14,7 +14,7 @@
 
 use crate::config;
 use lazy_static::lazy_static;
-use mysql::*;
+use mysql::Pool;
 use redis::Client;
 
 lazy_static! {

@@ -88,7 +88,7 @@ pub enum Inspection {
 fn handle_limit(
     event_id: u64,
     data: &mut Data,
-    symbol: &Symbol,
+    symbol: Symbol,
     price: Decimal,
     amount: Decimal,
     user: u64,
@@ -97,7 +97,7 @@ fn handle_limit(
     time: u64,
     sender: &Sender<Vec<output::Output>>,
 ) -> bool {
-    let orderbook = data.orderbooks.get_mut(symbol);
+    let orderbook = data.orderbooks.get_mut(&symbol);
     let account = data.accounts.get_mut(&user);
     match (orderbook, account) {
         (Some(orderbook), Some(account)) => {
@@ -140,7 +140,7 @@ fn handle_limit(
                 let cr = clearing::clear(
                     &mut data.accounts,
                     event_id,
-                    symbol,
+                    &symbol,
                     orderbook.taker_fee,
                     orderbook.maker_fee,
                     &mr,
@@ -206,7 +206,7 @@ fn handle_event(
     match event {
         Event::Limit(id, symbol, user, order, price, amount, ask_or_bid, time) => {
             let ok = handle_limit(
-                id, data, &symbol, price, amount, user, order, ask_or_bid, time, &sender,
+                id, data, symbol, price, amount, user, order, ask_or_bid, time, sender,
             );
             (id, ok)
         }
@@ -359,7 +359,7 @@ fn handle_event(
             None => (id, false),
         },
         Event::Dump(id, time) => {
-            snapshot::dump(id, time, &data);
+            snapshot::dump(id, time, data);
             // tricky way, return u64::MAX to update nothing
             (u64::MAX, true)
         }
