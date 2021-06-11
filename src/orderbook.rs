@@ -205,6 +205,16 @@ impl OrderBook {
         }
     }
 
+    pub fn get_best_tape(
+        &mut self,
+        ask_or_bid: AskOrBid,
+    ) -> Option<OccupiedEntry<Decimal, OrderPage>> {
+        match ask_or_bid {
+            AskOrBid::Bid => self.bids.last_entry(),
+            AskOrBid::Ask => self.asks.first_entry(),
+        }
+    }
+
     pub fn get_best_ask(&self) -> Option<Decimal> {
         self.asks.first_key_value().map(|(price, _)| *price)
     }
@@ -238,3 +248,4 @@ pub fn test_scale() {
     amount.rescale(2);
     assert_eq!("0.00", amount.to_string());
 }
+

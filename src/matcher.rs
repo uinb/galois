@@ -67,10 +67,20 @@ pub struct Taker {
     pub unfilled: Decimal,
     pub ask_or_bid: AskOrBid,
     pub state: State,
+
+    pub best_size: Decimal,
+    pub best_price: Decimal,
 }
 
 impl Taker {
-    pub fn taker_filled(user_id: u64, order_id: u64, price: Decimal, ask_or_bid: AskOrBid) -> Self {
+    pub fn taker_filled(
+        user_id: u64,
+        order_id: u64,
+        price: Decimal,
+        ask_or_bid: AskOrBid,
+        best_size: Decimal,
+        best_price: Decimal,
+    ) -> Self {
         Self {
             user_id,
             order_id,
@@ -78,6 +88,8 @@ impl Taker {
             unfilled: Decimal::zero(),
             ask_or_bid,
             state: State::Filled,
+            best_size,
+            best_price,
         }
     }
 
@@ -87,6 +99,8 @@ impl Taker {
         price: Decimal,
         unfilled: Decimal,
         ask_or_bid: AskOrBid,
+        best_size: Decimal,
+        best_price: Decimal,
     ) -> Self {
         Self {
             user_id,
@@ -95,6 +109,8 @@ impl Taker {
             unfilled,
             ask_or_bid,
             state: State::PartialFilled,
+            best_size,
+            best_price,
         }
     }
 
@@ -104,6 +120,8 @@ impl Taker {
         price: Decimal,
         unfilled: Decimal,
         ask_or_bid: AskOrBid,
+        best_size: Decimal,
+        best_price: Decimal,
     ) -> Self {
         Self {
             user_id,
@@ -112,6 +130,8 @@ impl Taker {
             unfilled,
             ask_or_bid,
             state: State::Canceled,
+            best_size,
+            best_price,
         }
     }
 }
@@ -123,6 +143,9 @@ pub struct Maker {
     pub price: Decimal,
     pub filled: Decimal,
     pub state: State,
+
+    pub best_size: Decimal,
+    pub best_price: Decimal,
 }
 
 impl Maker {
@@ -131,6 +154,8 @@ impl Maker {
         order_id: u64,
         price: Decimal,
         filled: Decimal,
+        best_size: Decimal,
+        best_price: Decimal,
     ) -> Self {
         Self {
             user_id,
@@ -138,6 +163,8 @@ impl Maker {
             price,
             filled,
             state: State::Filled,
+            best_size,
+            best_price,
         }
     }
 
@@ -146,6 +173,8 @@ impl Maker {
         order_id: u64,
         price: Decimal,
         filled: Decimal,
+        best_size: Decimal,
+        best_price: Decimal,
     ) -> Self {
         Self {
             user_id,
@@ -153,6 +182,8 @@ impl Maker {
             price,
             filled,
             state: State::PartialFilled,
+            best_size,
+            best_price,
         }
     }
 }
@@ -183,10 +214,11 @@ pub fn execute_limit(
     let mut unfilled = amount;
     loop {
         if unfilled == Decimal::zero() {
+            let tape = get_best_tape(book, ask_or_bid);
             return match !makers.is_empty() {
                 true => Some(Match {
                     maker: makers,
-                    taker: Taker::taker_filled(user_id, order_id, price, ask_or_bid),
+                    taker: Taker::taker_filled(user_id, order_id, price, ask_or_bid, tape.0, tape.1),
                 }),
                 false => None,
             };
@@ -195,10 +227,11 @@ pub fn execute_limit(
             if !can_trade(*best.key(), price, ask_or_bid) {
                 let order = Order::new(order_id, user_id, price, unfilled);
                 book.insert(order, ask_or_bid);
+                let tape = get_best_tape(book, ask_or_bid);
                 return match !makers.is_empty() {
                     true => Some(Match {
                         maker: makers,
-                        taker: Taker::taker_placed(user_id, order_id, price, unfilled, ask_or_bid),
+                        taker: Taker::taker_placed(user_id, order_id, price, unfilled, ask_or_bid, tape.0, tape.1),
                     }),
                     false => None,
                 };
@@ -207,6 +240,10 @@ pub fn execute_limit(
             let (remain, mut v) = take(page, unfilled);
             if page.is_empty() {
                 best.remove();
+                let last_maker = v.last_mut().unwrap();
+                let tape = get_best_tape(book, ask_or_bid);
+                last_maker.best_size = tape.0;
+                last_maker.best_price = tape.1;
             }
             v.iter().filter(|m| m.state == State::Filled).for_each(|m| {
                 book.indices.remove(&m.order_id);
@@ -216,14 +253,22 @@ pub fn execute_limit(
         } else {
             let order = Order::new(order_id, user_id, price, unfilled);
             book.insert(order, ask_or_bid);
+            let tape = get_best_tape(book, ask_or_bid);
             return match !makers.is_empty() {
                 true => Some(Match {
                     maker: makers,
-                    taker: Taker::taker_placed(user_id, order_id, price, unfilled, ask_or_bid),
+                    taker: Taker::taker_placed(user_id, order_id, price, unfilled, ask_or_bid, tape.0, tape.1),
                 }),
                 false => None,
             };
         }
+    }
+}
+
+fn get_best_tape(book: &mut OrderBook, ask_or_bid: AskOrBid) -> (Decimal, Decimal) {
+    match book.get_best_tape(ask_or_bid) {
+        Some(best) => (best.get().amount, best.get().price, ),
+        _ => (Decimal::ZERO, Decimal::ZERO),
     }
 }
 
@@ -233,27 +278,31 @@ fn take(page: &mut OrderPage, mut taker: Decimal) -> (Decimal, Vec<Maker>) {
         let mut oldest = page.orders.entries().next().unwrap();
         if taker >= oldest.get().unfilled {
             let maker = oldest.get();
+            taker -= maker.unfilled;
+            page.amount -= maker.unfilled;
             matches.push(Maker::maker_filled(
                 maker.user,
                 maker.id,
                 maker.price,
                 maker.unfilled,
+                page.amount,
+                page.price,
             ));
-            taker -= maker.unfilled;
-            page.amount -= maker.unfilled;
             oldest.remove();
             continue;
         }
         let maker = oldest.get_mut();
+        maker.unfilled -= taker;
+        page.amount -= taker;
+        taker = Decimal::zero();
         matches.push(Maker::maker_so_far(
             maker.user,
             maker.id,
             maker.price,
             taker,
+            page.amount,
+            page.price,
         ));
-        maker.unfilled -= taker;
-        page.amount -= taker;
-        taker = Decimal::zero();
     }
     (taker, matches)
 }
@@ -267,32 +316,27 @@ fn can_trade(best_price: Decimal, taker_price: Decimal, ask_or_bid: AskOrBid) ->
 
 pub fn cancel(book: &mut OrderBook, order_id: u64) -> Option<Match> {
     let price = book.indices.remove(&order_id)?;
-    let (from, removed) = match (book.get_best_ask(), book.get_best_bid()) {
-        (Some(best_ask), _) => {
-            if price >= best_ask {
-                (
-                    AskOrBid::Ask,
-                    OrderBook::remove_from_tape(&mut book.asks, order_id, price),
-                )
-            } else {
-                (
-                    AskOrBid::Bid,
-                    OrderBook::remove_from_tape(&mut book.bids, order_id, price),
-                )
-            }
-        }
-        (None, Some(best_bid)) => {
-            (
-                AskOrBid::Bid,
-                OrderBook::remove_from_tape(&mut book.bids, order_id, price),
-            )
-        }
-        _ => None,
+    let best_ask = book.get_best_ask();
+    let best_bid = book.get_best_bid();
+    if best_ask.is_none() && best_bid.is_none() {
+        return None;
+    }
+    let (from, removed) = if best_ask.is_some() && price >= best_ask.unwrap() {
+        (
+            AskOrBid::Ask,
+            OrderBook::remove_from_tape(&mut book.asks, order_id, price),
+        )
+    } else {
+        (
+            AskOrBid::Bid,
+            OrderBook::remove_from_tape(&mut book.bids, order_id, price),
+        )
     };
 
+    let tape = get_best_tape(book, from);
     removed.map(|order| Match {
         maker: vec![],
-        taker: Taker::cancel(order.user, order_id, order.price, order.unfilled, from),
+        taker: Taker::cancel(order.user, order_id, order.price, order.unfilled, from, tape.0, tape.1),
     })
 }
 
