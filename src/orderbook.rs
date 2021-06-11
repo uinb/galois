@@ -206,7 +206,7 @@ impl OrderBook {
     }
 
     pub fn get_best_ask(&self) -> Option<Decimal> {
-        self.asks.last_key_value().map(|(price, _)| *price)
+        self.asks.first_key_value().map(|(price, _)| *price)
     }
 
     pub fn get_best_bid(&self) -> Option<Decimal> {
