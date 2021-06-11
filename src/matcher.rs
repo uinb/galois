@@ -267,9 +267,9 @@ fn can_trade(best_price: Decimal, taker_price: Decimal, ask_or_bid: AskOrBid) ->
 
 pub fn cancel(book: &mut OrderBook, order_id: u64) -> Option<Match> {
     let price = book.indices.remove(&order_id)?;
-    match (book.get_best_ask(), book.get_best_bid()) {
+    let (from, removed) = match (book.get_best_ask(), book.get_best_bid()) {
         (Some(best_ask), _) => {
-            let (from, removed) = if price >= best_ask {
+            if price >= best_ask {
                 (
                     AskOrBid::Ask,
                     OrderBook::remove_from_tape(&mut book.asks, order_id, price),
@@ -279,14 +279,21 @@ pub fn cancel(book: &mut OrderBook, order_id: u64) -> Option<Match> {
                     AskOrBid::Bid,
                     OrderBook::remove_from_tape(&mut book.bids, order_id, price),
                 )
-            };
-            removed.map(|order| Match {
-                maker: vec![],
-                taker: Taker::cancel(order.user, order_id, order.price, order.unfilled, from),
-            })
+            }
+        }
+        (None, Some(best_bid)) => {
+            (
+                AskOrBid::Bid,
+                OrderBook::remove_from_tape(&mut book.bids, order_id, price),
+            )
         }
         _ => None,
-    }
+    };
+
+    removed.map(|order| Match {
+        maker: vec![],
+        taker: Taker::cancel(order.user, order_id, order.price, order.unfilled, from),
+    })
 }
 
 #[cfg(test)]
