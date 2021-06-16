@@ -238,6 +238,7 @@ pub fn execute_limit(
             }
             let page = best.get_mut();
             let (remain, mut v) = take(page, unfilled);
+
             if page.is_empty() {
                 best.remove();
                 let last_maker = v.last_mut().unwrap();
@@ -294,7 +295,6 @@ fn take(page: &mut OrderPage, mut taker: Decimal) -> (Decimal, Vec<Maker>) {
         let maker = oldest.get_mut();
         maker.unfilled -= taker;
         page.amount -= taker;
-        taker = Decimal::zero();
         matches.push(Maker::maker_so_far(
             maker.user,
             maker.id,
@@ -303,6 +303,7 @@ fn take(page: &mut OrderPage, mut taker: Decimal) -> (Decimal, Vec<Maker>) {
             page.amount,
             page.price,
         ));
+        taker = Decimal::zero();
     }
     (taker, matches)
 }
@@ -344,6 +345,7 @@ pub fn cancel(book: &mut OrderBook, order_id: u64) -> Option<Match> {
 mod test {
     use crate::{matcher::*, orderbook::*};
     use std::str::FromStr;
+    use rust_decimal::Decimal;
 
     #[test]
     pub fn test_trade() {
@@ -404,6 +406,8 @@ mod test {
                 1001,
                 Decimal::from_str("0.1").unwrap(),
                 Decimal::from_str("100").unwrap(),
+                Decimal::from_str("1000").unwrap(),
+                Decimal::from_str("0.1").unwrap(),
             ),
             mr.maker.first().unwrap()
         );
@@ -413,10 +417,12 @@ mod test {
                 1002,
                 Decimal::from_str("0.1").unwrap(),
                 Decimal::from_str("100").unwrap(),
+                Decimal::from_str("900").unwrap(),
+                Decimal::from_str("0.1").unwrap(),
             ),
             mr.maker.get(1).unwrap()
         );
-        assert_eq!(Taker::taker_filled(1, 1003, price, AskOrBid::Ask), mr.taker);
+        assert_eq!(Taker::taker_filled(1, 1003, price, AskOrBid::Ask, Decimal::ZERO, Decimal::ZERO), mr.taker);
         assert_eq!(
             Decimal::from_str("0.1").unwrap(),
             *book.get_best_match(AskOrBid::Ask).unwrap().key()
@@ -444,7 +450,7 @@ mod test {
         let price = Decimal::from_str("0.1").unwrap();
         let unfilled = Decimal::from_str("900").unwrap();
         assert_eq!(
-            Taker::cancel(1, 1002, price, unfilled, AskOrBid::Bid),
+            Taker::cancel(1, 1002, price, unfilled, AskOrBid::Bid, Decimal::ZERO, Decimal::ZERO),
             mr.taker
         );
         assert_eq!(false, book.indices.contains_key(&1002));
@@ -454,7 +460,7 @@ mod test {
         let unfilled = Decimal::from_str("100").unwrap();
         let mr = cancel(&mut book, 1004).unwrap();
         assert_eq!(
-            Taker::cancel(1, 1004, price, unfilled, AskOrBid::Ask),
+            Taker::cancel(1, 1004, price, unfilled, AskOrBid::Ask, Decimal::ZERO, Decimal::ZERO),
             mr.taker
         );
         assert_eq!(false, book.indices.contains_key(&1004));

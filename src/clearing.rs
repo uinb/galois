@@ -348,8 +348,10 @@ pub mod test {
                 1,
                 Decimal::from_str("9999").unwrap(),
                 Decimal::from_str("1").unwrap(),
+                Decimal::ZERO,
+                Decimal::ZERO,
             )],
-            taker: Taker::taker_filled(1, 2, Decimal::from_str("10000").unwrap(), AskOrBid::Bid),
+            taker: Taker::taker_filled(1, 2, Decimal::from_str("10000").unwrap(), AskOrBid::Bid, Decimal::ZERO, Decimal::ZERO),
         };
         super::clear(
             &mut accounts,
@@ -429,8 +431,10 @@ pub mod test {
                 1,
                 Decimal::from_str("10000").unwrap(),
                 Decimal::from_str("1").unwrap(),
+                Decimal::ZERO,
+                Decimal::ZERO,
             )],
-            taker: Taker::taker_filled(2, 2, Decimal::from_str("9999").unwrap(), AskOrBid::Ask),
+            taker: Taker::taker_filled(2, 2, Decimal::from_str("9999").unwrap(), AskOrBid::Ask, Decimal::ZERO, Decimal::ZERO),
         };
         super::clear(
             &mut accounts,
@@ -492,8 +496,10 @@ pub mod test {
                 1,
                 Decimal::from_str("10000").unwrap(),
                 Decimal::from_str("0.5").unwrap(),
+                Decimal::ZERO,
+                Decimal::ZERO,
             )],
-            taker: Taker::taker_filled(2, 2, Decimal::from_str("9999").unwrap(), AskOrBid::Ask),
+            taker: Taker::taker_filled(2, 2, Decimal::from_str("9999").unwrap(), AskOrBid::Ask, Decimal::ZERO, Decimal::ZERO),
         };
         super::clear(
             &mut accounts,
@@ -545,6 +551,8 @@ pub mod test {
                 Decimal::from_str("10000").unwrap(),
                 Decimal::from_str("0.5").unwrap(),
                 AskOrBid::Bid,
+                Decimal::ZERO,
+                Decimal::ZERO,
             ),
         };
         super::clear(
@@ -590,6 +598,8 @@ pub mod test {
                 1,
                 Decimal::from_str("10000").unwrap(),
                 Decimal::from_str("1").unwrap(),
+                Decimal::ZERO,
+                Decimal::ZERO,
             )],
             taker: Taker::taker_placed(
                 2,
@@ -597,6 +607,8 @@ pub mod test {
                 Decimal::from_str("9999").unwrap(),
                 Decimal::from_str("0.5").unwrap(),
                 AskOrBid::Ask,
+                Decimal::ZERO,
+                Decimal::ZERO,
             ),
         };
         super::clear(
@@ -649,6 +661,8 @@ pub mod test {
                 Decimal::from_str("9999").unwrap(),
                 Decimal::from_str("0.5").unwrap(),
                 AskOrBid::Ask,
+                Decimal::ZERO,
+                Decimal::ZERO,
             ),
         };
         super::clear(
@@ -695,8 +709,10 @@ pub mod test {
                 1,
                 Decimal::from_str("10000").unwrap(),
                 Decimal::from_str("1").unwrap(),
+                Decimal::ZERO,
+                Decimal::ZERO,
             )],
-            taker: Taker::taker_filled(2, 2, Decimal::from_str("9999").unwrap(), AskOrBid::Ask),
+            taker: Taker::taker_filled(2, 2, Decimal::from_str("9999").unwrap(), AskOrBid::Ask, Decimal::ZERO, Decimal::ZERO),
         };
         super::clear(
             &mut accounts,
@@ -759,8 +775,10 @@ pub mod test {
                 1,
                 Decimal::from_str("10000").unwrap(),
                 Decimal::from_str("1").unwrap(),
+                Decimal::ZERO,
+                Decimal::ZERO,
             )],
-            taker: Taker::taker_filled(2, 2, Decimal::from_str("9999").unwrap(), AskOrBid::Ask),
+            taker: Taker::taker_filled(2, 2, Decimal::from_str("9999").unwrap(), AskOrBid::Ask, Decimal::ZERO, Decimal::ZERO),
         };
         super::clear(
             &mut accounts,
@@ -825,8 +843,10 @@ pub mod test {
                 1,
                 Decimal::from_str("10000").unwrap(),
                 Decimal::from_str("1").unwrap(),
+                Decimal::ZERO,
+                Decimal::ZERO,
             )],
-            taker: Taker::taker_filled(2, 2, Decimal::from_str("9999").unwrap(), AskOrBid::Ask),
+            taker: Taker::taker_filled(2, 2, Decimal::from_str("9999").unwrap(), AskOrBid::Ask, Decimal::ZERO, Decimal::ZERO),
         };
 
         super::clear(

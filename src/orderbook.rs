@@ -249,3 +249,29 @@ pub fn test_scale() {
     assert_eq!("0.00", amount.to_string());
 }
 
+
+#[cfg(test)]
+mod test {
+    use crate::orderbook::{OrderBook, Order, AskOrBid};
+    use rust_decimal::Decimal;
+    use rust_decimal::prelude::FromStr;
+
+    #[test]
+    pub fn test_best_price() {
+        let mut book = OrderBook::new(1, 1, Decimal::ZERO, Decimal::ZERO, Decimal::ZERO, Decimal::ZERO, false);
+        let ask_order_1 = Order::new(1, 1, Decimal::new(12, 1), Decimal::new(11, 1));
+        book.insert(ask_order_1, AskOrBid::Ask);
+        let ask_order_2 = Order::new(2, 1, Decimal::new(15, 1), Decimal::new(11, 1));
+        book.insert(ask_order_2, AskOrBid::Ask);
+        let best_ask_price = book.get_best_ask().unwrap();
+        assert_eq!(best_ask_price, Decimal::new(12, 1));
+        let bid_order_1 = Order::new(3, 1, Decimal::from_str("8.2").unwrap(), Decimal::from_str("10").unwrap());
+        book.insert(bid_order_1, AskOrBid::Bid);
+        let bid_order_2 = Order::new(4, 1, Decimal::from_str("9.2").unwrap(), Decimal::from_str("10").unwrap());
+        book.insert(bid_order_2, AskOrBid::Bid);
+        let best_bid_price = book.get_best_bid().unwrap();
+        assert_eq!(best_bid_price, Decimal::from_str("9.2").unwrap());
+    }
+}
+
+
