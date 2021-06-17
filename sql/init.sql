@@ -19,6 +19,12 @@ CREATE TABLE `t_clearing_result` (
   `f_base` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
   `f_quote_fee` varchar(18) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
   `f_base_fee` varchar(18) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+  `best_size` varchar(20)CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+  `best_price`varchar(20)CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+  `base_available`varchar(20)CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+  `base_frozen`varchar(20)CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+  `quote_available`varchar(20)CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+  `quote_frozen`varchar(20)CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
   `f_timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`f_id`),
   UNIQUE KEY `f_event_id` (`f_event_id`,`f_order_id`)

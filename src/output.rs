@@ -38,6 +38,13 @@ pub struct Output {
     pub quote_fee: Decimal,
     pub base_fee: Decimal,
     pub timestamp: u64,
+
+    pub best_size: Decimal,
+    pub best_price: Decimal,
+    pub base_available: Decimal,
+    pub base_frozen: Decimal,
+    pub quote_available: Decimal,
+    pub quote_frozen: Decimal,
 }
 
 pub fn write_depth(depth: Vec<Depth>) {
@@ -90,7 +97,7 @@ fn get_max_record(symbol: Symbol) -> u64 {
 
 fn flush(symbol: Symbol, pending: &mut Vec<Output>) {
     let sql = format!(
-        "INSERT IGNORE INTO t_clearing_result_{}_{}(f_event_id,f_order_id,f_user_id,f_status,f_role,f_ask_or_bid,f_price,f_quote,f_base,f_quote_fee,f_base_fee,f_timestamp) VALUES (:event_id,:order_id,:user_id,:state,:role,:ask_or_bid,:price,:quote,:base,:quote_fee,:base_fee,FROM_UNIXTIME(:timestamp))",
+        "INSERT IGNORE INTO t_clearing_result_{}_{}(f_event_id,f_order_id,f_user_id,f_status,f_role,f_ask_or_bid,f_price,f_quote,f_base,f_quote_fee,f_base_fee,f_timestamp,best_size,best_price,base_available,base_frozen,quote_available,quote_frozen) VALUES (:event_id,:order_id,:user_id,:state,:role,:ask_or_bid,:price,:quote,:base,:quote_fee,:base_fee,FROM_UNIXTIME(:timestamp),:best_size,:best_price,:base_available,:base_frozen,:quote_available,:quote_frozen)",
         symbol.0, symbol.1
     );
     let conn = DB.get_conn();
@@ -115,6 +122,12 @@ fn flush(symbol: Symbol, pending: &mut Vec<Output>) {
                 "quote_fee" => p.quote_fee,
                 "base_fee" => p.base_fee,
                 "timestamp" => p.timestamp,
+                "best_size" => p.best_size,
+                "best_price" => p.best_price,
+                "base_available" => p.base_available,
+                "base_frozen" => p.base_frozen,
+                "quote_available" => p.quote_available,
+                "quote_frozen" => p.quote_frozen
             }
         }),
     );

@@ -20,6 +20,7 @@ use crate::{
     output::Output,
 };
 use rust_decimal::{prelude::Zero, Decimal};
+use crate::assets::Account;
 
 pub fn clear(
     accounts: &mut Accounts,
@@ -32,12 +33,16 @@ pub fn clear(
 ) -> Vec<Output> {
     let base = symbol.0;
     let quote = symbol.1;
+    let default_account = Account { available: Decimal::ZERO, frozen: Decimal::ZERO };
     match mr.maker.is_empty() {
         // cancel
         true => match mr.taker.ask_or_bid {
             AskOrBid::Ask => {
                 // revert base
-                assets::unfreeze(accounts, mr.taker.user_id, base, mr.taker.unfilled);
+                let user_id = mr.taker.user_id;
+                assets::unfreeze(accounts, user_id, base, mr.taker.unfilled);
+                let base_account = assets::get(accounts, user_id, base).unwrap_or(&default_account);
+                let quote_account = assets::get(accounts, user_id, quote).unwrap_or(&default_account);
                 vec![Output {
                     event_id,
                     order_id: mr.taker.order_id,
@@ -52,16 +57,25 @@ pub fn clear(
                     base_fee: Decimal::zero(),
                     quote_fee: Decimal::zero(),
                     timestamp: time,
+                    best_size: mr.taker.best_size,
+                    best_price: mr.taker.best_price,
+                    base_available: base_account.available,
+                    base_frozen: base_account.frozen,
+                    quote_available: quote_account.available,
+                    quote_frozen: quote_account.frozen,
                 }]
             }
             AskOrBid::Bid => {
+                let user_id = mr.taker.user_id;
                 // revert quote
                 assets::unfreeze(
                     accounts,
-                    mr.taker.user_id,
+                    user_id,
                     quote,
                     mr.taker.unfilled * mr.taker.price,
                 );
+                let base_account = assets::get(accounts, user_id, base).unwrap_or(&default_account);
+                let quote_account = assets::get(accounts, user_id, quote).unwrap_or(&default_account);
                 vec![Output {
                     event_id,
                     order_id: mr.taker.order_id,
@@ -76,6 +90,12 @@ pub fn clear(
                     base_fee: Decimal::zero(),
                     quote_fee: Decimal::zero(),
                     timestamp: time,
+                    best_size: mr.taker.best_size,
+                    best_price: mr.taker.best_price,
+                    base_available: base_account.available,
+                    base_frozen: base_account.frozen,
+                    quote_available: quote_account.available,
+                    quote_frozen: quote_account.frozen,
                 }]
             }
         },
@@ -101,6 +121,8 @@ pub fn clear(
                             let charge_fee = m.filled * maker_fee;
                             assets::deduct_available(accounts, m.user_id, base, charge_fee);
                             assets::add_to_available(accounts, SYSTEM, base, charge_fee);
+                            let base_account = assets::get(accounts, m.user_id, base).unwrap_or(&default_account);
+                            let quote_account = assets::get(accounts, m.user_id, quote).unwrap_or(&default_account);
                             cr.push(Output {
                                 event_id,
                                 order_id: m.order_id,
@@ -115,6 +137,12 @@ pub fn clear(
                                 base_fee: -charge_fee,
                                 quote_fee: Decimal::zero(),
                                 timestamp: time,
+                                best_size: m.best_size,
+                                best_price: m.best_price,
+                                base_available: base_account.available,
+                                base_frozen: base_account.frozen,
+                                quote_available: quote_account.available,
+                                quote_frozen: quote_account.frozen,
                             });
                         } else {
                             // maker_fee is negative
@@ -127,6 +155,8 @@ pub fn clear(
                                 quote,
                                 quote_decr * maker_fee.abs(),
                             );
+                            let base_account = assets::get(accounts, m.user_id, base).unwrap_or(&default_account);
+                            let quote_account = assets::get(accounts, m.user_id, quote).unwrap_or(&default_account);
                             cr.push(Output {
                                 event_id,
                                 order_id: m.order_id,
@@ -141,6 +171,12 @@ pub fn clear(
                                 base_fee: Decimal::zero(),
                                 quote_fee: quote_decr * maker_fee.abs(),
                                 timestamp: time,
+                                best_size: m.best_size,
+                                best_price: m.best_price,
+                                base_available: base_account.available,
+                                base_frozen: base_account.frozen,
+                                quote_available: quote_account.available,
+                                quote_frozen: quote_account.frozen,
                             });
                         }
                     }
@@ -166,6 +202,9 @@ pub fn clear(
                             quote_sum * (taker_fee - maker_fee.abs()),
                         );
                     }
+
+                    let base_account = assets::get(accounts, mr.taker.user_id, base).unwrap_or(&default_account);
+                    let quote_account = assets::get(accounts, mr.taker.user_id, quote).unwrap_or(&default_account);
                     cr.push(Output {
                         event_id,
                         order_id: mr.taker.order_id,
@@ -180,6 +219,12 @@ pub fn clear(
                         base_fee: Decimal::zero(),
                         quote_fee: -charge_fee,
                         timestamp: time,
+                        best_size: mr.taker.best_size,
+                        best_price: mr.taker.best_price,
+                        base_available: base_account.available,
+                        base_frozen: base_account.frozen,
+                        quote_available: quote_account.available,
+                        quote_frozen: quote_account.frozen,
                     });
                     cr
                     // maker has the dealing right
@@ -208,6 +253,8 @@ pub fn clear(
                             let charge_fee = quote_incr * maker_fee;
                             assets::deduct_available(accounts, m.user_id, quote, charge_fee);
                             assets::add_to_available(accounts, SYSTEM, quote, charge_fee);
+                            let base_account = assets::get(accounts, m.user_id, base).unwrap_or(&default_account);
+                            let quote_account = assets::get(accounts, m.user_id, quote).unwrap_or(&default_account);
                             cr.push(Output {
                                 event_id,
                                 order_id: m.order_id,
@@ -222,6 +269,12 @@ pub fn clear(
                                 base_fee: Decimal::zero(),
                                 quote_fee: -charge_fee,
                                 timestamp: time,
+                                best_size: m.best_size,
+                                best_price: m.best_price,
+                                base_available: base_account.available,
+                                base_frozen: base_account.frozen,
+                                quote_available: quote_account.available,
+                                quote_frozen: quote_account.frozen,
                             });
                         } else {
                             // maker_fee is negative
@@ -233,6 +286,8 @@ pub fn clear(
                                 base,
                                 m.filled * maker_fee.abs(),
                             );
+                            let base_account = assets::get(accounts, m.user_id, base).unwrap_or(&default_account);
+                            let quote_account = assets::get(accounts, m.user_id, quote).unwrap_or(&default_account);
                             cr.push(Output {
                                 event_id,
                                 order_id: m.order_id,
@@ -247,6 +302,12 @@ pub fn clear(
                                 base_fee: m.filled * maker_fee.abs(),
                                 quote_fee: Decimal::zero(),
                                 timestamp: time,
+                                best_size: m.best_size,
+                                best_price: m.best_price,
+                                base_available: base_account.available,
+                                base_frozen: base_account.frozen,
+                                quote_available: quote_account.available,
+                                quote_frozen: quote_account.frozen,
                             });
                         }
                     }
@@ -283,6 +344,9 @@ pub fn clear(
                     if return_quote > Decimal::zero() {
                         assets::unfreeze(accounts, mr.taker.user_id, quote, return_quote);
                     }
+
+                    let base_account = assets::get(accounts, mr.taker.user_id, base).unwrap_or(&default_account);
+                    let quote_account = assets::get(accounts, mr.taker.user_id, quote).unwrap_or(&default_account);
                     cr.push(Output {
                         event_id,
                         order_id: mr.taker.order_id,
@@ -297,6 +361,12 @@ pub fn clear(
                         base_fee: -charge_fee,
                         quote_fee: Decimal::zero(),
                         timestamp: time,
+                        best_size: mr.taker.best_size,
+                        best_price: mr.taker.best_price,
+                        base_available: base_account.available,
+                        base_frozen: base_account.frozen,
+                        quote_available: quote_account.available,
+                        quote_frozen: quote_account.frozen,
                     });
                     cr
                 }
