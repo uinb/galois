@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::{
+    str::FromStr,
     sync::atomic::{AtomicBool, Ordering},
     sync::mpsc::Sender,
     sync::Arc,
@@ -24,7 +25,7 @@ use mysql::{prelude::*, *};
 use rust_decimal::{prelude::Zero, Decimal};
 use serde::{Deserialize, Serialize};
 
-use crate::{config::C, core::Symbol, db::DB, event::*, orderbook::AskOrBid};
+use crate::{config::C, core::*, db::DB, event::*, orderbook::AskOrBid};
 
 pub const ASK_LIMIT: u32 = 0;
 pub const BID_LIMIT: u32 = 1;
@@ -68,7 +69,7 @@ impl Sequence {
             ASK_LIMIT => Some(Event::Limit(
                 self.id,
                 self.cmd.symbol()?,
-                self.cmd.user_id?,
+                UserId::from_str(self.cmd.user_id.as_ref()?).ok()?,
                 self.cmd.order_id?,
                 self.cmd.price?,
                 self.cmd.amount?,
@@ -78,7 +79,7 @@ impl Sequence {
             BID_LIMIT => Some(Event::Limit(
                 self.id,
                 self.cmd.symbol()?,
-                self.cmd.user_id?,
+                UserId::from_str(self.cmd.user_id.as_ref()?).ok()?,
                 self.cmd.order_id?,
                 self.cmd.price?,
                 self.cmd.amount?,
@@ -88,7 +89,7 @@ impl Sequence {
             CANCEL => Some(Event::Cancel(
                 self.id,
                 self.cmd.symbol()?,
-                self.cmd.user_id?,
+                UserId::from_str(self.cmd.user_id.as_ref()?).ok()?,
                 self.cmd.order_id?,
                 self.timestamp,
             )),
@@ -103,14 +104,14 @@ impl Sequence {
             CLOSE_ALL => Some(Event::CloseAll(self.id, self.timestamp)),
             TRANSFER_OUT => Some(Event::TransferOut(
                 self.id,
-                self.cmd.user_id?,
+                UserId::from_str(self.cmd.user_id.as_ref()?).ok()?,
                 self.cmd.currency?,
                 self.cmd.amount?,
                 self.timestamp,
             )),
             TRANSFER_IN => Some(Event::TransferIn(
                 self.id,
-                self.cmd.user_id?,
+                UserId::from_str(self.cmd.user_id.as_ref()?).ok()?,
                 self.cmd.currency?,
                 self.cmd.amount?,
                 self.timestamp,
@@ -190,13 +191,13 @@ impl Watch {
                 self.req_id,
             )),
             QUERY_BALANCE => Some(Inspection::QueryBalance(
-                self.cmd.user_id?,
+                UserId::from_str(self.cmd.user_id.as_ref()?).ok()?,
                 self.cmd.currency?,
                 self.session,
                 self.req_id,
             )),
             QUERY_ACCOUNTS => Some(Inspection::QueryAccounts(
-                self.cmd.user_id?,
+                UserId::from_str(self.cmd.user_id.as_ref()?).ok()?,
                 self.session,
                 self.req_id,
             )),
@@ -265,19 +266,20 @@ impl Watch {
 pub struct Command {
     pub cmd: u32,
     order_id: Option<u64>,
-    pub(crate) user_id: Option<u64>,
+    // TODO
+    pub(crate) user_id: Option<String>,
     base: Option<u32>,
     quote: Option<u32>,
     pub(crate) currency: Option<u32>,
     vol: Option<Decimal>,
-    pub(crate) amount: Option<Decimal>,
-    price: Option<Decimal>,
+    pub(crate) amount: Option<Amount>,
+    price: Option<Price>,
     base_scale: Option<u32>,
     quote_scale: Option<u32>,
-    taker_fee: Option<Decimal>,
-    maker_fee: Option<Decimal>,
-    min_amount: Option<Decimal>,
-    min_vol: Option<Decimal>,
+    taker_fee: Option<Fee>,
+    maker_fee: Option<Fee>,
+    min_amount: Option<Amount>,
+    min_vol: Option<Amount>,
     enable_market_order: Option<bool>,
     from: Option<u64>,
     exclude: Option<u64>,
@@ -309,19 +311,31 @@ impl Command {
     #[must_use]
     pub fn validate(&self) -> bool {
         match self.cmd {
-            ASK_LIMIT | BID_LIMIT => match (self.user_id, self.order_id, self.price, self.amount) {
-                (Some(_user_id), Some(_order_id), Some(price), Some(amount)) => {
-                    price.is_sign_positive() && amount.is_sign_positive()
+            ASK_LIMIT | BID_LIMIT => match (
+                self.user_id.as_ref(),
+                self.order_id,
+                self.price,
+                self.amount,
+            ) {
+                (Some(user_id), Some(_), Some(price), Some(amount)) => {
+                    price.is_sign_positive()
+                        && amount.is_sign_positive()
+                        && UserId::from_str(user_id).is_ok()
                 }
                 _ => false,
             },
-            CANCEL => self.symbol().is_some() && self.user_id.is_some() && self.order_id.is_some(),
+            CANCEL => match (self.symbol(), self.user_id.as_ref(), self.order_id) {
+                (Some(_), Some(user_id), Some(_)) => UserId::from_str(user_id).is_ok(),
+                _ => false,
+            },
             CANCEL_ALL => self.symbol().is_some(),
             OPEN | CLOSE => self.symbol().is_some(),
             OPEN_ALL | CLOSE_ALL => true,
-            TRANSFER_OUT | TRANSFER_IN => {
-                self.user_id.is_some() && self.currency.is_some() && self.amount.is_some()
-            }
+            TRANSFER_OUT | TRANSFER_IN => match (self.user_id.as_ref(), self.currency, self.amount)
+            {
+                (Some(user_id), Some(_), Some(_)) => UserId::from_str(user_id).is_ok(),
+                _ => false,
+            },
             NEW_SYMBOL | UPDATE_SYMBOL => {
                 match (
                     self.base_scale,
@@ -354,8 +368,14 @@ impl Command {
                 }
             }
             QUERY_ORDER => self.symbol().is_some() && self.order_id.is_some(),
-            QUERY_BALANCE => self.currency.is_some() && self.user_id.is_some(),
-            QUERY_ACCOUNTS => self.user_id.is_some(),
+            QUERY_BALANCE => match (self.currency, self.user_id.as_ref()) {
+                (Some(_), Some(user_id)) => UserId::from_str(user_id).is_ok(),
+                _ => false,
+            },
+            QUERY_ACCOUNTS => match self.user_id.as_ref() {
+                Some(user_id) => UserId::from_str(user_id).is_ok(),
+                _ => false,
+            },
             DUMP | UPDATE_DEPTH | CONFIRM_ALL => true,
             _ => false,
         }

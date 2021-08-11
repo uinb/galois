@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::core::Symbol;
+use crate::core::{Amount, Fee, Price, Symbol, UserId};
 use linked_hash_map::LinkedHashMap;
 use rust_decimal::{prelude::Zero, Decimal};
 use serde::{Deserialize, Serialize};
@@ -32,13 +32,13 @@ pub enum AskOrBid {
 #[derive(Deserialize, Serialize, Debug, Eq, PartialEq, Clone)]
 pub struct Order {
     pub id: u64,
-    pub user: u64,
-    pub price: Decimal,
-    pub unfilled: Decimal,
+    pub user: UserId,
+    pub price: Price,
+    pub unfilled: Amount,
 }
 
 impl Order {
-    pub const fn new(id: u64, user: u64, price: Decimal, unfilled: Decimal) -> Self {
+    pub const fn new(id: u64, user: UserId, price: Price, unfilled: Amount) -> Self {
         Self {
             id,
             user,
@@ -51,11 +51,11 @@ impl Order {
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
 pub struct OrderPage {
     pub orders: LinkedHashMap<u64, Order>,
-    pub amount: Decimal,
-    pub price: Decimal,
+    pub amount: Amount,
+    pub price: Price,
 }
 
-pub type Level = (Decimal, Decimal, Decimal);
+pub type Level = (Price, Amount, Amount);
 
 impl OrderPage {
     pub fn with_init_order(order: Order) -> Self {
@@ -70,7 +70,7 @@ impl OrderPage {
         }
     }
 
-    pub fn as_level(&self, base_scale: u32, quote_scale: u32, total: Decimal) -> Level {
+    pub fn as_level(&self, base_scale: u32, quote_scale: u32, total: Amount) -> Level {
         let mut amount = self.amount;
         let mut price = self.price;
         amount.rescale(base_scale);
@@ -94,9 +94,9 @@ impl OrderPage {
     }
 }
 
-pub type Tape = BTreeMap<Decimal, OrderPage>;
+pub type Tape = BTreeMap<Price, OrderPage>;
 
-pub type Index = HashMap<u64, Decimal>;
+pub type Index = HashMap<u64, Price>;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
 pub struct OrderBook {
@@ -105,10 +105,10 @@ pub struct OrderBook {
     pub indices: Index,
     pub base_scale: u32,
     pub quote_scale: u32,
-    pub taker_fee: Decimal,
-    pub maker_fee: Decimal,
-    pub min_amount: Decimal,
-    pub min_vol: Decimal,
+    pub taker_fee: Fee,
+    pub maker_fee: Fee,
+    pub min_amount: Amount,
+    pub min_vol: Amount,
     pub enable_market_order: bool,
     pub open: bool,
 }
@@ -125,10 +125,10 @@ impl OrderBook {
     pub fn new(
         base_scale: u32,
         quote_scale: u32,
-        taker_fee: Decimal,
-        maker_fee: Decimal,
-        min_amount: Decimal,
-        min_vol: Decimal,
+        taker_fee: Fee,
+        maker_fee: Fee,
+        min_amount: Amount,
+        min_vol: Amount,
         enable_market_order: bool,
     ) -> Self {
         Self {
@@ -186,7 +186,7 @@ impl OrderBook {
             .or_insert_with(|| OrderPage::with_init_order(order));
     }
 
-    pub fn remove_from_tape(tape: &mut Tape, order_id: u64, price: Decimal) -> Option<Order> {
+    pub fn remove_from_tape(tape: &mut Tape, order_id: u64, price: Price) -> Option<Order> {
         let page = tape.get_mut(&price)?;
         let removed = page.remove(order_id);
         if page.is_empty() {
@@ -198,18 +198,18 @@ impl OrderBook {
     pub fn get_best_match(
         &mut self,
         ask_or_bid: AskOrBid,
-    ) -> Option<OccupiedEntry<Decimal, OrderPage>> {
+    ) -> Option<OccupiedEntry<Price, OrderPage>> {
         match ask_or_bid {
             AskOrBid::Bid => self.asks.first_entry(),
             AskOrBid::Ask => self.bids.last_entry(),
         }
     }
 
-    pub fn get_best_ask(&self) -> Option<Decimal> {
+    pub fn get_best_ask(&self) -> Option<Price> {
         self.asks.first_key_value().map(|(price, _)| *price)
     }
 
-    pub fn get_best_bid(&self) -> Option<Decimal> {
+    pub fn get_best_bid(&self) -> Option<Price> {
         self.bids.last_key_value().map(|(price, _)| *price)
     }
 
@@ -231,10 +231,12 @@ impl OrderBook {
 
 #[test]
 pub fn test_scale() {
-    let mut price = Decimal::new(126, 2);
+    use rust_decimal_marco::dec;
+
+    let mut price = dec!(1.26);
     price.rescale(4);
     assert_eq!("1.2600", price.to_string());
-    let mut amount = Decimal::new(1, 4);
+    let mut amount = dec!(0.0001);
     amount.rescale(2);
     assert_eq!("0.00", amount.to_string());
 }

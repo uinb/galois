@@ -91,7 +91,7 @@ fn handle_limit(
     symbol: Symbol,
     price: Decimal,
     amount: Decimal,
-    user: u64,
+    user: UserId,
     order: u64,
     ask_or_bid: AskOrBid,
     time: u64,

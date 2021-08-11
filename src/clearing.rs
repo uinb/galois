@@ -14,7 +14,7 @@
 
 use crate::{
     assets,
-    core::{Accounts, Symbol, SYSTEM},
+    core::*,
     matcher::{Match, Role},
     orderbook::AskOrBid,
     output::Output,
@@ -25,8 +25,8 @@ pub fn clear(
     accounts: &mut Accounts,
     event_id: u64,
     symbol: &Symbol,
-    taker_fee: Decimal,
-    maker_fee: Decimal,
+    taker_fee: Fee,
+    maker_fee: Fee,
     mr: &Match,
     time: u64,
 ) -> Vec<Output> {
@@ -47,10 +47,10 @@ pub fn clear(
                     state: mr.taker.state,
                     ask_or_bid: AskOrBid::Ask,
                     price: mr.taker.price,
-                    base: Decimal::zero(),
-                    quote: Decimal::zero(),
-                    base_fee: Decimal::zero(),
-                    quote_fee: Decimal::zero(),
+                    base: Amount::zero(),
+                    quote: Amount::zero(),
+                    base_fee: Amount::zero(),
+                    quote_fee: Amount::zero(),
                     timestamp: time,
                 }]
             }
