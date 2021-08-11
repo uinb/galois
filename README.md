@@ -23,6 +23,9 @@ event(mysql)  >>  |  galois  |  >> match results(mysql)/best n price(redis)
 
 If you would like to use Galois in your product, you should implement the order/user management known as broker, as well as the blockchain client to handle crypto coin withdraw/deposition.
 
+## Notice
+Galois on `offchain` branch works as a component of [Fusotao](https://github.com/uinb/fusotao), while the master branch could be used stand alone.
+
 ## Getting Started
 
 ### Dependencies
