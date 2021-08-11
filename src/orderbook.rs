@@ -231,7 +231,7 @@ impl OrderBook {
 
 #[test]
 pub fn test_scale() {
-    use rust_decimal_marco::dec;
+    use rust_decimal_macros::dec;
 
     let mut price = dec!(1.26);
     price.rescale(4);

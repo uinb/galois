@@ -140,9 +140,9 @@ pub fn unfreeze(accounts: &mut Accounts, user: UserId, currency: u32, amount: Am
 mod test {
     use super::*;
     use crate::core::UserId;
-    use rust_decimal::Decimal;
     use rust_decimal_macros::dec;
     use serde_json;
+    use std::str::FromStr;
 
     #[test]
     pub fn test_transfer() {
@@ -170,37 +170,49 @@ mod test {
         if cmd.cmd == crate::sequence::TRANSFER_IN {
             add_to_available(
                 all,
-                cmd.user_id.unwrap(),
+                UserId::from_str(&cmd.user_id.unwrap()).unwrap(),
                 cmd.currency.unwrap(),
                 cmd.amount.unwrap(),
             );
         } else if cmd.cmd == crate::sequence::TRANSFER_OUT {
             deduct_available(
                 all,
-                cmd.user_id.unwrap(),
+                UserId::from_str(&cmd.user_id.unwrap()).unwrap(),
                 cmd.currency.unwrap(),
                 cmd.amount.unwrap(),
             );
         }
     }
 
-    // #[test]
+    #[test]
     pub fn test_deser_from_json() {
         let mut all = Accounts::new();
-        let s = r#"{"amount":"10000","cmd":11,"currency":101,"user_id":2}"#;
+        let s = r#"{"amount":"10000","cmd":11,"currency":101,"user_id":"0000000000000000000000000000000000000000000000000000000000000002"}"#;
         help(&mut all, s);
-        let s = r#"{"amount":"3.41","cmd":11,"currency":101,"user_id":2}"#;
+        let s = r#"{"amount":"3.41","cmd":11,"currency":101,"user_id":"0000000000000000000000000000000000000000000000000000000000000002"}"#;
         help(&mut all, s);
-        let s = r#"{"amount":"4.39","cmd":10,"currency":101,"user_id":2}"#;
+        let s = r#"{"amount":"4.39","cmd":10,"currency":101,"user_id":"0000000000000000000000000000000000000000000000000000000000000002"}"#;
         help(&mut all, s);
-        let s = r#"{"amount":"2.47","cmd":11,"currency":101,"user_id":2}"#;
+        let s = r#"{"amount":"2.47","cmd":11,"currency":101,"user_id":"0000000000000000000000000000000000000000000000000000000000000002"}"#;
         help(&mut all, s);
-        let s = r#"{"amount":"3.65","cmd":10,"currency":101,"user_id":2}"#;
+        let s = r#"{"amount":"3.65","cmd":10,"currency":101,"user_id":"0000000000000000000000000000000000000000000000000000000000000002"}"#;
         help(&mut all, s);
-        let s = r#"{"amount":"1.99","cmd":11,"currency":101,"user_id":2}"#;
+        let s = r#"{"amount":"1.99","cmd":11,"currency":101,"user_id":"0000000000000000000000000000000000000000000000000000000000000002"}"#;
         help(&mut all, s);
-        let s = r#"{"amount":"3.81","cmd":10,"currency":101,"user_id":2}"#;
+        let s = r#"{"amount":"3.81","cmd":10,"currency":101,"user_id":"0000000000000000000000000000000000000000000000000000000000000002"}"#;
         help(&mut all, s);
-        // assert_eq!(get(&all, UserId::, 101).unwrap().available, dec!("9996.02"));
+        assert_eq!(
+            get(
+                &all,
+                UserId::from_str(
+                    "0x0000000000000000000000000000000000000000000000000000000000000002"
+                )
+                .unwrap(),
+                101
+            )
+            .unwrap()
+            .available,
+            dec!(9996.02)
+        );
     }
 }
