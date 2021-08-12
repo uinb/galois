@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use galois::{config, event, output, sequence, server, snapshot};
-
 use std::sync::{atomic, mpsc, Arc};
 
 fn main() {

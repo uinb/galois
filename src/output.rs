@@ -14,7 +14,6 @@
 
 use mysql::{prelude::*, *};
 use redis::Commands;
-use rust_decimal::Decimal;
 use std::collections::HashMap;
 use std::convert::Into;
 use std::sync::mpsc::{Receiver, Sender};
@@ -27,16 +26,16 @@ use crate::{core::*, db::DB, db::REDIS, matcher::*, orderbook::AskOrBid, orderbo
 pub struct Output {
     pub event_id: u64,
     pub order_id: u64,
-    pub user_id: u64,
+    pub user_id: UserId,
     pub symbol: Symbol,
     pub state: State,
     pub role: Role,
     pub ask_or_bid: AskOrBid,
-    pub price: Decimal,
-    pub quote: Decimal,
-    pub base: Decimal,
-    pub quote_fee: Decimal,
-    pub base_fee: Decimal,
+    pub price: Price,
+    pub quote: Amount,
+    pub base: Amount,
+    pub quote_fee: Amount,
+    pub base_fee: Amount,
     pub timestamp: u64,
 }
 
@@ -105,7 +104,7 @@ fn flush(symbol: Symbol, pending: &mut Vec<Output>) {
             params! {
                 "event_id" => p.event_id,
                 "order_id" => p.order_id,
-                "user_id" => p.user_id,
+                "user_id" => format!("{:#x}", p.user_id),
                 "state" => p.state.into(): u32,
                 "role" => p.role.into(): u32,
                 "ask_or_bid" => p.ask_or_bid.into(): u32,
