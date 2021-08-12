@@ -2,9 +2,9 @@ name: Rust CI
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master, offchain ]
   pull_request:
-    branches: [ master ]
+    branches: [ master, offchain ]
 
 jobs:
   build:

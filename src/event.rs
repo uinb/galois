@@ -91,7 +91,7 @@ fn handle_limit(
     symbol: Symbol,
     price: Decimal,
     amount: Decimal,
-    user: u64,
+    user: UserId,
     order: u64,
     ask_or_bid: AskOrBid,
     time: u64,
@@ -414,7 +414,7 @@ fn do_inspect(inspection: Inspection, data: &Data) -> anyhow::Result<()> {
 }
 
 #[test]
-pub fn test() {
+pub fn test_serialize() {
     assert_eq!("{}", serde_json::to_string(&Accounts::new()).unwrap());
     let mut account = std::collections::HashMap::<u32, assets::Account>::new();
     account.insert(

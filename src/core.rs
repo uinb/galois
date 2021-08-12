@@ -14,6 +14,7 @@
 
 use crate::{assets::Account, orderbook::OrderBook};
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
+use primitive_types::H256;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -28,7 +29,7 @@ pub type Price = Decimal;
 pub type Amount = Decimal;
 pub type Vol = Decimal;
 pub type Currency = u32;
-pub type UserId = u64;
+pub type UserId = H256;
 pub type Symbol = (Base, Quote);
 pub type EventId = u64;
 pub type OrderId = u64;
@@ -38,7 +39,7 @@ pub type Timestamp = u64;
 
 pub type Accounts = HashMap<UserId, HashMap<Currency, Account>>;
 
-pub const SYSTEM: u64 = 0;
+pub const SYSTEM: UserId = H256::zero();
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct Data {
@@ -73,17 +74,19 @@ impl Data {
 #[test]
 pub fn test_dump() {
     use crate::orderbook::Order;
-    let order = Order::new(0, 0, Decimal::new(1, 0), Decimal::new(1, 0));
+    use rust_decimal_macros::dec;
+
+    let order = Order::new(0, UserId::zero(), Decimal::new(1, 0), Decimal::new(1, 0));
     let v = bincode::serialize(&order).unwrap();
     let des: Order = bincode::deserialize(&v).unwrap();
     assert_eq!(des, order);
     let orderbook = OrderBook::new(
         3,
         3,
-        Decimal::new(1, 3),
-        Decimal::new(1, 3),
-        Decimal::new(1, 3),
-        Decimal::new(1, 0),
+        dec!(0.001),
+        dec!(0.001),
+        dec!(0.001),
+        dec!(1.0),
         false,
     );
     let v = bincode::serialize(&orderbook).unwrap();
@@ -95,10 +98,10 @@ pub fn test_dump() {
         OrderBook::new(
             3,
             3,
-            Decimal::new(1, 3),
-            Decimal::new(1, 3),
-            Decimal::new(1, 3),
-            Decimal::new(1, 0),
+            dec!(0.001),
+            dec!(0.001),
+            dec!(0.001),
+            dec!(1.0),
             false,
         ),
     );

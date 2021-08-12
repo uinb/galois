@@ -23,14 +23,14 @@ pub struct Account {
     pub frozen: Decimal,
 }
 
-pub fn get_mut(accounts: &mut Accounts, user: u64, currency: u32) -> Option<&mut Account> {
+pub fn get_mut(accounts: &mut Accounts, user: UserId, currency: u32) -> Option<&mut Account> {
     match accounts.get_mut(&user) {
         None => None,
         Some(account) => account.get_mut(&currency),
     }
 }
 
-pub fn get(accounts: &Accounts, user: u64, currency: u32) -> Option<&Account> {
+pub fn get(accounts: &Accounts, user: UserId, currency: u32) -> Option<&Account> {
     match accounts.get(&user) {
         None => None,
         Some(account) => account.get(&currency),
@@ -50,7 +50,7 @@ fn init_wallet(available: Decimal) -> Account {
 
 pub fn add_to_available(
     accounts: &mut Accounts,
-    user: u64,
+    user: UserId,
     currency: u32,
     amount: Decimal,
 ) -> bool {
@@ -74,9 +74,9 @@ pub fn add_to_available(
 
 pub fn deduct_available(
     accounts: &mut Accounts,
-    user: u64,
+    user: UserId,
     currency: u32,
-    amount: Decimal,
+    amount: Amount,
 ) -> bool {
     match get_mut(accounts, user, currency) {
         Some(account) => {
@@ -91,7 +91,7 @@ pub fn deduct_available(
     }
 }
 
-pub fn deduct_frozen(accounts: &mut Accounts, user: u64, currency: u32, amount: Decimal) -> bool {
+pub fn deduct_frozen(accounts: &mut Accounts, user: UserId, currency: u32, amount: Amount) -> bool {
     match get_mut(accounts, user, currency) {
         Some(account) => {
             if account.frozen < amount {
@@ -106,7 +106,7 @@ pub fn deduct_frozen(accounts: &mut Accounts, user: u64, currency: u32, amount: 
 }
 
 #[allow(dead_code)]
-pub fn freeze(accounts: &mut Accounts, user: u64, currency: u32, amount: Decimal) -> bool {
+pub fn freeze(accounts: &mut Accounts, user: UserId, currency: u32, amount: Amount) -> bool {
     match get_mut(accounts, user, currency) {
         None => false,
         Some(account) => {
@@ -121,7 +121,7 @@ pub fn freeze(accounts: &mut Accounts, user: u64, currency: u32, amount: Decimal
     }
 }
 
-pub fn unfreeze(accounts: &mut Accounts, user: u64, currency: u32, amount: Decimal) -> bool {
+pub fn unfreeze(accounts: &mut Accounts, user: UserId, currency: u32, amount: Amount) -> bool {
     match get_mut(accounts, user, currency) {
         None => false,
         Some(account) => {
@@ -139,35 +139,30 @@ pub fn unfreeze(accounts: &mut Accounts, user: u64, currency: u32, amount: Decim
 #[cfg(test)]
 mod test {
     use super::*;
-    use rust_decimal::Decimal;
+    use crate::core::UserId;
+    use rust_decimal_macros::dec;
     use serde_json;
     use std::str::FromStr;
 
     #[test]
     pub fn test_transfer() {
         let mut all = Accounts::new();
-        add_to_available(&mut all, 1, 101, Decimal::from_str("1.11111").unwrap());
-        add_to_available(&mut all, 1, 101, Decimal::from_str("1.11111").unwrap());
-        add_to_available(&mut all, 1, 101, Decimal::from_str("1.11111").unwrap());
-        add_to_available(&mut all, 1, 101, Decimal::from_str("1.11111").unwrap());
-        add_to_available(&mut all, 1, 101, Decimal::from_str("1.11111").unwrap());
-        add_to_available(&mut all, 1, 101, Decimal::from_str("1.11111").unwrap());
-        add_to_available(&mut all, 1, 101, Decimal::from_str("1.11111").unwrap());
+        add_to_available(&mut all, UserId::zero(), 101, dec!(1.11111));
+        add_to_available(&mut all, UserId::zero(), 101, dec!(1.11111));
+        add_to_available(&mut all, UserId::zero(), 101, dec!(1.11111));
+        add_to_available(&mut all, UserId::zero(), 101, dec!(1.11111));
+        add_to_available(&mut all, UserId::zero(), 101, dec!(1.11111));
+        add_to_available(&mut all, UserId::zero(), 101, dec!(1.11111));
+        add_to_available(&mut all, UserId::zero(), 101, dec!(1.11111));
         assert_eq!(
-            get(&all, 1, 101).unwrap().available,
-            Decimal::from_str("7.77777").unwrap()
+            get(&all, UserId::zero(), 101).unwrap().available,
+            dec!(7.77777)
         );
-        deduct_available(&mut all, 1, 101, Decimal::from_str("7.67777").unwrap());
-        assert_eq!(
-            get(&all, 1, 101).unwrap().available,
-            Decimal::from_str("0.1").unwrap()
-        );
-        let ok = deduct_available(&mut all, 1, 101, Decimal::from_str("1.0").unwrap());
-        assert_eq!(false, ok);
-        assert_eq!(
-            get(&all, 1, 101).unwrap().available,
-            Decimal::from_str("0.1").unwrap()
-        );
+        deduct_available(&mut all, UserId::zero(), 101, dec!(7.67777));
+        assert_eq!(get(&all, UserId::zero(), 101).unwrap().available, dec!(0.1));
+        let ok = deduct_available(&mut all, UserId::zero(), 101, dec!(1.0));
+        assert!(!ok);
+        assert_eq!(get(&all, UserId::zero(), 101).unwrap().available, dec!(0.1));
     }
 
     fn help(all: &mut Accounts, json: &str) {
@@ -175,14 +170,14 @@ mod test {
         if cmd.cmd == crate::sequence::TRANSFER_IN {
             add_to_available(
                 all,
-                cmd.user_id.unwrap(),
+                UserId::from_str(&cmd.user_id.unwrap()).unwrap(),
                 cmd.currency.unwrap(),
                 cmd.amount.unwrap(),
             );
         } else if cmd.cmd == crate::sequence::TRANSFER_OUT {
             deduct_available(
                 all,
-                cmd.user_id.unwrap(),
+                UserId::from_str(&cmd.user_id.unwrap()).unwrap(),
                 cmd.currency.unwrap(),
                 cmd.amount.unwrap(),
             );
@@ -192,23 +187,32 @@ mod test {
     #[test]
     pub fn test_deser_from_json() {
         let mut all = Accounts::new();
-        let s = r#"{"amount":"10000","cmd":11,"currency":101,"user_id":2}"#;
+        let s = r#"{"amount":"10000","cmd":11,"currency":101,"user_id":"0000000000000000000000000000000000000000000000000000000000000002"}"#;
         help(&mut all, s);
-        let s = r#"{"amount":"3.41","cmd":11,"currency":101,"user_id":2}"#;
+        let s = r#"{"amount":"3.41","cmd":11,"currency":101,"user_id":"0000000000000000000000000000000000000000000000000000000000000002"}"#;
         help(&mut all, s);
-        let s = r#"{"amount":"4.39","cmd":10,"currency":101,"user_id":2}"#;
+        let s = r#"{"amount":"4.39","cmd":10,"currency":101,"user_id":"0000000000000000000000000000000000000000000000000000000000000002"}"#;
         help(&mut all, s);
-        let s = r#"{"amount":"2.47","cmd":11,"currency":101,"user_id":2}"#;
+        let s = r#"{"amount":"2.47","cmd":11,"currency":101,"user_id":"0000000000000000000000000000000000000000000000000000000000000002"}"#;
         help(&mut all, s);
-        let s = r#"{"amount":"3.65","cmd":10,"currency":101,"user_id":2}"#;
+        let s = r#"{"amount":"3.65","cmd":10,"currency":101,"user_id":"0000000000000000000000000000000000000000000000000000000000000002"}"#;
         help(&mut all, s);
-        let s = r#"{"amount":"1.99","cmd":11,"currency":101,"user_id":2}"#;
+        let s = r#"{"amount":"1.99","cmd":11,"currency":101,"user_id":"0000000000000000000000000000000000000000000000000000000000000002"}"#;
         help(&mut all, s);
-        let s = r#"{"amount":"3.81","cmd":10,"currency":101,"user_id":2}"#;
+        let s = r#"{"amount":"3.81","cmd":10,"currency":101,"user_id":"0000000000000000000000000000000000000000000000000000000000000002"}"#;
         help(&mut all, s);
         assert_eq!(
-            get(&all, 2, 101).unwrap().available,
-            Decimal::from_str("9996.02").unwrap()
+            get(
+                &all,
+                UserId::from_str(
+                    "0x0000000000000000000000000000000000000000000000000000000000000002"
+                )
+                .unwrap(),
+                101
+            )
+            .unwrap()
+            .available,
+            dec!(9996.02)
         );
     }
 }

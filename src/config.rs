@@ -119,7 +119,7 @@ fn init_config_file() -> anyhow::Result<Config> {
 }
 
 #[test]
-pub fn test_des() {
+pub fn test_encrypt() {
     let encrypted = encrypt("hello", "root12345678");
     println!("{}", encrypted);
     assert_eq!("root12345678", decrypt("hello", &encrypted).unwrap());
