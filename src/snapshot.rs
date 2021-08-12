@@ -84,7 +84,7 @@ mod test {
     use std::time::{Duration, UNIX_EPOCH};
 
     #[test]
-    pub fn test() {
+    pub fn test_syspath() {
         let timestamp = UNIX_EPOCH + Duration::from_secs(1524885322);
         let datetime = DateTime::<Utc>::from(timestamp);
         let format = datetime.format("%Y-%m-%dT%H:%M:%S").to_string();
@@ -99,7 +99,7 @@ mod test {
     }
 
     #[test]
-    pub fn test_max() {
+    pub fn test_max_seq() {
         let timestamp = UNIX_EPOCH + Duration::from_secs(1524885322);
         let datetime = DateTime::<Utc>::from(timestamp);
         let format = datetime.format("%Y-%m-%dT%H:%M:%S").to_string();

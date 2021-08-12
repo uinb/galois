@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::core::*;
 use crate::orderbook::{AskOrBid, Order, OrderBook, OrderPage};
-use rust_decimal::{prelude::Zero, Decimal};
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum State {
@@ -61,31 +61,36 @@ impl Into<u32> for State {
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Taker {
-    pub user_id: u64,
+    pub user_id: UserId,
     pub order_id: u64,
-    pub price: Decimal,
-    pub unfilled: Decimal,
+    pub price: Price,
+    pub unfilled: Amount,
     pub ask_or_bid: AskOrBid,
     pub state: State,
 }
 
 impl Taker {
-    pub fn taker_filled(user_id: u64, order_id: u64, price: Decimal, ask_or_bid: AskOrBid) -> Self {
+    pub fn taker_filled(
+        user_id: UserId,
+        order_id: u64,
+        price: Price,
+        ask_or_bid: AskOrBid,
+    ) -> Self {
         Self {
             user_id,
             order_id,
             price,
-            unfilled: Decimal::zero(),
+            unfilled: Amount::ZERO,
             ask_or_bid,
             state: State::Filled,
         }
     }
 
     pub const fn taker_placed(
-        user_id: u64,
+        user_id: UserId,
         order_id: u64,
-        price: Decimal,
-        unfilled: Decimal,
+        price: Price,
+        unfilled: Amount,
         ask_or_bid: AskOrBid,
     ) -> Self {
         Self {
@@ -99,10 +104,10 @@ impl Taker {
     }
 
     pub const fn cancel(
-        user_id: u64,
+        user_id: UserId,
         order_id: u64,
-        price: Decimal,
-        unfilled: Decimal,
+        price: Price,
+        unfilled: Amount,
         ask_or_bid: AskOrBid,
     ) -> Self {
         Self {
@@ -118,19 +123,19 @@ impl Taker {
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Maker {
-    pub user_id: u64,
+    pub user_id: UserId,
     pub order_id: u64,
-    pub price: Decimal,
-    pub filled: Decimal,
+    pub price: Price,
+    pub filled: Amount,
     pub state: State,
 }
 
 impl Maker {
     pub const fn maker_filled(
-        user_id: u64,
+        user_id: UserId,
         order_id: u64,
-        price: Decimal,
-        filled: Decimal,
+        price: Price,
+        filled: Amount,
     ) -> Self {
         Self {
             user_id,
@@ -142,10 +147,10 @@ impl Maker {
     }
 
     pub const fn maker_so_far(
-        user_id: u64,
+        user_id: UserId,
         order_id: u64,
-        price: Decimal,
-        filled: Decimal,
+        price: Price,
+        filled: Amount,
     ) -> Self {
         Self {
             user_id,
@@ -163,26 +168,18 @@ pub struct Match {
     pub taker: Taker,
 }
 
-// fn ask_market(book: &mut OrderBook, order_id: &str, vol: Decimal) -> Vec<Match> {
-//     vec![]
-// }
-
-// fn bid_market(book: &mut OrderBook, order_id: &str, vol: Decimal) -> Vec<Match> {
-//     vec![]
-// }
-
 pub fn execute_limit(
     book: &mut OrderBook,
-    user_id: u64,
+    user_id: UserId,
     order_id: u64,
-    price: Decimal,
-    amount: Decimal,
+    price: Price,
+    amount: Amount,
     ask_or_bid: AskOrBid,
 ) -> Option<Match> {
     let mut makers = Vec::<Maker>::new();
     let mut unfilled = amount;
     loop {
-        if unfilled == Decimal::zero() {
+        if unfilled == Amount::ZERO {
             return match !makers.is_empty() {
                 true => Some(Match {
                     maker: makers,
@@ -227,9 +224,9 @@ pub fn execute_limit(
     }
 }
 
-fn take(page: &mut OrderPage, mut taker: Decimal) -> (Decimal, Vec<Maker>) {
+fn take(page: &mut OrderPage, mut taker: Amount) -> (Amount, Vec<Maker>) {
     let mut matches = Vec::<Maker>::new();
-    while taker != Decimal::zero() && !page.is_empty() {
+    while !taker.is_zero() && !page.is_empty() {
         let mut oldest = page.orders.entries().next().unwrap();
         if taker >= oldest.get().unfilled {
             let maker = oldest.get();
@@ -253,12 +250,12 @@ fn take(page: &mut OrderPage, mut taker: Decimal) -> (Decimal, Vec<Maker>) {
         ));
         maker.unfilled -= taker;
         page.amount -= taker;
-        taker = Decimal::zero();
+        taker = Amount::ZERO;
     }
     (taker, matches)
 }
 
-fn can_trade(best_price: Decimal, taker_price: Decimal, ask_or_bid: AskOrBid) -> bool {
+fn can_trade(best_price: Price, taker_price: Price, ask_or_bid: AskOrBid) -> bool {
     match ask_or_bid {
         AskOrBid::Ask => best_price >= taker_price,
         AskOrBid::Bid => best_price <= taker_price,
@@ -299,17 +296,17 @@ pub fn cancel(book: &mut OrderBook, order_id: u64) -> Option<Match> {
 
 #[cfg(test)]
 mod test {
-    use crate::{matcher::*, orderbook::*};
-    use std::str::FromStr;
+    use crate::{core::*, matcher::*, orderbook::*};
+    use rust_decimal_macros::dec;
 
     #[test]
     pub fn test_trade() {
         let base_scale = 5;
         let quote_scale = 1;
-        let taker_fee = Decimal::from_str("0.001").unwrap();
-        let maker_fee = Decimal::from_str("0.001").unwrap();
-        let min_amount = Decimal::from_str("1").unwrap();
-        let min_vol = Decimal::from_str("1").unwrap();
+        let taker_fee = dec!(0.001);
+        let maker_fee = dec!(0.001);
+        let min_amount = dec!(1);
+        let min_vol = dec!(1);
         let mut book = OrderBook::new(
             base_scale,
             quote_scale,
@@ -320,111 +317,145 @@ mod test {
             true,
         );
 
-        let price = Decimal::from_str("0.1").unwrap();
-        let amount = Decimal::from_str("100").unwrap();
-        let mr = execute_limit(&mut book, 1, 1001, price, amount, AskOrBid::Bid);
+        let price = dec!(0.1);
+        let amount = dec!(100);
+        let mr = execute_limit(
+            &mut book,
+            UserId::from_low_u64_be(1),
+            1001,
+            price,
+            amount,
+            AskOrBid::Bid,
+        );
         assert_eq!(true, mr.is_none());
         assert_eq!(
-            Decimal::from_str("0.1").unwrap(),
+            dec!(0.1),
             *book.get_best_match(AskOrBid::Ask).unwrap().key()
         );
         assert_eq!(
-            Decimal::from_str("100").unwrap(),
+            dec!(100),
             book.get_best_match(AskOrBid::Ask).unwrap().get().amount
         );
-        assert_eq!(true, book.indices.contains_key(&1001));
+        assert!(book.indices.contains_key(&1001));
 
-        let price = Decimal::from_str("0.1").unwrap();
-        let amount = Decimal::from_str("1000").unwrap();
-        let mr = execute_limit(&mut book, 1, 1002, price, amount, AskOrBid::Bid);
-        assert_eq!(true, mr.is_none());
+        let price = dec!(0.1);
+        let amount = dec!(1000);
+        let mr = execute_limit(
+            &mut book,
+            UserId::from_low_u64_be(1),
+            1002,
+            price,
+            amount,
+            AskOrBid::Bid,
+        );
+        assert!(mr.is_none());
         assert_eq!(
-            Decimal::from_str("0.1").unwrap(),
+            dec!(0.1),
             *book.get_best_match(AskOrBid::Ask).unwrap().key()
         );
         assert_eq!(
-            Decimal::from_str("1100").unwrap(),
+            dec!(1100),
             book.get_best_match(AskOrBid::Ask).unwrap().get().amount
         );
-        assert_eq!(true, book.indices.contains_key(&1002));
+        assert!(book.indices.contains_key(&1002));
 
-        let price = Decimal::from_str("0.08").unwrap();
-        let amount = Decimal::from_str("200").unwrap();
-        let mr = execute_limit(&mut book, 1, 1003, price, amount, AskOrBid::Ask).unwrap();
-        assert_eq!(false, mr.maker.is_empty());
-        assert_eq!(false, book.indices.contains_key(&1001));
-        assert_eq!(true, book.indices.contains_key(&1002));
-        assert_eq!(false, book.indices.contains_key(&1003));
+        let price = dec!(0.08);
+        let amount = dec!(200);
+        let mr = execute_limit(
+            &mut book,
+            UserId::from_low_u64_be(1),
+            1003,
+            price,
+            amount,
+            AskOrBid::Ask,
+        )
+        .unwrap();
+        assert!(!mr.maker.is_empty());
+        assert!(!book.indices.contains_key(&1001));
+        assert!(book.indices.contains_key(&1002));
+        assert!(!book.indices.contains_key(&1003));
         assert_eq!(
-            &Maker::maker_filled(
-                1,
-                1001,
-                Decimal::from_str("0.1").unwrap(),
-                Decimal::from_str("100").unwrap(),
-            ),
+            &Maker::maker_filled(UserId::from_low_u64_be(1), 1001, dec!(0.1), dec!(100)),
             mr.maker.first().unwrap()
         );
         assert_eq!(
-            &Maker::maker_so_far(
-                1,
-                1002,
-                Decimal::from_str("0.1").unwrap(),
-                Decimal::from_str("100").unwrap(),
-            ),
+            &Maker::maker_so_far(UserId::from_low_u64_be(1), 1002, dec!(0.1), dec!(100)),
             mr.maker.get(1).unwrap()
         );
-        assert_eq!(Taker::taker_filled(1, 1003, price, AskOrBid::Ask), mr.taker);
         assert_eq!(
-            Decimal::from_str("0.1").unwrap(),
+            Taker::taker_filled(UserId::from_low_u64_be(1), 1003, price, AskOrBid::Ask),
+            mr.taker
+        );
+        assert_eq!(
+            dec!(0.1),
             *book.get_best_match(AskOrBid::Ask).unwrap().key()
         );
         assert_eq!(
-            Decimal::from_str("900").unwrap(),
+            dec!(900),
             book.get_best_match(AskOrBid::Ask).unwrap().get().amount
         );
 
-        let price = Decimal::from_str("0.12").unwrap();
-        let amount = Decimal::from_str("100").unwrap();
-        let mr = execute_limit(&mut book, 1, 1004, price, amount, AskOrBid::Ask);
-        assert_eq!(true, mr.is_none());
+        let price = dec!(0.12);
+        let amount = dec!(100);
+        let mr = execute_limit(
+            &mut book,
+            UserId::from_low_u64_be(1),
+            1004,
+            price,
+            amount,
+            AskOrBid::Ask,
+        );
+        assert!(mr.is_none());
         assert_eq!(
-            Decimal::from_str("0.12").unwrap(),
+            dec!(0.12),
             *book.get_best_match(AskOrBid::Bid).unwrap().key()
         );
         assert_eq!(
-            Decimal::from_str("100").unwrap(),
+            dec!(100),
             book.get_best_match(AskOrBid::Bid).unwrap().get().amount
         );
-        assert_eq!(true, book.indices.contains_key(&1004));
+        assert!(book.indices.contains_key(&1004));
 
         let mr = cancel(&mut book, 1002).unwrap();
-        let price = Decimal::from_str("0.1").unwrap();
-        let unfilled = Decimal::from_str("900").unwrap();
+        let price = dec!(0.1);
+        let unfilled = dec!(900);
         assert_eq!(
-            Taker::cancel(1, 1002, price, unfilled, AskOrBid::Bid),
+            Taker::cancel(
+                UserId::from_low_u64_be(1),
+                1002,
+                price,
+                unfilled,
+                AskOrBid::Bid
+            ),
             mr.taker
         );
-        assert_eq!(false, book.indices.contains_key(&1002));
-        assert_eq!(true, book.bids.is_empty());
+        assert!(!book.indices.contains_key(&1002));
+        assert!(book.bids.is_empty());
 
-        let price = Decimal::from_str("0.12").unwrap();
-        let unfilled = Decimal::from_str("100").unwrap();
+        let price = dec!(0.12);
+        let unfilled = dec!(100);
         let mr = cancel(&mut book, 1004).unwrap();
         assert_eq!(
-            Taker::cancel(1, 1004, price, unfilled, AskOrBid::Ask),
+            Taker::cancel(
+                UserId::from_low_u64_be(1),
+                1004,
+                price,
+                unfilled,
+                AskOrBid::Ask
+            ),
             mr.taker
         );
-        assert_eq!(false, book.indices.contains_key(&1004));
-        assert_eq!(true, book.asks.is_empty());
+        assert!(!book.indices.contains_key(&1004));
+        assert!(book.asks.is_empty());
 
         let mr = cancel(&mut book, 1004);
-        assert_eq!(true, mr.is_none());
-        assert_eq!(false, book.indices.contains_key(&1004));
-        assert_eq!(true, book.asks.is_empty());
+        assert!(mr.is_none());
+        assert!(!book.indices.contains_key(&1004));
+        assert!(book.asks.is_empty());
 
         let mr = cancel(&mut book, 1004);
-        assert_eq!(true, mr.is_none());
-        assert_eq!(false, book.indices.contains_key(&1004));
-        assert_eq!(true, book.asks.is_empty());
+        assert!(mr.is_none());
+        assert!(!book.indices.contains_key(&1004));
+        assert!(book.asks.is_empty());
     }
 }
