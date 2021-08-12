@@ -31,4 +31,5 @@ pub mod orderbook;
 pub mod output;
 pub mod sequence;
 pub mod server;
+pub mod smt;
 pub mod snapshot;

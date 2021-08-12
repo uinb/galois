@@ -92,5 +92,11 @@ features = ["serde"]
 [dependencies.fixed-macro]
 version = "1.1"
 
+[dependencies.sparse-merkle-tree]
+version = "0.5.2-port"
+git = "https://github.com/uinb/sparse-merkle-tree"
+#path = "../sparse-merkle-tree"
+features = ["serde-rs"]
+
 [dev-dependencies]
 tempdir = "0.3"

@@ -17,6 +17,7 @@ use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use primitive_types::H256;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use sparse_merkle_tree::{sha256::Sha256Hasher, store::MemStore, SparseMerkleTree};
 use std::{
     collections::HashMap,
     fs::File,
@@ -36,6 +37,7 @@ pub type OrderId = u64;
 pub type Fee = Decimal;
 pub type Scale = u32;
 pub type Timestamp = u64;
+pub type GlobalState = SparseMerkleTree<Sha256Hasher, H256, MemStore<H256>>;
 
 pub type Accounts = HashMap<UserId, HashMap<Currency, Account>>;
 
