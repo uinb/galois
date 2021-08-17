@@ -13,8 +13,7 @@
 // limitations under the License.
 
 use crate::{
-    assets, clearing, core::*, matcher::*, onchain, orderbook::*, output, sequence, server,
-    snapshot,
+    assets, clearing, core::*, matcher, onchain, orderbook::*, output, sequence, server, snapshot,
 };
 use anyhow::{anyhow, ensure};
 use rust_decimal::{prelude::Zero, Decimal};
@@ -82,6 +81,12 @@ pub enum Inspection {
     QueryAccounts(UserId, u64, u64),
 }
 
+impl Default for Inspection {
+    fn default() -> Self {
+        Self::UpdateDepth
+    }
+}
+
 /// 0. symbol exists
 /// 1. check symbol open
 /// 2. check amount >= symbol_min_amount
@@ -108,8 +113,14 @@ fn handle_limit(
         anyhow!("order can't be accepted")
     );
     let (currency, val) = assets::freeze_if(&symbol, ask_or_bid, price, amount);
-    assets::try_freeze(&mut data.accounts, user, currency, val)?;
-    if let Some(mr) = execute_limit(orderbook, user, order, price, amount, ask_or_bid) {
+    let after_freeze = assets::try_freeze(&mut data.accounts, user, currency, val)?;
+    // notice: after freezing account, we can't return Err anymore, instead, let system crash
+    let (va, vf) = (
+        onchain::to_merkle_represent(after_freeze.available).unwrap(),
+        onchain::to_merkle_represent(after_freeze.available).unwrap(),
+    );
+    let leaf = onchain::new_account_merkle_leaf(user, currency, va, vf);
+    if let Some(mr) = matcher::execute_limit(orderbook, user, order, price, amount, ask_or_bid) {
         let cr = clearing::clear(
             &mut data.accounts,
             event_id,
@@ -119,7 +130,6 @@ fn handle_limit(
             &mr,
             time,
         );
-        // FIXME
         sender.send(cr).unwrap();
     }
     Ok(())
@@ -141,9 +151,7 @@ pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>
                         ));
                         continue;
                     }
-                    let inspection = watch
-                        .to_inspection()
-                        .ok_or_else(|| anyhow::anyhow!("Watch::to_inspection error"))?;
+                    let inspection = watch.to_inspection().unwrap_or_default();
                     let _ = do_inspect(inspection, &data);
                 }
                 sequence::Fusion::W(seq) => {
@@ -152,9 +160,8 @@ pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>
                         sequence::update_sequence_status(seq.id, sequence::ERROR);
                         continue;
                     }
-                    let event = seq
-                        .to_event()
-                        .ok_or_else(|| anyhow::anyhow!("Sequence::to_event error"))?;
+                    // FIXME shall we interrupt?
+                    let event = seq.to_event().ok_or(anyhow!("Sequence::to_event error"))?;
                     let (_, ok) = handle_event(event, &mut data, &sender);
                     if !ok {
                         log::info!("execute sequence {:?} failed", seq);
@@ -195,7 +202,7 @@ fn handle_event(
             // 1. check order's owner
             match data.orderbooks.get_mut(&symbol) {
                 Some(orderbook) => {
-                    if let Some(mr) = cancel(orderbook, order) {
+                    if let Some(mr) = matcher::cancel(orderbook, order) {
                         let cr = clearing::clear(
                             &mut data.accounts,
                             id,
@@ -218,7 +225,7 @@ fn handle_event(
                 Some(orderbook) => {
                     let ids = orderbook.indices.keys().copied().collect::<Vec<_>>();
                     ids.into_iter()
-                        .map(|id| cancel(orderbook, id))
+                        .map(|id| matcher::cancel(orderbook, id))
                         .collect::<Vec<_>>()
                 }
                 None => vec![],

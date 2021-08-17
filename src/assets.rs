@@ -128,12 +128,12 @@ pub fn try_freeze(
     user: UserId,
     currency: Currency,
     amount: Amount,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Account> {
     let account = get_mut(accounts, user, currency).ok_or(anyhow!("Account not found"))?;
     ensure!(account.available >= amount, anyhow!("Available not enough"));
     account.available -= amount;
     account.frozen += amount;
-    Ok(())
+    Ok(account.clone())
 }
 
 pub fn unfreeze(accounts: &mut Accounts, user: UserId, currency: Currency, amount: Amount) -> bool {
