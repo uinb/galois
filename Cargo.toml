@@ -97,11 +97,6 @@ git = "https://github.com/uinb/sparse-merkle-tree"
 #path = "../sparse-merkle-tree"
 features = ["serde-rs", "sha256"]
 
-[dependencies.monotree]
-version = "0.1.3"
-path = "../monotree"
-features = ["serde_map"]
-
 [dependencies.sha2]
 version = "0.9"
 
