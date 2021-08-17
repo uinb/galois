@@ -93,8 +93,8 @@ version = "1.1"
 
 [dependencies.sparse-merkle-tree]
 version = "0.5.2-rc1"
-#git = "https://github.com/uinb/sparse-merkle-tree"
-path = "../sparse-merkle-tree"
+git = "https://github.com/uinb/sparse-merkle-tree"
+#path = "../sparse-merkle-tree"
 features = ["serde-rs", "sha256"]
 
 [dependencies.monotree]
