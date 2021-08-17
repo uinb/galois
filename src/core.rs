@@ -17,13 +17,15 @@ use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use primitive_types::H256;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use sparse_merkle_tree::{sha256::Sha256Hasher, store::MemStore, SparseMerkleTree};
+use sparse_merkle_tree::{default_store::DefaultStore, sha256::Sha256Hasher, SparseMerkleTree};
 use std::{
     collections::HashMap,
     fs::File,
     io::{BufReader, BufWriter},
 };
 
+pub type MerkleIdentity = sparse_merkle_tree::H256;
+pub type MerkleLeaf = (MerkleIdentity, MerkleIdentity);
 pub type Base = u32;
 pub type Quote = u32;
 pub type Price = Decimal;
@@ -37,16 +39,23 @@ pub type OrderId = u64;
 pub type Fee = Decimal;
 pub type Scale = u32;
 pub type Timestamp = u64;
-pub type GlobalState = SparseMerkleTree<Sha256Hasher, H256, MemStore<H256>>;
-
-pub type Accounts = HashMap<UserId, HashMap<Currency, Account>>;
+pub type GlobalStates =
+    SparseMerkleTree<Sha256Hasher, MerkleIdentity, DefaultStore<MerkleIdentity>>;
+pub type Balances = HashMap<Currency, Account>;
+pub type Accounts = HashMap<UserId, Balances>;
 
 pub const SYSTEM: UserId = H256::zero();
 
-#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[must_use]
+pub fn max_support_number() -> Amount {
+    u64::MAX.into()
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Data {
     pub orderbooks: HashMap<Symbol, OrderBook>,
     pub accounts: Accounts,
+    pub merkle_tree: GlobalStates,
 }
 
 unsafe impl Sync for Data {}
@@ -56,6 +65,7 @@ impl Data {
         Self {
             orderbooks: HashMap::new(),
             accounts: HashMap::new(),
+            merkle_tree: GlobalStates::default(),
         }
     }
 
@@ -107,12 +117,12 @@ pub fn test_dump() {
             false,
         ),
     );
-
     let temp_dir = tempdir::TempDir::new(".").unwrap();
     let file_path = temp_dir.path().join("bin.gz");
     let temp_file = File::create(&file_path).unwrap();
     test.into_raw(temp_file).unwrap();
-
     let de = Data::from_raw(File::open(&file_path).unwrap()).unwrap();
-    assert_eq!(test, de);
+    assert_eq!(test.orderbooks, de.orderbooks);
+    assert_eq!(test.accounts, de.accounts);
+    assert_eq!(test.merkle_tree.root(), de.merkle_tree.root());
 }

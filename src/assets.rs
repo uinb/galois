@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::core::*;
+use crate::{core::*, orderbook::AskOrBid};
+use anyhow::{anyhow, ensure};
 use rust_decimal::{prelude::Zero, Decimal};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -23,14 +24,14 @@ pub struct Account {
     pub frozen: Decimal,
 }
 
-pub fn get_mut(accounts: &mut Accounts, user: UserId, currency: u32) -> Option<&mut Account> {
+pub fn get_mut(accounts: &mut Accounts, user: UserId, currency: Currency) -> Option<&mut Account> {
     match accounts.get_mut(&user) {
         None => None,
         Some(account) => account.get_mut(&currency),
     }
 }
 
-pub fn get(accounts: &Accounts, user: UserId, currency: u32) -> Option<&Account> {
+pub fn get(accounts: &Accounts, user: UserId, currency: Currency) -> Option<&Account> {
     match accounts.get(&user) {
         None => None,
         Some(account) => account.get(&currency),
@@ -51,7 +52,7 @@ fn init_wallet(available: Decimal) -> Account {
 pub fn add_to_available(
     accounts: &mut Accounts,
     user: UserId,
-    currency: u32,
+    currency: Currency,
     amount: Decimal,
 ) -> bool {
     accounts
@@ -75,7 +76,7 @@ pub fn add_to_available(
 pub fn deduct_available(
     accounts: &mut Accounts,
     user: UserId,
-    currency: u32,
+    currency: Currency,
     amount: Amount,
 ) -> bool {
     match get_mut(accounts, user, currency) {
@@ -91,7 +92,12 @@ pub fn deduct_available(
     }
 }
 
-pub fn deduct_frozen(accounts: &mut Accounts, user: UserId, currency: u32, amount: Amount) -> bool {
+pub fn deduct_frozen(
+    accounts: &mut Accounts,
+    user: UserId,
+    currency: Currency,
+    amount: Amount,
+) -> bool {
     match get_mut(accounts, user, currency) {
         Some(account) => {
             if account.frozen < amount {
@@ -105,23 +111,32 @@ pub fn deduct_frozen(accounts: &mut Accounts, user: UserId, currency: u32, amoun
     }
 }
 
-#[allow(dead_code)]
-pub fn freeze(accounts: &mut Accounts, user: UserId, currency: u32, amount: Amount) -> bool {
-    match get_mut(accounts, user, currency) {
-        None => false,
-        Some(account) => {
-            if account.available < amount {
-                false
-            } else {
-                account.available -= amount;
-                account.frozen += amount;
-                true
-            }
-        }
+pub fn freeze_if(
+    symbol: &Symbol,
+    ask_or_bid: AskOrBid,
+    price: Price,
+    amount: Amount,
+) -> (Currency, Amount) {
+    match ask_or_bid {
+        AskOrBid::Ask => (symbol.0, amount),
+        AskOrBid::Bid => (symbol.1, price * amount),
     }
 }
 
-pub fn unfreeze(accounts: &mut Accounts, user: UserId, currency: u32, amount: Amount) -> bool {
+pub fn try_freeze(
+    accounts: &mut Accounts,
+    user: UserId,
+    currency: Currency,
+    amount: Amount,
+) -> anyhow::Result<()> {
+    let account = get_mut(accounts, user, currency).ok_or(anyhow!("Account not found"))?;
+    ensure!(account.available >= amount, anyhow!("Available not enough"));
+    account.available -= amount;
+    account.frozen += amount;
+    Ok(())
+}
+
+pub fn unfreeze(accounts: &mut Accounts, user: UserId, currency: Currency, amount: Amount) -> bool {
     match get_mut(accounts, user, currency) {
         None => false,
         Some(account) => {
@@ -163,6 +178,19 @@ mod test {
         let ok = deduct_available(&mut all, UserId::zero(), 101, dec!(1.0));
         assert!(!ok);
         assert_eq!(get(&all, UserId::zero(), 101).unwrap().available, dec!(0.1));
+    }
+
+    #[test]
+    pub fn test_freeze() {
+        let mut all = Accounts::new();
+        add_to_available(&mut all, UserId::zero(), 101, dec!(1.11111));
+        let r = try_freeze(&mut all, UserId::zero(), 101, dec!(0.00011));
+        assert!(r.is_ok());
+        let a = get(&all, UserId::zero(), 101);
+        assert!(a.is_some());
+        let a = a.unwrap();
+        assert_eq!(a.available, dec!(1.111));
+        assert_eq!(a.frozen, dec!(0.00011));
     }
 
     fn help(all: &mut Accounts, json: &str) {

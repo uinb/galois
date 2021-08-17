@@ -13,8 +13,10 @@
 // limitations under the License.
 
 use crate::{
-    assets, clearing, core::*, matcher::*, orderbook::*, output, sequence, server, snapshot,
+    assets, clearing, core::*, matcher::*, onchain, orderbook::*, output, sequence, server,
+    snapshot,
 };
+use anyhow::{anyhow, ensure};
 use rust_decimal::{prelude::Zero, Decimal};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -96,63 +98,31 @@ fn handle_limit(
     ask_or_bid: AskOrBid,
     time: u64,
     sender: &Sender<Vec<output::Output>>,
-) -> bool {
-    let orderbook = data.orderbooks.get_mut(&symbol);
-    let account = data.accounts.get_mut(&user);
-    match (orderbook, account) {
-        (Some(orderbook), Some(account)) => {
-            if !orderbook.open
-                || amount < orderbook.min_amount
-                || price.scale() > orderbook.quote_scale
-                || amount.scale() > orderbook.base_scale
-            {
-                return false;
-            }
-            match ask_or_bid {
-                AskOrBid::Bid => {
-                    // check quote account
-                    if let Some(account) = account.get_mut(&symbol.1) {
-                        let vol = price * amount;
-                        if account.available < vol {
-                            return false;
-                        }
-                        account.available -= vol;
-                        account.frozen += vol;
-                    } else {
-                        return false;
-                    }
-                }
-                AskOrBid::Ask => {
-                    // check base account
-                    if let Some(account) = account.get_mut(&symbol.0) {
-                        if account.available < amount {
-                            return false;
-                        }
-                        account.available -= amount;
-                        account.frozen += amount;
-                    } else {
-                        return false;
-                    }
-                }
-            }
-
-            if let Some(mr) = execute_limit(orderbook, user, order, price, amount, ask_or_bid) {
-                let cr = clearing::clear(
-                    &mut data.accounts,
-                    event_id,
-                    &symbol,
-                    orderbook.taker_fee,
-                    orderbook.maker_fee,
-                    &mr,
-                    time,
-                );
-                // FIXME
-                sender.send(cr).unwrap();
-            }
-            true
-        }
-        _ => false,
+) -> anyhow::Result<()> {
+    let orderbook = data
+        .orderbooks
+        .get_mut(&symbol)
+        .ok_or(anyhow!("orderbook doesn't exist"))?;
+    ensure!(
+        orderbook.should_accept(price, amount),
+        anyhow!("order can't be accepted")
+    );
+    let (currency, val) = assets::freeze_if(&symbol, ask_or_bid, price, amount);
+    assets::try_freeze(&mut data.accounts, user, currency, val)?;
+    if let Some(mr) = execute_limit(orderbook, user, order, price, amount, ask_or_bid) {
+        let cr = clearing::clear(
+            &mut data.accounts,
+            event_id,
+            &symbol,
+            orderbook.taker_fee,
+            orderbook.maker_fee,
+            &mr,
+            time,
+        );
+        // FIXME
+        sender.send(cr).unwrap();
     }
+    Ok(())
 }
 
 pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>>, mut data: Data) {
@@ -174,8 +144,7 @@ pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>
                     let inspection = watch
                         .to_inspection()
                         .ok_or_else(|| anyhow::anyhow!("Watch::to_inspection error"))?;
-
-                    do_inspect(inspection, &data)?;
+                    let _ = do_inspect(inspection, &data);
                 }
                 sequence::Fusion::W(seq) => {
                     if !seq.cmd.validate() {
@@ -186,7 +155,6 @@ pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>
                     let event = seq
                         .to_event()
                         .ok_or_else(|| anyhow::anyhow!("Sequence::to_event error"))?;
-
                     let (_, ok) = handle_event(event, &mut data, &sender);
                     if !ok {
                         log::info!("execute sequence {:?} failed", seq);
@@ -205,10 +173,10 @@ fn handle_event(
 ) -> (u64, bool) {
     match event {
         Event::Limit(id, symbol, user, order, price, amount, ask_or_bid, time) => {
-            let ok = handle_limit(
+            let r = handle_limit(
                 id, data, symbol, price, amount, user, order, ask_or_bid, time, sender,
             );
-            (id, ok)
+            (id, r.is_ok())
         }
         Event::Market(id, _symbol, _user, _order, _vol, _ask_or_bid, _time) => {
             // 0. symbol exsits
@@ -387,8 +355,7 @@ fn do_inspect(inspection: Inspection, data: &Data) -> anyhow::Result<()> {
                 None => serde_json::to_vec(&assets::Account {
                     available: Decimal::new(0, 0),
                     frozen: Decimal::new(0, 0),
-                })
-                .unwrap(),
+                })?,
                 Some(a) => serde_json::to_vec(a)?,
             };
             server::publish(server::Message::with_payload(session, req_id, v));
