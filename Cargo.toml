@@ -4,8 +4,7 @@ version = "0.1.0"
 authors = ["UINB Technologies"]
 edition = "2018"
 license = "Apache-2.0"
-homepage = "https://uinb.tech"
-repository = "https://github.com/UINB-Tech/"
+repository = "https://github.com/uinb/galois"
 description = "High performance matching system"
 readme = "README.md"
 
@@ -91,6 +90,15 @@ features = ["serde"]
 
 [dependencies.fixed-macro]
 version = "1.1"
+
+[dependencies.sparse-merkle-tree]
+version = "0.5.2-rc1"
+git = "https://github.com/uinb/sparse-merkle-tree"
+#path = "../sparse-merkle-tree"
+features = ["serde-rs", "sha256"]
+
+[dependencies.sha2]
+version = "0.9"
 
 [dev-dependencies]
 tempdir = "0.3"

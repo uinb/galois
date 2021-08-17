@@ -227,6 +227,13 @@ impl OrderBook {
             }
         }
     }
+
+    pub fn should_accept(&self, price: Price, amount: Amount) -> bool {
+        return self.open
+            && amount >= self.min_amount
+            && price.scale() <= self.quote_scale
+            && amount.scale() <= self.base_scale;
+    }
 }
 
 #[test]

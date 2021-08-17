@@ -266,7 +266,6 @@ impl Watch {
 pub struct Command {
     pub cmd: u32,
     order_id: Option<u64>,
-    // TODO
     pub(crate) user_id: Option<String>,
     base: Option<u32>,
     quote: Option<u32>,
@@ -321,6 +320,11 @@ impl Command {
                     price.is_sign_positive()
                         && amount.is_sign_positive()
                         && UserId::from_str(user_id).is_ok()
+                        && amount < max_support_number()
+                        && price < max_support_number()
+                        && amount
+                            .checked_mul(price)
+                            .map_or(false, |r| r < max_support_number())
                 }
                 _ => false,
             },

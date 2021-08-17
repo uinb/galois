@@ -27,6 +27,7 @@ pub mod core;
 pub mod db;
 pub mod event;
 pub mod matcher;
+pub mod onchain;
 pub mod orderbook;
 pub mod output;
 pub mod sequence;

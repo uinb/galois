@@ -305,6 +305,7 @@ pub fn clear(
     }
 }
 
+#[warn(unused_must_use)]
 #[cfg(test)]
 pub mod test {
     use crate::assets;
@@ -324,12 +325,13 @@ pub mod test {
             100,
             Decimal::from_str("10000").unwrap(),
         );
-        assets::freeze(
+        assets::try_freeze(
             &mut accounts,
             UserId::from_low_u64_be(1),
             100,
             Decimal::from_str("10000").unwrap(),
-        );
+        )
+        .unwrap();
         assert_eq!(
             Decimal::zero(),
             assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 100)
@@ -350,12 +352,13 @@ pub mod test {
             101,
             Decimal::from_str("1").unwrap(),
         );
-        assets::freeze(
+        assets::try_freeze(
             &mut accounts,
             UserId::from_low_u64_be(2),
             101,
             Decimal::from_str("1").unwrap(),
-        );
+        )
+        .unwrap();
         assert_eq!(
             Decimal::zero(),
             assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 101)
@@ -454,12 +457,13 @@ pub mod test {
             100,
             Decimal::from_str("10000").unwrap(),
         );
-        assets::freeze(
+        assets::try_freeze(
             &mut accounts,
             UserId::from_low_u64_be(1),
             100,
             Decimal::from_str("10000").unwrap(),
-        );
+        )
+        .unwrap();
         assert_eq!(
             Decimal::zero(),
             assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 100)
@@ -480,12 +484,13 @@ pub mod test {
             101,
             Decimal::from_str("1").unwrap(),
         );
-        assets::freeze(
+        assets::try_freeze(
             &mut accounts,
             UserId::from_low_u64_be(2),
             101,
             Decimal::from_str("1").unwrap(),
-        );
+        )
+        .unwrap();
         assert_eq!(
             Decimal::zero(),
             assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 101)
@@ -584,12 +589,13 @@ pub mod test {
             100,
             Decimal::from_str("10000").unwrap(),
         );
-        assets::freeze(
+        assets::try_freeze(
             &mut accounts,
             UserId::from_low_u64_be(1),
             100,
             Decimal::from_str("10000").unwrap(),
-        );
+        )
+        .unwrap();
         // taker: ask 0.5 btc price 9999
         assets::add_to_available(
             &mut accounts,
@@ -597,12 +603,13 @@ pub mod test {
             101,
             Decimal::from_str("1").unwrap(),
         );
-        assets::freeze(
+        assets::try_freeze(
             &mut accounts,
             UserId::from_low_u64_be(2),
             101,
             Decimal::from_str("0.5").unwrap(),
-        );
+        )
+        .unwrap();
         let symbol = (101, 100);
         let mr = Match {
             maker: vec![Maker::maker_filled(
@@ -731,12 +738,13 @@ pub mod test {
             100,
             Decimal::from_str("10000").unwrap(),
         );
-        assets::freeze(
+        assets::try_freeze(
             &mut accounts,
             UserId::from_low_u64_be(1),
             100,
             Decimal::from_str("10000").unwrap(),
-        );
+        )
+        .unwrap();
         // taker: ask 1.5 btc price 9999
         assets::add_to_available(
             &mut accounts,
@@ -744,12 +752,13 @@ pub mod test {
             101,
             Decimal::from_str("2").unwrap(),
         );
-        assets::freeze(
+        assets::try_freeze(
             &mut accounts,
             UserId::from_low_u64_be(2),
             101,
             Decimal::from_str("1.5").unwrap(),
-        );
+        )
+        .unwrap();
         let symbol = (101, 100);
         let mr = Match {
             maker: vec![Maker::maker_filled(
@@ -880,12 +889,13 @@ pub mod test {
             100,
             Decimal::from_str("10000").unwrap(),
         );
-        assets::freeze(
+        assets::try_freeze(
             &mut accounts,
             UserId::from_low_u64_be(1),
             100,
             Decimal::from_str("10000").unwrap(),
-        );
+        )
+        .unwrap();
         // taker: ask 1 btc price 9999
         assets::add_to_available(
             &mut accounts,
@@ -893,12 +903,13 @@ pub mod test {
             101,
             Decimal::from_str("1").unwrap(),
         );
-        assets::freeze(
+        assets::try_freeze(
             &mut accounts,
             UserId::from_low_u64_be(2),
             101,
             Decimal::from_str("1").unwrap(),
-        );
+        )
+        .unwrap();
         let symbol = (101, 100);
         let mr = Match {
             maker: vec![Maker::maker_filled(
@@ -1008,7 +1019,7 @@ pub mod test {
 
         let price = Decimal::new(13333, 0);
         let amount = Decimal::new(1, 1);
-        assets::freeze(&mut accounts, UserId::from_low_u64_be(1), 101, amount);
+        assets::try_freeze(&mut accounts, UserId::from_low_u64_be(1), 101, amount).unwrap();
         execute_limit(
             &mut book,
             UserId::from_low_u64_be(1),
@@ -1020,12 +1031,13 @@ pub mod test {
 
         let price = Decimal::new(13333, 0);
         let amount = Decimal::new(5, 1);
-        assets::freeze(
+        assets::try_freeze(
             &mut accounts,
             UserId::from_low_u64_be(1),
             100,
             price * amount,
-        );
+        )
+        .unwrap();
         assert_eq!(
             assets::get(&accounts, UserId::from_low_u64_be(1), 100)
                 .unwrap()
@@ -1124,7 +1136,7 @@ pub mod test {
 
         let price = Decimal::new(10000, 0);
         let amount = Decimal::new(1, 1);
-        assets::freeze(&mut accounts, UserId::from_low_u64_be(1), 101, amount);
+        assets::try_freeze(&mut accounts, UserId::from_low_u64_be(1), 101, amount).unwrap();
         execute_limit(
             &mut book,
             UserId::from_low_u64_be(1),
@@ -1136,12 +1148,13 @@ pub mod test {
 
         let price = Decimal::new(13333, 0);
         let amount = Decimal::new(5, 1);
-        assets::freeze(
+        assets::try_freeze(
             &mut accounts,
             UserId::from_low_u64_be(2),
             100,
             price * amount,
-        );
+        )
+        .unwrap();
         let mr = execute_limit(
             &mut book,
             UserId::from_low_u64_be(2),
@@ -1254,12 +1267,13 @@ pub mod test {
 
         let price = Decimal::new(13333, 0);
         let amount = Decimal::new(5, 1);
-        assets::freeze(
+        assets::try_freeze(
             &mut accounts,
             UserId::from_low_u64_be(2),
             100,
             price * amount,
-        );
+        )
+        .unwrap();
         execute_limit(
             &mut book,
             UserId::from_low_u64_be(2),
@@ -1271,7 +1285,7 @@ pub mod test {
 
         let price = Decimal::new(10000, 0);
         let amount = Decimal::new(1, 1);
-        assets::freeze(&mut accounts, UserId::from_low_u64_be(1), 101, amount);
+        assets::try_freeze(&mut accounts, UserId::from_low_u64_be(1), 101, amount).unwrap();
         let mr = execute_limit(
             &mut book,
             UserId::from_low_u64_be(1),
