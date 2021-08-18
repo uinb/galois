@@ -29,6 +29,7 @@ pub mod event;
 pub mod matcher;
 pub mod orderbook;
 pub mod output;
+#[cfg(feature = "prover")]
 pub mod prover;
 pub mod sequence;
 pub mod server;

@@ -17,7 +17,6 @@ use crate::orderbook::{AskOrBid, Order, OrderBook, OrderPage};
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum State {
-    #[allow(dead_code)]
     Submitted,
     Canceled,
     Filled,
@@ -70,7 +69,7 @@ pub struct Taker {
 }
 
 impl Taker {
-    pub fn terminate(order: Order, ask_or_bid: AskOrBid, state: State) -> Self {
+    pub fn taker(order: Order, ask_or_bid: AskOrBid, state: State) -> Self {
         Self {
             user_id: order.user,
             order_id: order.id,
@@ -186,17 +185,14 @@ pub fn execute_limit(
     price: Price,
     amount: Amount,
     ask_or_bid: AskOrBid,
-) -> Option<Match> {
+) -> Match {
     let mut makers = Vec::<Maker>::new();
     let mut order = Order::new(order_id, user_id, price, amount);
     loop {
         if order.is_filled() {
-            return match !makers.is_empty() {
-                true => Some(Match {
-                    maker: makers,
-                    taker: Taker::terminate(order, ask_or_bid, State::Filled),
-                }),
-                false => None,
+            return Match {
+                maker: makers,
+                taker: Taker::taker(order, ask_or_bid, State::Filled),
             };
         }
         if let Some(mut best) = book.get_best_if_match(ask_or_bid, &order.price) {
@@ -214,12 +210,12 @@ pub fn execute_limit(
             makers.append(&mut traded);
         } else {
             book.insert(order.clone(), ask_or_bid);
-            return match !makers.is_empty() {
-                true => Some(Match {
-                    maker: makers,
-                    taker: Taker::terminate(order, ask_or_bid, State::PartialFilled),
-                }),
-                false => None,
+            return Match {
+                taker: match makers.is_empty() {
+                    true => Taker::taker(order, ask_or_bid, State::Submitted),
+                    false => Taker::taker(order, ask_or_bid, State::PartialFilled),
+                },
+                maker: makers,
             };
         }
     }
@@ -273,7 +269,7 @@ pub fn cancel(book: &mut OrderBook, order_id: u64) -> Option<Match> {
     };
     removed.map(|order| Match {
         maker: vec![],
-        taker: Taker::cancel(order.user, order_id, order.price, order.unfilled, from),
+        taker: Taker::taker(order, from, State::Canceled),
     })
 }
 
@@ -310,7 +306,8 @@ mod test {
             amount,
             AskOrBid::Bid,
         );
-        assert!(mr.is_none());
+        assert_eq!(State::Submitted, mr.taker.state);
+        assert!(mr.maker.is_empty());
         assert_eq!(
             dec!(0.1),
             *book
@@ -341,7 +338,8 @@ mod test {
             amount,
             AskOrBid::Bid,
         );
-        assert!(mr.is_none());
+        assert_eq!(State::Submitted, mr.taker.state);
+        assert!(mr.maker.is_empty());
         assert_eq!(
             dec!(0.1),
             *book
@@ -367,8 +365,8 @@ mod test {
             price,
             amount,
             AskOrBid::Ask,
-        )
-        .unwrap();
+        );
+        assert_eq!(State::Filled, mr.taker.state);
         assert!(!mr.maker.is_empty());
         assert!(!book.indices.contains_key(&1001));
         assert!(book.indices.contains_key(&1002));
@@ -410,7 +408,7 @@ mod test {
             amount,
             AskOrBid::Ask,
         );
-        assert!(mr.is_none());
+        assert_eq!(State::Submitted, mr.taker.state);
         assert!(book.get_best_if_match(AskOrBid::Bid, &dec!(0.11)).is_none());
         assert_eq!(
             dec!(0.12),
@@ -428,7 +426,7 @@ mod test {
         );
         assert!(book.indices.contains_key(&1004));
 
-        let mr = cancel(&mut book, 1002).unwrap();
+        let mr = cancel(&mut book, 1002);
         let price = dec!(0.1);
         let unfilled = dec!(900);
         assert_eq!(
@@ -439,14 +437,15 @@ mod test {
                 unfilled,
                 AskOrBid::Bid
             ),
-            mr.taker
+            mr.unwrap().taker
         );
         assert!(!book.indices.contains_key(&1002));
         assert!(book.bids.is_empty());
 
         let price = dec!(0.12);
         let unfilled = dec!(100);
-        let mr = cancel(&mut book, 1004).unwrap();
+        let mr = cancel(&mut book, 1004);
+        assert!(mr.is_some());
         assert_eq!(
             Taker::cancel(
                 UserId::from_low_u64_be(1),
@@ -455,7 +454,7 @@ mod test {
                 unfilled,
                 AskOrBid::Ask
             ),
-            mr.taker
+            mr.unwrap().taker
         );
         assert!(!book.indices.contains_key(&1004));
         assert!(book.asks.is_empty());

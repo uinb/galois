@@ -15,7 +15,7 @@
 use crate::{
     assets,
     core::*,
-    matcher::{Match, Role},
+    matcher::{Match, Role, State},
     orderbook::AskOrBid,
     output::Output,
 };
@@ -32,6 +32,29 @@ pub fn clear(
 ) -> Vec<Output> {
     let base = symbol.0;
     let quote = symbol.1;
+    if mr.taker.state == State::Submitted {
+        let base_account = assets::get_to_owned(accounts, &mr.taker.user_id, base);
+        let quote_account = assets::get_to_owned(accounts, &mr.taker.user_id, quote);
+        return vec![Output {
+            event_id,
+            order_id: mr.taker.order_id,
+            user_id: mr.taker.user_id,
+            symbol: *symbol,
+            role: Role::Taker,
+            state: mr.taker.state,
+            ask_or_bid: AskOrBid::Ask,
+            price: mr.taker.price,
+            base_delta: Amount::zero(),
+            quote_delta: Amount::zero(),
+            base_charge: Amount::zero(),
+            quote_charge: Amount::zero(),
+            base_available: base_account.available,
+            quote_available: quote_account.available,
+            base_frozen: base_account.frozen,
+            quote_frozen: quote_account.frozen,
+            timestamp: time,
+        }];
+    }
     match mr.maker.is_empty() {
         // cancel
         true => match mr.taker.ask_or_bid {
@@ -1110,8 +1133,7 @@ pub mod test {
             price,
             amount,
             AskOrBid::Bid,
-        )
-        .unwrap();
+        );
 
         let symbol = (101, 100);
         let out = super::clear(&mut accounts, 2, &symbol, taker_fee, maker_fee, &mr, 0);
@@ -1215,8 +1237,7 @@ pub mod test {
             price,
             amount,
             AskOrBid::Bid,
-        )
-        .unwrap();
+        );
 
         let symbol = (101, 100);
         let out = super::clear(&mut accounts, 2, &symbol, taker_fee, maker_fee, &mr, 0);
@@ -1346,8 +1367,7 @@ pub mod test {
             price,
             amount,
             AskOrBid::Ask,
-        )
-        .unwrap();
+        );
 
         let symbol = (101, 100);
         let out = super::clear(&mut accounts, 2, &symbol, taker_fee, maker_fee, &mr, 0);

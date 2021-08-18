@@ -12,18 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use mysql::{prelude::*, *};
-use redis::Commands;
-use std::collections::HashMap;
-use std::convert::Into;
-use std::sync::mpsc::{Receiver, Sender};
-use std::thread;
-use std::time::Duration;
-
 use crate::core::*;
-use crate::{core::*, db::DB, db::REDIS, matcher::*, orderbook::AskOrBid, orderbook::Depth};
 use rust_decimal::{prelude::*, Decimal};
 use sha2::{Digest, Sha256};
+use std::convert::Into;
 
 pub const ONE_ONCHAIN: u128 = 1_000_000_000_000_000_000;
 pub const SCALE_ONCHAIN: u32 = 18;
@@ -73,4 +65,15 @@ pub fn new_orderbook_merkle_leaf(symbol: Symbol, ask_size: u128, bid_size: u128)
     hasher.update(&[ORDERBOOK_KEY][..]);
     hasher.update(&symbol_bits[..]);
     (hasher.finalize().into(), MerkleIdentity::from(value))
+}
+
+// FIXME unwrap
+pub fn prove(merkle_tree: &mut GlobalStates, leaves: Vec<MerkleLeaf>) -> Vec<u8> {
+    leaves.iter().for_each(|(k, v)| {
+        merkle_tree.update(*k, *v).unwrap();
+    });
+    let proof = merkle_tree
+        .merkle_proof(leaves.iter().map(|(k, _)| *k).collect::<Vec<_>>())
+        .unwrap();
+    proof.compile(leaves).unwrap().into()
 }
