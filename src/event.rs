@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::{
-    assets, clearing, core::*, matcher, onchain, orderbook::*, output, sequence, server, snapshot,
+    assets, clearing, core::*, matcher, orderbook::*, output, prover, sequence, server, snapshot,
 };
 use anyhow::{anyhow, ensure};
 use rust_decimal::{prelude::Zero, Decimal};
@@ -115,11 +115,6 @@ fn handle_limit(
     let (currency, val) = assets::freeze_if(&symbol, ask_or_bid, price, amount);
     let after_freeze = assets::try_freeze(&mut data.accounts, user, currency, val)?;
     // notice: after freezing account, we can't return Err anymore, instead, let system crash
-    let (va, vf) = (
-        onchain::to_merkle_represent(after_freeze.available).unwrap(),
-        onchain::to_merkle_represent(after_freeze.available).unwrap(),
-    );
-    let leaf = onchain::new_account_merkle_leaf(user, currency, va, vf);
     if let Some(mr) = matcher::execute_limit(orderbook, user, order, price, amount, ask_or_bid) {
         let cr = clearing::clear(
             &mut data.accounts,
@@ -131,6 +126,13 @@ fn handle_limit(
             time,
         );
         sender.send(cr).unwrap();
+    } else {
+        // TODO orderbook +1, account change
+        let (va, vf) = (
+            prover::to_merkle_represent(after_freeze.available).unwrap(),
+            prover::to_merkle_represent(after_freeze.available).unwrap(),
+        );
+        let leaf0 = prover::new_account_merkle_leaf(user, currency, va, vf);
     }
     Ok(())
 }

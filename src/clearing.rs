@@ -38,6 +38,8 @@ pub fn clear(
             AskOrBid::Ask => {
                 // revert base
                 assets::unfreeze(accounts, mr.taker.user_id, base, mr.taker.unfilled);
+                let base_account = assets::get_to_owned(accounts, &mr.taker.user_id, base);
+                let quote_account = assets::get_to_owned(accounts, &mr.taker.user_id, quote);
                 vec![Output {
                     event_id,
                     order_id: mr.taker.order_id,
@@ -47,10 +49,14 @@ pub fn clear(
                     state: mr.taker.state,
                     ask_or_bid: AskOrBid::Ask,
                     price: mr.taker.price,
-                    base: Amount::zero(),
-                    quote: Amount::zero(),
-                    base_fee: Amount::zero(),
-                    quote_fee: Amount::zero(),
+                    base_delta: Amount::zero(),
+                    quote_delta: Amount::zero(),
+                    base_charge: Amount::zero(),
+                    quote_charge: Amount::zero(),
+                    base_available: base_account.available,
+                    quote_available: quote_account.available,
+                    base_frozen: base_account.frozen,
+                    quote_frozen: quote_account.frozen,
                     timestamp: time,
                 }]
             }
@@ -62,6 +68,9 @@ pub fn clear(
                     quote,
                     mr.taker.unfilled * mr.taker.price,
                 );
+                assets::unfreeze(accounts, mr.taker.user_id, base, mr.taker.unfilled);
+                let base_account = assets::get_to_owned(accounts, &mr.taker.user_id, base);
+                let quote_account = assets::get_to_owned(accounts, &mr.taker.user_id, quote);
                 vec![Output {
                     event_id,
                     order_id: mr.taker.order_id,
@@ -71,10 +80,14 @@ pub fn clear(
                     state: mr.taker.state,
                     ask_or_bid: AskOrBid::Ask,
                     price: mr.taker.price,
-                    base: Decimal::zero(),
-                    quote: Decimal::zero(),
-                    base_fee: Decimal::zero(),
-                    quote_fee: Decimal::zero(),
+                    base_delta: Amount::zero(),
+                    quote_delta: Amount::zero(),
+                    base_charge: Amount::zero(),
+                    quote_charge: Amount::zero(),
+                    base_available: base_account.available,
+                    quote_available: quote_account.available,
+                    base_frozen: base_account.frozen,
+                    quote_frozen: quote_account.frozen,
                     timestamp: time,
                 }]
             }
@@ -101,6 +114,8 @@ pub fn clear(
                             let charge_fee = m.filled * maker_fee;
                             assets::deduct_available(accounts, m.user_id, base, charge_fee);
                             assets::add_to_available(accounts, SYSTEM, base, charge_fee);
+                            let base_account = assets::get_to_owned(accounts, &m.user_id, base);
+                            let quote_account = assets::get_to_owned(accounts, &m.user_id, quote);
                             cr.push(Output {
                                 event_id,
                                 order_id: m.order_id,
@@ -110,10 +125,14 @@ pub fn clear(
                                 state: m.state,
                                 ask_or_bid: AskOrBid::Bid,
                                 price: m.price,
-                                base: m.filled,
-                                quote: -quote_decr,
-                                base_fee: -charge_fee,
-                                quote_fee: Decimal::zero(),
+                                base_delta: m.filled,
+                                quote_delta: -quote_decr,
+                                base_charge: -charge_fee,
+                                quote_charge: Decimal::zero(),
+                                base_available: base_account.available,
+                                quote_available: quote_account.available,
+                                base_frozen: base_account.frozen,
+                                quote_frozen: quote_account.frozen,
                                 timestamp: time,
                             });
                         } else {
@@ -127,6 +146,8 @@ pub fn clear(
                                 quote,
                                 quote_decr * maker_fee.abs(),
                             );
+                            let base_account = assets::get_to_owned(accounts, &m.user_id, base);
+                            let quote_account = assets::get_to_owned(accounts, &m.user_id, quote);
                             cr.push(Output {
                                 event_id,
                                 order_id: m.order_id,
@@ -136,10 +157,14 @@ pub fn clear(
                                 state: m.state,
                                 ask_or_bid: AskOrBid::Bid,
                                 price: m.price,
-                                base: m.filled,
-                                quote: -quote_decr,
-                                base_fee: Decimal::zero(),
-                                quote_fee: quote_decr * maker_fee.abs(),
+                                base_delta: m.filled,
+                                quote_delta: -quote_decr,
+                                base_charge: Decimal::zero(),
+                                quote_charge: quote_decr * maker_fee.abs(),
+                                base_available: base_account.available,
+                                quote_available: quote_account.available,
+                                base_frozen: base_account.frozen,
+                                quote_frozen: quote_account.frozen,
                                 timestamp: time,
                             });
                         }
@@ -166,6 +191,8 @@ pub fn clear(
                             quote_sum * (taker_fee - maker_fee.abs()),
                         );
                     }
+                    let base_account = assets::get_to_owned(accounts, &mr.taker.user_id, base);
+                    let quote_account = assets::get_to_owned(accounts, &mr.taker.user_id, quote);
                     cr.push(Output {
                         event_id,
                         order_id: mr.taker.order_id,
@@ -175,10 +202,14 @@ pub fn clear(
                         state: mr.taker.state,
                         ask_or_bid: AskOrBid::Ask,
                         price: mr.taker.price,
-                        base: -base_sum,
-                        quote: quote_sum,
-                        base_fee: Decimal::zero(),
-                        quote_fee: -charge_fee,
+                        base_delta: -base_sum,
+                        quote_delta: quote_sum,
+                        base_charge: Decimal::zero(),
+                        quote_charge: -charge_fee,
+                        base_available: base_account.available,
+                        quote_available: quote_account.available,
+                        base_frozen: base_account.frozen,
+                        quote_frozen: quote_account.frozen,
                         timestamp: time,
                     });
                     cr
@@ -208,6 +239,10 @@ pub fn clear(
                             let charge_fee = quote_incr * maker_fee;
                             assets::deduct_available(accounts, m.user_id, quote, charge_fee);
                             assets::add_to_available(accounts, SYSTEM, quote, charge_fee);
+                            let base_account =
+                                assets::get_to_owned(accounts, &mr.taker.user_id, base);
+                            let quote_account =
+                                assets::get_to_owned(accounts, &mr.taker.user_id, quote);
                             cr.push(Output {
                                 event_id,
                                 order_id: m.order_id,
@@ -217,10 +252,14 @@ pub fn clear(
                                 state: m.state,
                                 ask_or_bid: AskOrBid::Ask,
                                 price: m.price,
-                                base: -m.filled,
-                                quote: quote_incr,
-                                base_fee: Decimal::zero(),
-                                quote_fee: -charge_fee,
+                                base_delta: -m.filled,
+                                quote_delta: quote_incr,
+                                base_charge: Decimal::zero(),
+                                quote_charge: -charge_fee,
+                                base_available: base_account.available,
+                                quote_available: quote_account.available,
+                                base_frozen: base_account.frozen,
+                                quote_frozen: quote_account.frozen,
                                 timestamp: time,
                             });
                         } else {
@@ -233,6 +272,10 @@ pub fn clear(
                                 base,
                                 m.filled * maker_fee.abs(),
                             );
+                            let base_account =
+                                assets::get_to_owned(accounts, &mr.taker.user_id, base);
+                            let quote_account =
+                                assets::get_to_owned(accounts, &mr.taker.user_id, quote);
                             cr.push(Output {
                                 event_id,
                                 order_id: m.order_id,
@@ -242,10 +285,14 @@ pub fn clear(
                                 state: m.state,
                                 ask_or_bid: AskOrBid::Ask,
                                 price: m.price,
-                                base: -m.filled,
-                                quote: quote_incr,
-                                base_fee: m.filled * maker_fee.abs(),
-                                quote_fee: Decimal::zero(),
+                                base_delta: -m.filled,
+                                quote_delta: quote_incr,
+                                base_charge: m.filled * maker_fee.abs(),
+                                quote_charge: Decimal::zero(),
+                                base_available: base_account.available,
+                                quote_available: quote_account.available,
+                                base_frozen: base_account.frozen,
+                                quote_frozen: quote_account.frozen,
                                 timestamp: time,
                             });
                         }
@@ -283,6 +330,8 @@ pub fn clear(
                     if return_quote > Decimal::zero() {
                         assets::unfreeze(accounts, mr.taker.user_id, quote, return_quote);
                     }
+                    let base_account = assets::get_to_owned(accounts, &mr.taker.user_id, base);
+                    let quote_account = assets::get_to_owned(accounts, &mr.taker.user_id, quote);
                     cr.push(Output {
                         event_id,
                         order_id: mr.taker.order_id,
@@ -292,10 +341,14 @@ pub fn clear(
                         state: mr.taker.state,
                         ask_or_bid: AskOrBid::Bid,
                         price: mr.taker.price,
-                        base: base_sum,
-                        quote: -quote_sum,
-                        base_fee: -charge_fee,
-                        quote_fee: Decimal::zero(),
+                        base_delta: base_sum,
+                        quote_delta: -quote_sum,
+                        base_charge: -charge_fee,
+                        quote_charge: Decimal::zero(),
+                        base_available: base_account.available,
+                        quote_available: quote_account.available,
+                        base_frozen: base_account.frozen,
+                        quote_frozen: quote_account.frozen,
                         timestamp: time,
                     });
                     cr
@@ -1062,15 +1115,15 @@ pub mod test {
 
         let symbol = (101, 100);
         let out = super::clear(&mut accounts, 2, &symbol, taker_fee, maker_fee, &mr, 0);
-        assert_eq!(out[0].base, Decimal::new(-1, 1));
-        assert_eq!(out[0].quote, Decimal::new(13333, 1));
-        assert_eq!(out[0].base_fee, Decimal::new(5, 5));
-        assert_eq!(out[0].quote_fee, Decimal::zero());
+        assert_eq!(out[0].base_delta, Decimal::new(-1, 1));
+        assert_eq!(out[0].quote_delta, Decimal::new(13333, 1));
+        assert_eq!(out[0].base_charge, Decimal::new(5, 5));
+        assert_eq!(out[0].quote_charge, Decimal::zero());
 
-        assert_eq!(out[1].base, Decimal::new(1, 1));
-        assert_eq!(out[1].quote, Decimal::new(-13333, 1));
-        assert_eq!(out[1].base_fee, Decimal::new(-1, 4));
-        assert_eq!(out[1].quote_fee, Decimal::zero());
+        assert_eq!(out[1].base_delta, Decimal::new(1, 1));
+        assert_eq!(out[1].quote_delta, Decimal::new(-13333, 1));
+        assert_eq!(out[1].base_charge, Decimal::new(-1, 4));
+        assert_eq!(out[1].quote_charge, Decimal::zero());
 
         assert_eq!(
             assets::get(&accounts, UserId::from_low_u64_be(1), 100)
@@ -1167,15 +1220,15 @@ pub mod test {
 
         let symbol = (101, 100);
         let out = super::clear(&mut accounts, 2, &symbol, taker_fee, maker_fee, &mr, 0);
-        assert_eq!(out[0].base, Decimal::new(-1, 1));
-        assert_eq!(out[0].quote, Decimal::new(10000, 1));
-        assert_eq!(out[0].base_fee, Decimal::new(5, 5));
-        assert_eq!(out[0].quote_fee, Decimal::zero());
+        assert_eq!(out[0].base_delta, Decimal::new(-1, 1));
+        assert_eq!(out[0].quote_delta, Decimal::new(10000, 1));
+        assert_eq!(out[0].base_charge, Decimal::new(5, 5));
+        assert_eq!(out[0].quote_charge, Decimal::zero());
 
-        assert_eq!(out[1].base, Decimal::new(1, 1));
-        assert_eq!(out[1].quote, Decimal::new(-10000, 1));
-        assert_eq!(out[1].base_fee, Decimal::new(-1, 4));
-        assert_eq!(out[1].quote_fee, Decimal::zero());
+        assert_eq!(out[1].base_delta, Decimal::new(1, 1));
+        assert_eq!(out[1].quote_delta, Decimal::new(-10000, 1));
+        assert_eq!(out[1].base_charge, Decimal::new(-1, 4));
+        assert_eq!(out[1].quote_charge, Decimal::zero());
 
         println!("{:?}", mr);
         assert_eq!(
@@ -1299,10 +1352,10 @@ pub mod test {
         let symbol = (101, 100);
         let out = super::clear(&mut accounts, 2, &symbol, taker_fee, maker_fee, &mr, 0);
         // 2: maker bid
-        assert_eq!(out[0].base, Decimal::new(1, 1));
-        assert_eq!(out[0].quote, Decimal::new(-13333, 1));
-        assert_eq!(out[0].base_fee, Decimal::zero());
-        assert_eq!(out[0].quote_fee, Decimal::new(66665, 5));
+        assert_eq!(out[0].base_delta, Decimal::new(1, 1));
+        assert_eq!(out[0].quote_delta, Decimal::new(-13333, 1));
+        assert_eq!(out[0].base_charge, Decimal::zero());
+        assert_eq!(out[0].quote_charge, Decimal::new(66665, 5));
         assert_eq!(
             assets::get(&accounts, UserId::from_low_u64_be(2), 100)
                 .unwrap()
@@ -1328,10 +1381,10 @@ pub mod test {
             Decimal::zero()
         );
         // 1: taker ask
-        assert_eq!(out[1].base, Decimal::new(-1, 1));
-        assert_eq!(out[1].quote, Decimal::new(13333, 1));
-        assert_eq!(out[1].base_fee, Decimal::zero());
-        assert_eq!(out[1].quote_fee, Decimal::new(-13333, 4));
+        assert_eq!(out[1].base_delta, Decimal::new(-1, 1));
+        assert_eq!(out[1].quote_delta, Decimal::new(13333, 1));
+        assert_eq!(out[1].base_charge, Decimal::zero());
+        assert_eq!(out[1].quote_charge, Decimal::new(-13333, 4));
         assert_eq!(
             assets::get(&accounts, UserId::from_low_u64_be(1), 100)
                 .unwrap()
