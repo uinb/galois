@@ -18,7 +18,7 @@ use rust_decimal::{prelude::Zero, Decimal};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq, Default)]
 pub struct Account {
     pub available: Decimal,
     pub frozen: Decimal,
@@ -35,6 +35,15 @@ pub fn get(accounts: &Accounts, user: UserId, currency: Currency) -> Option<&Acc
     match accounts.get(&user) {
         None => None,
         Some(account) => account.get(&currency),
+    }
+}
+
+pub fn get_to_owned(accounts: &Accounts, user: &UserId, currency: Currency) -> Account {
+    match accounts.get(user) {
+        None => Account::default(),
+        Some(account) => account
+            .get(&currency)
+            .map_or(Account::default(), |a| a.clone()),
     }
 }
 

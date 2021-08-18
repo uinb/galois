@@ -27,9 +27,10 @@ pub mod core;
 pub mod db;
 pub mod event;
 pub mod matcher;
-pub mod onchain;
 pub mod orderbook;
 pub mod output;
+#[cfg(feature = "prover")]
+pub mod prover;
 pub mod sequence;
 pub mod server;
 pub mod snapshot;

@@ -17,7 +17,6 @@ use crate::orderbook::{AskOrBid, Order, OrderBook, OrderPage};
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum State {
-    #[allow(dead_code)]
     Submitted,
     Canceled,
     Filled,
@@ -70,6 +69,17 @@ pub struct Taker {
 }
 
 impl Taker {
+    pub fn taker(order: Order, ask_or_bid: AskOrBid, state: State) -> Self {
+        Self {
+            user_id: order.user,
+            order_id: order.id,
+            price: order.price,
+            unfilled: order.unfilled,
+            ask_or_bid: ask_or_bid,
+            state,
+        }
+    }
+
     pub fn taker_filled(
         user_id: UserId,
         order_id: u64,
@@ -168,7 +178,6 @@ pub struct Match {
     pub taker: Taker,
 }
 
-// TODO bump merkle proofs
 pub fn execute_limit(
     book: &mut OrderBook,
     user_id: UserId,
@@ -176,91 +185,60 @@ pub fn execute_limit(
     price: Price,
     amount: Amount,
     ask_or_bid: AskOrBid,
-) -> Option<Match> {
+) -> Match {
     let mut makers = Vec::<Maker>::new();
-    let mut unfilled = amount;
+    let mut order = Order::new(order_id, user_id, price, amount);
     loop {
-        if unfilled == Amount::ZERO {
-            return match !makers.is_empty() {
-                true => Some(Match {
-                    maker: makers,
-                    taker: Taker::taker_filled(user_id, order_id, price, ask_or_bid),
-                }),
-                false => None,
+        if order.is_filled() {
+            return Match {
+                maker: makers,
+                taker: Taker::taker(order, ask_or_bid, State::Filled),
             };
         }
-        if let Some(mut best) = book.get_best_match(ask_or_bid) {
-            if !can_trade(*best.key(), price, ask_or_bid) {
-                let order = Order::new(order_id, user_id, price, unfilled);
-                book.insert(order, ask_or_bid);
-                return match !makers.is_empty() {
-                    true => Some(Match {
-                        maker: makers,
-                        taker: Taker::taker_placed(user_id, order_id, price, unfilled, ask_or_bid),
-                    }),
-                    false => None,
-                };
-            }
+        if let Some(mut best) = book.get_best_if_match(ask_or_bid, &order.price) {
             let page = best.get_mut();
-            let (remain, mut v) = take(page, unfilled);
+            let mut traded = take(page, &mut order);
             if page.is_empty() {
                 best.remove();
             }
-            v.iter().filter(|m| m.state == State::Filled).for_each(|m| {
-                book.indices.remove(&m.order_id);
+            traded.iter().for_each(|m| {
+                book.decr_size_on(ask_or_bid, &m.filled);
+                if m.state == State::Filled {
+                    book.indices.remove(&m.order_id);
+                }
             });
-            unfilled = remain;
-            makers.append(&mut v);
+            makers.append(&mut traded);
         } else {
-            let order = Order::new(order_id, user_id, price, unfilled);
-            book.insert(order, ask_or_bid);
-            return match !makers.is_empty() {
-                true => Some(Match {
-                    maker: makers,
-                    taker: Taker::taker_placed(user_id, order_id, price, unfilled, ask_or_bid),
-                }),
-                false => None,
+            book.insert(order.clone(), ask_or_bid);
+            return Match {
+                taker: match makers.is_empty() {
+                    true => Taker::taker(order, ask_or_bid, State::Submitted),
+                    false => Taker::taker(order, ask_or_bid, State::PartialFilled),
+                },
+                maker: makers,
             };
         }
     }
 }
 
-fn take(page: &mut OrderPage, mut taker: Amount) -> (Amount, Vec<Maker>) {
+fn take(page: &mut OrderPage, taker: &mut Order) -> Vec<Maker> {
     let mut matches = Vec::<Maker>::new();
-    while !taker.is_zero() && !page.is_empty() {
+    while !taker.is_filled() && !page.is_empty() {
         let mut oldest = page.orders.entries().next().unwrap();
-        if taker >= oldest.get().unfilled {
-            let maker = oldest.get();
-            matches.push(Maker::maker_filled(
-                maker.user,
-                maker.id,
-                maker.price,
-                maker.unfilled,
-            ));
-            taker -= maker.unfilled;
-            page.amount -= maker.unfilled;
+        let m = if taker.unfilled >= oldest.get().unfilled {
+            let maker = oldest.get().clone();
             oldest.remove();
-            continue;
-        }
-        let maker = oldest.get_mut();
-        matches.push(Maker::maker_so_far(
-            maker.user,
-            maker.id,
-            maker.price,
-            taker,
-        ));
-        maker.unfilled -= taker;
-        page.amount -= taker;
-        taker = Amount::ZERO;
+            Maker::maker_filled(maker.user, maker.id, maker.price, maker.unfilled)
+        } else {
+            let maker = oldest.get_mut();
+            maker.fill(taker.unfilled);
+            Maker::maker_so_far(maker.user, maker.id, maker.price, taker.unfilled)
+        };
+        taker.fill(m.filled);
+        page.decr_size(&m.filled);
+        matches.push(m);
     }
-    (taker, matches)
-}
-
-fn can_trade(best_price: Price, taker_price: Price, ask_or_bid: AskOrBid) -> bool {
-    match ask_or_bid {
-        AskOrBid::Ask => best_price >= taker_price,
-        AskOrBid::Bid => best_price <= taker_price,
-    }
+    matches
 }
 
 pub fn cancel(book: &mut OrderBook, order_id: u64) -> Option<Match> {
@@ -270,28 +248,28 @@ pub fn cancel(book: &mut OrderBook, order_id: u64) -> Option<Match> {
             if price >= best_ask {
                 (
                     AskOrBid::Ask,
-                    OrderBook::remove_from_tape(&mut book.asks, order_id, price),
+                    OrderBook::remove(book, order_id, &price, AskOrBid::Ask),
                 )
             } else {
                 (
                     AskOrBid::Bid,
-                    OrderBook::remove_from_tape(&mut book.bids, order_id, price),
+                    OrderBook::remove(book, order_id, &price, AskOrBid::Bid),
                 )
             }
         }
         (None, Some(_)) => (
             AskOrBid::Bid,
-            OrderBook::remove_from_tape(&mut book.bids, order_id, price),
+            OrderBook::remove(book, order_id, &price, AskOrBid::Bid),
         ),
         (Some(_), None) => (
             AskOrBid::Ask,
-            OrderBook::remove_from_tape(&mut book.asks, order_id, price),
+            OrderBook::remove(book, order_id, &price, AskOrBid::Ask),
         ),
         _ => (AskOrBid::Ask, None),
     };
     removed.map(|order| Match {
         maker: vec![],
-        taker: Taker::cancel(order.user, order_id, order.price, order.unfilled, from),
+        taker: Taker::taker(order, from, State::Canceled),
     })
 }
 
@@ -328,14 +306,25 @@ mod test {
             amount,
             AskOrBid::Bid,
         );
-        assert_eq!(true, mr.is_none());
+        assert_eq!(State::Submitted, mr.taker.state);
+        assert!(mr.maker.is_empty());
         assert_eq!(
             dec!(0.1),
-            *book.get_best_match(AskOrBid::Ask).unwrap().key()
+            *book
+                .get_best_if_match(AskOrBid::Ask, &dec!(0.1))
+                .unwrap()
+                .key()
         );
+        // best bid = 0.1, now ask with 0.11, no matches
+        assert!(book.get_best_if_match(AskOrBid::Ask, &dec!(0.11)).is_none());
+        // best bid = 0.1, now ask with 0.09, matches
+        assert!(book.get_best_if_match(AskOrBid::Ask, &dec!(0.09)).is_some());
         assert_eq!(
             dec!(100),
-            book.get_best_match(AskOrBid::Ask).unwrap().get().amount
+            book.get_best_if_match(AskOrBid::Ask, &dec!(0.1))
+                .unwrap()
+                .get()
+                .amount
         );
         assert!(book.indices.contains_key(&1001));
 
@@ -349,14 +338,21 @@ mod test {
             amount,
             AskOrBid::Bid,
         );
-        assert!(mr.is_none());
+        assert_eq!(State::Submitted, mr.taker.state);
+        assert!(mr.maker.is_empty());
         assert_eq!(
             dec!(0.1),
-            *book.get_best_match(AskOrBid::Ask).unwrap().key()
+            *book
+                .get_best_if_match(AskOrBid::Ask, &dec!(0.1))
+                .unwrap()
+                .key()
         );
         assert_eq!(
             dec!(1100),
-            book.get_best_match(AskOrBid::Ask).unwrap().get().amount
+            book.get_best_if_match(AskOrBid::Ask, &dec!(0.1))
+                .unwrap()
+                .get()
+                .amount
         );
         assert!(book.indices.contains_key(&1002));
 
@@ -369,8 +365,8 @@ mod test {
             price,
             amount,
             AskOrBid::Ask,
-        )
-        .unwrap();
+        );
+        assert_eq!(State::Filled, mr.taker.state);
         assert!(!mr.maker.is_empty());
         assert!(!book.indices.contains_key(&1001));
         assert!(book.indices.contains_key(&1002));
@@ -389,11 +385,17 @@ mod test {
         );
         assert_eq!(
             dec!(0.1),
-            *book.get_best_match(AskOrBid::Ask).unwrap().key()
+            *book
+                .get_best_if_match(AskOrBid::Ask, &dec!(0.1))
+                .unwrap()
+                .key()
         );
         assert_eq!(
             dec!(900),
-            book.get_best_match(AskOrBid::Ask).unwrap().get().amount
+            book.get_best_if_match(AskOrBid::Ask, &dec!(0.1))
+                .unwrap()
+                .get()
+                .amount
         );
 
         let price = dec!(0.12);
@@ -406,18 +408,25 @@ mod test {
             amount,
             AskOrBid::Ask,
         );
-        assert!(mr.is_none());
+        assert_eq!(State::Submitted, mr.taker.state);
+        assert!(book.get_best_if_match(AskOrBid::Bid, &dec!(0.11)).is_none());
         assert_eq!(
             dec!(0.12),
-            *book.get_best_match(AskOrBid::Bid).unwrap().key()
+            *book
+                .get_best_if_match(AskOrBid::Bid, &dec!(0.12))
+                .unwrap()
+                .key()
         );
         assert_eq!(
             dec!(100),
-            book.get_best_match(AskOrBid::Bid).unwrap().get().amount
+            book.get_best_if_match(AskOrBid::Bid, &dec!(0.12))
+                .unwrap()
+                .get()
+                .amount
         );
         assert!(book.indices.contains_key(&1004));
 
-        let mr = cancel(&mut book, 1002).unwrap();
+        let mr = cancel(&mut book, 1002);
         let price = dec!(0.1);
         let unfilled = dec!(900);
         assert_eq!(
@@ -428,14 +437,15 @@ mod test {
                 unfilled,
                 AskOrBid::Bid
             ),
-            mr.taker
+            mr.unwrap().taker
         );
         assert!(!book.indices.contains_key(&1002));
         assert!(book.bids.is_empty());
 
         let price = dec!(0.12);
         let unfilled = dec!(100);
-        let mr = cancel(&mut book, 1004).unwrap();
+        let mr = cancel(&mut book, 1004);
+        assert!(mr.is_some());
         assert_eq!(
             Taker::cancel(
                 UserId::from_low_u64_be(1),
@@ -444,7 +454,7 @@ mod test {
                 unfilled,
                 AskOrBid::Ask
             ),
-            mr.taker
+            mr.unwrap().taker
         );
         assert!(!book.indices.contains_key(&1004));
         assert!(book.asks.is_empty());

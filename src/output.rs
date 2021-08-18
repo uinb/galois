@@ -32,10 +32,14 @@ pub struct Output {
     pub role: Role,
     pub ask_or_bid: AskOrBid,
     pub price: Price,
-    pub quote: Amount,
-    pub base: Amount,
-    pub quote_fee: Amount,
-    pub base_fee: Amount,
+    pub quote_charge: Amount,
+    pub quote_delta: Amount,
+    pub quote_available: Amount,
+    pub quote_frozen: Amount,
+    pub base_charge: Amount,
+    pub base_delta: Amount,
+    pub base_available: Amount,
+    pub base_frozen: Amount,
     pub timestamp: u64,
 }
 
@@ -89,7 +93,10 @@ fn get_max_record(symbol: Symbol) -> u64 {
 
 fn flush(symbol: Symbol, pending: &mut Vec<Output>) {
     let sql = format!(
-        "INSERT IGNORE INTO t_clearing_result_{}_{}(f_event_id,f_order_id,f_user_id,f_status,f_role,f_ask_or_bid,f_price,f_quote,f_base,f_quote_fee,f_base_fee,f_timestamp) VALUES (:event_id,:order_id,:user_id,:state,:role,:ask_or_bid,:price,:quote,:base,:quote_fee,:base_fee,FROM_UNIXTIME(:timestamp))",
+        r#"INSERT IGNORE INTO t_clearing_result_{}_{}
+(f_event_id,f_order_id,f_user_id,f_status,f_role,f_ask_or_bid,f_price,f_quote_delta,f_base_delta,f_quote_charge,f_base_charge,f_quote_available,f_base_available,f_quote_frozen,f_base_frozen,f_timestamp)
+VALUES
+(:event_id,:order_id,:user_id,:state,:role,:ask_or_bid,:price,:quote_delta,:base_delta,:quote_charge,:base_charge,:quote_available,:base_available,:quote_frozen,:base_frozen,FROM_UNIXTIME(:timestamp))"#,
         symbol.0, symbol.1
     );
     let conn = DB.get_conn();
@@ -109,10 +116,14 @@ fn flush(symbol: Symbol, pending: &mut Vec<Output>) {
                 "role" => p.role.into(): u32,
                 "ask_or_bid" => p.ask_or_bid.into(): u32,
                 "price" => p.price,
-                "quote" => p.quote,
-                "base" => p.base,
-                "quote_fee" => p.quote_fee,
-                "base_fee" => p.base_fee,
+                "quote_delta" => p.quote_delta,
+                "base_delta" => p.base_delta,
+                "quote_charge" => p.quote_charge,
+                "base_charge" => p.base_charge,
+                "quote_available" => p.quote_available,
+                "base_available" => p.base_available,
+                "quote_frozen" => p.quote_frozen,
+                "base_frozen" => p.base_frozen,
                 "timestamp" => p.timestamp,
             }
         }),

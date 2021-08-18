@@ -29,6 +29,17 @@ pub enum AskOrBid {
     Bid,
 }
 
+impl std::ops::Not for AskOrBid {
+    type Output = Self;
+
+    fn not(self) -> Self::Output {
+        match self {
+            Self::Bid => Self::Ask,
+            Self::Ask => Self::Bid,
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize, Debug, Eq, PartialEq, Clone)]
 pub struct Order {
     pub id: u64,
@@ -46,6 +57,14 @@ impl Order {
             unfilled,
         }
     }
+
+    pub fn fill(&mut self, delta: Amount) {
+        self.unfilled -= delta;
+    }
+
+    pub fn is_filled(&self) -> bool {
+        self.unfilled == Amount::ZERO
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
@@ -58,7 +77,7 @@ pub struct OrderPage {
 pub type Level = (Price, Amount, Amount);
 
 impl OrderPage {
-    pub fn with_init_order(order: Order) -> Self {
+    fn with_init_order(order: Order) -> Self {
         let amount = order.unfilled;
         let price = order.price;
         let mut orders = LinkedHashMap::<u64, Order>::new();
@@ -82,14 +101,18 @@ impl OrderPage {
         self.orders.is_empty()
     }
 
-    pub fn remove(&mut self, order_id: u64) -> Option<Order> {
+    pub fn decr_size(&mut self, amount: &Amount) {
+        self.amount -= amount;
+    }
+
+    fn remove(&mut self, order_id: u64) -> Option<Order> {
         self.orders.remove(&order_id).map(|x| {
             self.amount -= x.unfilled;
             x
         })
     }
 
-    pub fn get(&self, order_id: u64) -> Option<&Order> {
+    fn get(&self, order_id: u64) -> Option<&Order> {
         self.orders.get(&order_id)
     }
 }
@@ -102,6 +125,8 @@ pub type Index = HashMap<u64, Price>;
 pub struct OrderBook {
     pub asks: Tape,
     pub bids: Tape,
+    pub ask_size: Amount,
+    pub bid_size: Amount,
     pub indices: Index,
     pub base_scale: u32,
     pub quote_scale: u32,
@@ -134,6 +159,8 @@ impl OrderBook {
         Self {
             asks: Tape::new(),
             bids: Tape::new(),
+            ask_size: Amount::ZERO,
+            bid_size: Amount::ZERO,
             indices: Index::with_capacity(DEFAULT_PAGE_SIZE),
             base_scale,
             quote_scale,
@@ -171,12 +198,18 @@ impl OrderBook {
 
     pub fn insert(&mut self, order: Order, ask_or_bid: AskOrBid) {
         match ask_or_bid {
-            AskOrBid::Ask => Self::_insert(&mut self.asks, &mut self.indices, order),
-            AskOrBid::Bid => Self::_insert(&mut self.bids, &mut self.indices, order),
+            AskOrBid::Ask => {
+                self.ask_size += order.unfilled;
+                Self::insert_into(&mut self.asks, &mut self.indices, order)
+            }
+            AskOrBid::Bid => {
+                self.bid_size += order.unfilled;
+                Self::insert_into(&mut self.bids, &mut self.indices, order)
+            }
         }
     }
 
-    fn _insert(tape: &mut Tape, index: &mut Index, order: Order) {
+    fn insert_into(tape: &mut Tape, index: &mut Index, order: Order) {
         index.insert(order.id, order.price);
         tape.entry(order.price)
             .and_modify(|page| {
@@ -186,8 +219,30 @@ impl OrderBook {
             .or_insert_with(|| OrderPage::with_init_order(order));
     }
 
-    pub fn remove_from_tape(tape: &mut Tape, order_id: u64, price: Price) -> Option<Order> {
-        let page = tape.get_mut(&price)?;
+    pub fn decr_size_on(&mut self, ask_or_bid: AskOrBid, amount: &Amount) {
+        match ask_or_bid {
+            AskOrBid::Ask => self.ask_size -= amount,
+            AskOrBid::Bid => self.bid_size -= amount,
+        }
+    }
+
+    pub fn remove(&mut self, order_id: u64, price: &Price, ask_or_bid: AskOrBid) -> Option<Order> {
+        match ask_or_bid {
+            AskOrBid::Ask => {
+                let order = Self::remove_from(&mut self.asks, order_id, price)?;
+                self.ask_size -= order.unfilled;
+                Some(order)
+            }
+            AskOrBid::Bid => {
+                let order = Self::remove_from(&mut self.bids, order_id, price)?;
+                self.bid_size -= order.unfilled;
+                Some(order)
+            }
+        }
+    }
+
+    fn remove_from(tape: &mut Tape, order_id: u64, price: &Price) -> Option<Order> {
+        let page = tape.get_mut(price)?;
         let removed = page.remove(order_id);
         if page.is_empty() {
             tape.remove(&price);
@@ -195,13 +250,14 @@ impl OrderBook {
         removed
     }
 
-    pub fn get_best_match(
+    pub fn get_best_if_match(
         &mut self,
         ask_or_bid: AskOrBid,
+        taker_price: &Price,
     ) -> Option<OccupiedEntry<Price, OrderPage>> {
         match ask_or_bid {
-            AskOrBid::Bid => self.asks.first_entry(),
-            AskOrBid::Ask => self.bids.last_entry(),
+            AskOrBid::Bid => self.asks.first_entry().filter(|v| taker_price >= v.key()),
+            AskOrBid::Ask => self.bids.last_entry().filter(|v| taker_price <= v.key()),
         }
     }
 

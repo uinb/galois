@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{
-    assets, clearing, core::*, matcher, onchain, orderbook::*, output, sequence, server, snapshot,
-};
+use crate::{assets, clearing, core::*, matcher, orderbook::*, output, sequence, server, snapshot};
 use anyhow::{anyhow, ensure};
 use rust_decimal::{prelude::Zero, Decimal};
 use serde::{Deserialize, Serialize};
@@ -113,26 +111,59 @@ fn handle_limit(
         anyhow!("order can't be accepted")
     );
     let (currency, val) = assets::freeze_if(&symbol, ask_or_bid, price, amount);
-    let after_freeze = assets::try_freeze(&mut data.accounts, user, currency, val)?;
-    // notice: after freezing account, we can't return Err anymore, instead, let system crash
-    let (va, vf) = (
-        onchain::to_merkle_represent(after_freeze.available).unwrap(),
-        onchain::to_merkle_represent(after_freeze.available).unwrap(),
+    assets::try_freeze(&mut data.accounts, user, currency, val)?;
+    let mr = matcher::execute_limit(orderbook, user, order, price, amount, ask_or_bid);
+    let cr = clearing::clear(
+        &mut data.accounts,
+        event_id,
+        &symbol,
+        orderbook.taker_fee,
+        orderbook.maker_fee,
+        &mr,
+        time,
     );
-    let leaf = onchain::new_account_merkle_leaf(user, currency, va, vf);
-    if let Some(mr) = matcher::execute_limit(orderbook, user, order, price, amount, ask_or_bid) {
-        let cr = clearing::clear(
-            &mut data.accounts,
-            event_id,
-            &symbol,
-            orderbook.taker_fee,
-            orderbook.maker_fee,
-            &mr,
-            time,
-        );
-        sender.send(cr).unwrap();
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "prover")] {
+            gen_proof(&mut data.merkle_tree, orderbook, &cr, symbol);
+        }
     }
+    // notice: after freezing account, we can't return Err anymore, instead, let system crash
+    sender.send(cr).unwrap();
     Ok(())
+}
+
+#[cfg(feature = "prover")]
+fn gen_proof(
+    merkle_tree: &mut GlobalStates,
+    orderbook: &OrderBook,
+    outputs: &[output::Output],
+    symbol: Symbol,
+) {
+    use crate::prover;
+    let mut updates = vec![];
+    let (ask, bid) = (
+        prover::to_merkle_represent(orderbook.ask_size).unwrap(),
+        prover::to_merkle_represent(orderbook.bid_size).unwrap(),
+    );
+    updates.push(prover::new_orderbook_merkle_leaf(symbol, ask, bid));
+    let mut updated_accounts = outputs
+        .iter()
+        .flat_map(|r| {
+            let (ba, bf) = (
+                prover::to_merkle_represent(r.base_available).unwrap(),
+                prover::to_merkle_represent(r.base_frozen).unwrap(),
+            );
+            let leaf0 = prover::new_account_merkle_leaf(r.user_id, symbol.0, ba, bf);
+            let (qa, qf) = (
+                prover::to_merkle_represent(r.quote_available).unwrap(),
+                prover::to_merkle_represent(r.quote_frozen).unwrap(),
+            );
+            let leaf1 = prover::new_account_merkle_leaf(r.user_id, symbol.1, qa, qf);
+            vec![leaf0, leaf1].into_iter()
+        })
+        .collect::<Vec<MerkleLeaf>>();
+    updates.append(&mut updated_accounts);
+    prover::prove(merkle_tree, updates);
 }
 
 pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>>, mut data: Data) {
