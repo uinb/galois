@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::{config::C, core::*, db::DB, event::*, orderbook::AskOrBid};
+use mysql::{prelude::*, *};
+use rust_decimal::{prelude::Zero, Decimal};
+use serde::{Deserialize, Serialize};
 use std::{
     str::FromStr,
     sync::atomic::{AtomicBool, Ordering},
@@ -20,12 +24,6 @@ use std::{
     thread,
     time::{Duration, SystemTime},
 };
-
-use mysql::{prelude::*, *};
-use rust_decimal::{prelude::Zero, Decimal};
-use serde::{Deserialize, Serialize};
-
-use crate::{config::C, core::*, db::DB, event::*, orderbook::AskOrBid};
 
 pub const ASK_LIMIT: u32 = 0;
 pub const BID_LIMIT: u32 = 1;

@@ -124,46 +124,12 @@ fn handle_limit(
     );
     cfg_if::cfg_if! {
         if #[cfg(feature = "prover")] {
-            gen_proof(&mut data.merkle_tree, orderbook, &cr, symbol);
+            crate::prover::prove_limit_cmd(event_id, 0, symbol, ask_or_bid, &mut data.merkle_tree, orderbook, &cr);
         }
     }
     // notice: after freezing account, we can't return Err anymore, instead, let system crash
     sender.send(cr).unwrap();
     Ok(())
-}
-
-#[cfg(feature = "prover")]
-fn gen_proof(
-    merkle_tree: &mut GlobalStates,
-    orderbook: &OrderBook,
-    outputs: &[output::Output],
-    symbol: Symbol,
-) {
-    use crate::prover;
-    let mut updates = vec![];
-    let (ask, bid) = (
-        prover::to_merkle_represent(orderbook.ask_size).unwrap(),
-        prover::to_merkle_represent(orderbook.bid_size).unwrap(),
-    );
-    updates.push(prover::new_orderbook_merkle_leaf(symbol, ask, bid));
-    let mut updated_accounts = outputs
-        .iter()
-        .flat_map(|r| {
-            let (ba, bf) = (
-                prover::to_merkle_represent(r.base_available).unwrap(),
-                prover::to_merkle_represent(r.base_frozen).unwrap(),
-            );
-            let leaf0 = prover::new_account_merkle_leaf(r.user_id, symbol.0, ba, bf);
-            let (qa, qf) = (
-                prover::to_merkle_represent(r.quote_available).unwrap(),
-                prover::to_merkle_represent(r.quote_frozen).unwrap(),
-            );
-            let leaf1 = prover::new_account_merkle_leaf(r.user_id, symbol.1, qa, qf);
-            vec![leaf0, leaf1].into_iter()
-        })
-        .collect::<Vec<MerkleLeaf>>();
-    updates.append(&mut updated_accounts);
-    prover::prove(merkle_tree, updates);
 }
 
 pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>>, mut data: Data) {

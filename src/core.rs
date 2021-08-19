@@ -14,9 +14,9 @@
 
 use crate::{assets::Account, orderbook::OrderBook};
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
-use primitive_types::H256;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use sparse_merkle_tree::H256;
 use sparse_merkle_tree::{default_store::DefaultStore, sha256::Sha256Hasher, SparseMerkleTree};
 use std::{
     collections::HashMap,
@@ -24,29 +24,27 @@ use std::{
     io::{BufReader, BufWriter},
 };
 
-pub type Plain256 = [u8; 32];
-pub type MerkleIdentity = sparse_merkle_tree::H256;
-pub type MerkleLeaf = (MerkleIdentity, MerkleIdentity);
+pub type MerkleIdentity = H256;
+pub type MerkleLeaf = (H256, H256);
 pub type Base = u32;
 pub type Quote = u32;
 pub type Price = Decimal;
 pub type Amount = Decimal;
 pub type Vol = Decimal;
 pub type Currency = u32;
-pub type UserId = H256;
+pub type UserId = primitive_types::H256;
 pub type Symbol = (Base, Quote);
 pub type EventId = u64;
 pub type OrderId = u64;
 pub type Fee = Decimal;
 pub type Scale = u32;
 pub type Timestamp = u64;
-pub type GlobalStates =
-    SparseMerkleTree<Sha256Hasher, MerkleIdentity, DefaultStore<MerkleIdentity>>;
+pub type GlobalStates = SparseMerkleTree<Sha256Hasher, H256, DefaultStore<H256>>;
 pub type Balances = HashMap<Currency, Account>;
 pub type Accounts = HashMap<UserId, Balances>;
 pub type Balance = Account;
 
-pub const SYSTEM: UserId = H256::zero();
+pub const SYSTEM: UserId = UserId::zero();
 
 #[must_use]
 pub fn max_support_number() -> Amount {

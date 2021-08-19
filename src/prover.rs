@@ -12,7 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::core::*;
+use crate::{
+    core::*,
+    orderbook::{AskOrBid, OrderBook},
+    output::Output,
+};
 use rust_decimal::{prelude::*, Decimal};
 use sha2::{Digest, Sha256};
 use std::convert::Into;
@@ -25,9 +29,10 @@ const ORDERBOOK_KEY: u8 = 0x01;
 #[derive(Debug, Clone)]
 pub struct Proof {
     pub event_id: u64,
-    pub user_id: UserId,
     pub symbol: Symbol,
-    pub encoded_updates: Vec<u8>,
+    pub cmd: u8,
+    pub nonce: u32,
+    pub encoded_updates: Vec<MerkleLeaf>,
     pub proofs: Vec<u8>,
 }
 
@@ -39,7 +44,7 @@ pub fn to_merkle_represent(v: Decimal) -> Option<u128> {
     Some((v.fract() * d18()).to_u128()? + (v.floor().to_u128()? * ONE_ONCHAIN))
 }
 
-pub fn new_account_merkle_leaf(
+fn new_account_merkle_leaf(
     user_id: UserId,
     currency: Currency,
     avaiable: u128,
@@ -54,7 +59,7 @@ pub fn new_account_merkle_leaf(
     (hasher.finalize().into(), MerkleIdentity::from(value))
 }
 
-pub fn new_orderbook_merkle_leaf(symbol: Symbol, ask_size: u128, bid_size: u128) -> MerkleLeaf {
+fn new_orderbook_merkle_leaf(symbol: Symbol, ask_size: u128, bid_size: u128) -> MerkleLeaf {
     let mut hasher = Sha256::new();
     let mut value: [u8; 32] = Default::default();
     value.copy_from_slice(&[&ask_size.to_be_bytes()[..], &bid_size.to_be_bytes()[..]].concat());
@@ -68,7 +73,7 @@ pub fn new_orderbook_merkle_leaf(symbol: Symbol, ask_size: u128, bid_size: u128)
 }
 
 // FIXME unwrap
-pub fn prove(merkle_tree: &mut GlobalStates, leaves: Vec<MerkleLeaf>) -> Vec<u8> {
+fn gen_proofs(merkle_tree: &mut GlobalStates, leaves: Vec<MerkleLeaf>) -> Vec<u8> {
     leaves.iter().for_each(|(k, v)| {
         merkle_tree.update(*k, *v).unwrap();
     });
@@ -76,4 +81,45 @@ pub fn prove(merkle_tree: &mut GlobalStates, leaves: Vec<MerkleLeaf>) -> Vec<u8>
         .merkle_proof(leaves.iter().map(|(k, _)| *k).collect::<Vec<_>>())
         .unwrap();
     proof.compile(leaves).unwrap().into()
+}
+
+pub fn prove_limit_cmd(
+    event_id: u64,
+    nonce: u32,
+    symbol: Symbol,
+    ask_or_bid: AskOrBid,
+    merkle_tree: &mut GlobalStates,
+    orderbook: &OrderBook,
+    outputs: &[Output],
+) {
+    let mut updates = vec![];
+    let (ask, bid) = (
+        to_merkle_represent(orderbook.ask_size).unwrap(),
+        to_merkle_represent(orderbook.bid_size).unwrap(),
+    );
+    updates.push(new_orderbook_merkle_leaf(symbol, ask, bid));
+    outputs
+        .iter()
+        .flat_map(|r| {
+            let (ba, bf) = (
+                to_merkle_represent(r.base_available).unwrap(),
+                to_merkle_represent(r.base_frozen).unwrap(),
+            );
+            let leaf0 = new_account_merkle_leaf(r.user_id, symbol.0, ba, bf);
+            let (qa, qf) = (
+                to_merkle_represent(r.quote_available).unwrap(),
+                to_merkle_represent(r.quote_frozen).unwrap(),
+            );
+            let leaf1 = new_account_merkle_leaf(r.user_id, symbol.1, qa, qf);
+            vec![leaf0, leaf1].into_iter()
+        })
+        .for_each(|n| updates.push(n));
+    let proof = Proof {
+        event_id,
+        symbol,
+        cmd: ask_or_bid.into(),
+        nonce: nonce,
+        encoded_updates: updates.clone(),
+        proofs: gen_proofs(merkle_tree, updates),
+    };
 }
