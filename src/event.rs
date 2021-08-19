@@ -182,8 +182,8 @@ pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>
                         ));
                         continue;
                     }
-                    let inspection = watch.to_inspection().unwrap_or_default();
-                    let _ = do_inspect(inspection, &data);
+                    let inspection = watch.to_inspection().ok_or(anyhow!("to_inspect error"))?;
+                    do_inspect(inspection, &data)?;
                 }
                 sequence::Fusion::W(seq) => {
                     if !seq.cmd.validate() {
@@ -191,7 +191,6 @@ pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>
                         sequence::update_sequence_status(seq.id, sequence::ERROR);
                         continue;
                     }
-                    // FIXME shall we interrupt?
                     let event = seq.to_event().ok_or(anyhow!("Sequence::to_event error"))?;
                     let (_, ok) = handle_event(event, &mut data, &sender);
                     if !ok {
@@ -375,34 +374,22 @@ fn handle_event(
 fn do_inspect(inspection: Inspection, data: &Data) -> anyhow::Result<()> {
     match inspection {
         Inspection::QueryOrder(symbol, order_id, session, req_id) => {
-            match data.orderbooks.get(&symbol) {
-                Some(orderbook) => {
-                    let v = match orderbook.find_order(order_id) {
-                        Some(order) => serde_json::to_vec(order).unwrap_or_default(),
-                        None => vec![],
-                    };
-                    server::publish(server::Message::with_payload(session, req_id, v));
-                }
-                None => {
-                    server::publish(server::Message::with_payload(session, req_id, vec![]));
-                }
-            }
-        }
-        Inspection::QueryBalance(user_id, currency, session, req_id) => {
-            let v = match assets::get(&data.accounts, user_id, currency) {
-                None => serde_json::to_vec(&assets::Account {
-                    available: Decimal::new(0, 0),
-                    frozen: Decimal::new(0, 0),
-                })?,
-                Some(a) => serde_json::to_vec(a)?,
+            let v = match data.orderbooks.get(&symbol) {
+                Some(orderbook) => orderbook.find_order(order_id).map_or(vec![], |order| {
+                    serde_json::to_vec(order).unwrap_or_default()
+                }),
+                None => vec![],
             };
             server::publish(server::Message::with_payload(session, req_id, v));
         }
+        Inspection::QueryBalance(user_id, currency, session, req_id) => {
+            let a = assets::get_to_owned(&data.accounts, &user_id, currency);
+            let v = serde_json::to_vec(&a)?;
+            server::publish(server::Message::with_payload(session, req_id, v));
+        }
         Inspection::QueryAccounts(user_id, session, req_id) => {
-            let v = match data.accounts.get(&user_id) {
-                None => serde_json::to_vec(&Accounts::new())?,
-                Some(all) => serde_json::to_vec(all)?,
-            };
+            let a = assets::get_all_to_owned(&data.accounts, &user_id);
+            let v = serde_json::to_vec(&a)?;
             server::publish(server::Message::with_payload(session, req_id, v));
         }
         Inspection::UpdateDepth => {

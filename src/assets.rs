@@ -38,6 +38,12 @@ pub fn get(accounts: &Accounts, user: UserId, currency: Currency) -> Option<&Acc
     }
 }
 
+pub fn get_all_to_owned(accounts: &Accounts, user: &UserId) -> Balances {
+    accounts
+        .get(user)
+        .map_or(Balances::default(), |b| b.clone())
+}
+
 pub fn get_to_owned(accounts: &Accounts, user: &UserId, currency: Currency) -> Account {
     match accounts.get(user) {
         None => Account::default(),

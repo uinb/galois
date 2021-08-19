@@ -44,6 +44,7 @@ pub type GlobalStates =
     SparseMerkleTree<Sha256Hasher, MerkleIdentity, DefaultStore<MerkleIdentity>>;
 pub type Balances = HashMap<Currency, Account>;
 pub type Accounts = HashMap<UserId, Balances>;
+pub type Balance = Account;
 
 pub const SYSTEM: UserId = H256::zero();
 

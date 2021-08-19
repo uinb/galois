@@ -48,10 +48,13 @@ pub fn write_depth(depth: Vec<Depth>) {
     match redis {
         Ok(mut conn) => {
             depth.iter().for_each(|d| {
-                let _: redis::RedisResult<()> = conn.set(
+                let r: redis::RedisResult<()> = conn.set(
                     format!("V2_DEPTH_L{}_{}_{}", d.depth, d.symbol.0, d.symbol.1),
                     serde_json::to_string(d).unwrap(),
                 );
+                if r.is_err() {
+                    log::error!("{:?}", r);
+                }
             });
         }
         Err(_) => {
