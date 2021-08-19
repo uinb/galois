@@ -71,7 +71,6 @@ lazy_static! {
 
 fn init_config_file() -> anyhow::Result<Config> {
     let mut file = String::new();
-    // FIXME
     let mut from_genesis = false;
     {
         let mut args = ArgumentParser::new();
@@ -82,7 +81,6 @@ fn init_config_file() -> anyhow::Result<Config> {
         args.parse_args_or_exit();
     }
     let mut cfg: Config = toml::from_str(&fs::read_to_string(file)?)?;
-    // FIXME
     let opts = mysql::Opts::from_url(&cfg.mysql.url)?;
     let pass = opts
         .get_pass()
