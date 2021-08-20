@@ -29,6 +29,24 @@ pub enum AskOrBid {
     Bid,
 }
 
+impl Into<u32> for AskOrBid {
+    fn into(self) -> u32 {
+        match self {
+            AskOrBid::Ask => 0,
+            AskOrBid::Bid => 1,
+        }
+    }
+}
+
+impl Into<u8> for AskOrBid {
+    fn into(self) -> u8 {
+        match self {
+            AskOrBid::Ask => 0,
+            AskOrBid::Bid => 1,
+        }
+    }
+}
+
 impl std::ops::Not for AskOrBid {
     type Output = Self;
 

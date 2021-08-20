@@ -38,15 +38,6 @@ impl Into<u32> for Role {
     }
 }
 
-impl Into<u32> for AskOrBid {
-    fn into(self) -> u32 {
-        match self {
-            AskOrBid::Ask => 0,
-            AskOrBid::Bid => 1,
-        }
-    }
-}
-
 impl Into<u32> for State {
     fn into(self) -> u32 {
         match self {
