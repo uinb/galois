@@ -90,7 +90,7 @@ pub enum EventsError {
     EventRejected(u64),
 }
 
-type EventExecutionResult = std::result::Result<(), EventsError>;
+type EventExecutionResult = Result<(), EventsError>;
 
 pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>>, mut data: Data) {
     thread::spawn(move || -> EventExecutionResult {
@@ -114,15 +114,16 @@ pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>
                 sequence::Fusion::W(seq) => {
                     if !seq.cmd.validate() {
                         log::info!("illegal sequence {:?}", seq);
-                        sequence::update_sequence_status(seq.id, sequence::ERROR);
+                        sequence::update_sequence_status(seq.id, sequence::ERROR)
+                            .map_err(|_| EventsError::Interrupted)?;
                         continue;
                     }
                     let event = seq.to_event().ok_or(EventsError::Interrupted)?;
-                    let result = handle_event(event, &mut data, &sender);
-                    match result {
+                    match handle_event(event, &mut data, &sender) {
                         Err(EventsError::EventRejected(id)) => {
                             log::info!("execute sequence {:?} failed", seq);
-                            sequence::update_sequence_status(id, sequence::ERROR);
+                            sequence::update_sequence_status(id, sequence::ERROR)
+                                .map_err(|_| EventsError::Interrupted)?;
                         }
                         Err(EventsError::Interrupted) => {
                             panic!("sequence thread panic");
@@ -162,11 +163,6 @@ fn handle_event(
                 &mr,
                 time,
             );
-            // cfg_if::cfg_if! {
-            //     if #[cfg(feature = "prover")] {
-            //         crate::prover::prove_limit_cmd(event_id, 0, symbol, ask_or_bid, &mut data.merkle_tree, orderbook, &cr);
-            //     }
-            // }
             sender.send(cr).map_err(|_| EventsError::Interrupted)?;
             Ok(())
         }
@@ -317,7 +313,6 @@ fn handle_event(
     }
 }
 
-// TODO error handling
 fn do_inspect(inspection: Inspection, data: &Data) -> EventExecutionResult {
     match inspection {
         Inspection::QueryOrder(symbol, order_id, session, req_id) => {
@@ -331,12 +326,12 @@ fn do_inspect(inspection: Inspection, data: &Data) -> EventExecutionResult {
         }
         Inspection::QueryBalance(user_id, currency, session, req_id) => {
             let a = assets::get_to_owned(&data.accounts, &user_id, currency);
-            let v = serde_json::to_vec(&a).map_err(|_| EventsError::EventRejected(0))?;
+            let v = serde_json::to_vec(&a).unwrap_or_default();
             server::publish(server::Message::with_payload(session, req_id, v));
         }
         Inspection::QueryAccounts(user_id, session, req_id) => {
             let a = assets::get_all_to_owned(&data.accounts, &user_id);
-            let v = serde_json::to_vec(&a).map_err(|_| EventsError::EventRejected(0))?;
+            let v = serde_json::to_vec(&a).unwrap_or_default();
             server::publish(server::Message::with_payload(session, req_id, v));
         }
         Inspection::UpdateDepth => {
@@ -347,7 +342,9 @@ fn do_inspect(inspection: Inspection, data: &Data) -> EventExecutionResult {
                 .collect::<Vec<_>>();
             output::write_depth(writing);
         }
-        Inspection::ConfirmAll(from, exclude) => sequence::confirm(from, exclude),
+        Inspection::ConfirmAll(from, exclude) => {
+            sequence::confirm(from, exclude).map_err(|_| EventsError::Interrupted)?;
+        }
     }
     Ok(())
 }

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use crate::{config::C, core::*, db::DB, event::*, orderbook::AskOrBid};
+use anyhow::anyhow;
 use mysql::{prelude::*, *};
 use rust_decimal::{prelude::Zero, Decimal};
 use serde::{Deserialize, Serialize};
@@ -486,26 +487,18 @@ pub fn insert_nop(id: u64) -> Option<bool> {
     }
 }
 
-pub fn update_sequence_status(id: u64, status: u32) {
+pub fn update_sequence_status(id: u64, status: u32) -> anyhow::Result<()> {
     let sql = "UPDATE t_sequence SET f_status=? WHERE f_id=?";
-    let conn = DB.get_conn();
-    if conn.is_err() {
-        log::error!("retrieve mysql connection failed while update_sequence_status");
-        return;
-    }
-    let mut conn = conn.unwrap();
-    let _ = conn.exec_drop(sql, (status, id));
+    let mut conn = DB.get_conn()?;
+    conn.exec_drop(sql, (status, id))
+        .map_err(|_| anyhow!("retrieve mysql connection failed while update_sequence_status"))
 }
 
-pub fn confirm(from: u64, exclude: u64) {
+pub fn confirm(from: u64, exclude: u64) -> anyhow::Result<()> {
     let sql = "UPDATE t_sequence SET f_status=? WHERE f_status=? AND f_id>=? AND f_id<?";
-    let conn = DB.get_conn();
-    if conn.is_err() {
-        log::error!("retrieve mysql connection failed while update_sequence_status");
-        return;
-    }
-    let mut conn = conn.unwrap();
-    let _ = sql.with((ACCEPTED, PENDING, from, exclude)).run(&mut conn);
+    let mut conn = DB.get_conn()?;
+    conn.exec_drop(sql, (ACCEPTED, PENDING, from, exclude))
+        .map_err(|_| anyhow!("retrieve mysql connection failed while confirm"))
 }
 
 pub const PENDING: u32 = 0;

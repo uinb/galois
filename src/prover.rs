@@ -19,7 +19,10 @@ use crate::{
 };
 use rust_decimal::{prelude::*, Decimal};
 use sha2::{Digest, Sha256};
-use std::convert::Into;
+use std::{
+    convert::Into,
+    sync::mpsc::{Receiver, Sender},
+};
 
 pub const ONE_ONCHAIN: u128 = 1_000_000_000_000_000_000;
 pub const SCALE_ONCHAIN: u32 = 18;
@@ -36,7 +39,10 @@ pub struct Proof {
     pub proofs: Vec<u8>,
 }
 
-pub struct Prover;
+pub struct Prover {
+    tx: Sender<Proof>,
+    rx: Receiver<Proof>,
+}
 
 pub fn d18() -> Amount {
     ONE_ONCHAIN.into()
