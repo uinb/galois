@@ -36,6 +36,8 @@ pub struct Proof {
     pub proofs: Vec<u8>,
 }
 
+pub struct Prover;
+
 pub fn d18() -> Amount {
     ONE_ONCHAIN.into()
 }
