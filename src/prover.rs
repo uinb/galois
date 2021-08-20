@@ -19,10 +19,7 @@ use crate::{
 };
 use rust_decimal::{prelude::*, Decimal};
 use sha2::{Digest, Sha256};
-use std::{
-    convert::Into,
-    sync::mpsc::{Receiver, Sender},
-};
+use std::{sync::mpsc, thread};
 
 pub const ONE_ONCHAIN: u128 = 1_000_000_000_000_000_000;
 pub const SCALE_ONCHAIN: u32 = 18;
@@ -39,9 +36,62 @@ pub struct Proof {
     pub proofs: Vec<u8>,
 }
 
-pub struct Prover {
-    tx: Sender<Proof>,
-    rx: Receiver<Proof>,
+pub struct Prover(mpsc::Sender<Proof>);
+
+impl Prover {
+    pub fn init() -> Self {
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || loop {
+            let _proofs = rx.recv().unwrap();
+            // TODO update proofs
+        });
+        Self(tx)
+    }
+
+    pub fn prove_limit_cmd(
+        &self,
+        event_id: u64,
+        nonce: u32,
+        symbol: Symbol,
+        ask_or_bid: AskOrBid,
+        merkle_tree: &mut GlobalStates,
+        orderbook: &OrderBook,
+        outputs: &[Output],
+    ) -> anyhow::Result<()> {
+        let mut updates = vec![];
+        let (ask, bid) = (
+            to_merkle_represent(orderbook.ask_size).unwrap(),
+            to_merkle_represent(orderbook.bid_size).unwrap(),
+        );
+        updates.push(new_orderbook_merkle_leaf(symbol, ask, bid));
+        outputs
+            .iter()
+            .flat_map(|r| {
+                let (ba, bf) = (
+                    to_merkle_represent(r.base_available).unwrap(),
+                    to_merkle_represent(r.base_frozen).unwrap(),
+                );
+                let leaf0 = new_account_merkle_leaf(r.user_id, symbol.0, ba, bf);
+                let (qa, qf) = (
+                    to_merkle_represent(r.quote_available).unwrap(),
+                    to_merkle_represent(r.quote_frozen).unwrap(),
+                );
+                let leaf1 = new_account_merkle_leaf(r.user_id, symbol.1, qa, qf);
+                vec![leaf0, leaf1].into_iter()
+            })
+            .for_each(|n| updates.push(n));
+        let proof = Proof {
+            event_id,
+            symbol,
+            cmd: ask_or_bid.into(),
+            nonce: nonce,
+            encoded_updates: updates.clone(),
+            proofs: gen_proofs(merkle_tree, updates),
+        };
+        self.0
+            .send(proof)
+            .map_err(|_| anyhow::anyhow!("memory channel broken on prover"))
+    }
 }
 
 pub fn d18() -> Amount {
@@ -89,45 +139,4 @@ fn gen_proofs(merkle_tree: &mut GlobalStates, leaves: Vec<MerkleLeaf>) -> Vec<u8
         .merkle_proof(leaves.iter().map(|(k, _)| *k).collect::<Vec<_>>())
         .unwrap();
     proof.compile(leaves).unwrap().into()
-}
-
-pub fn prove_limit_cmd(
-    event_id: u64,
-    nonce: u32,
-    symbol: Symbol,
-    ask_or_bid: AskOrBid,
-    merkle_tree: &mut GlobalStates,
-    orderbook: &OrderBook,
-    outputs: &[Output],
-) {
-    let mut updates = vec![];
-    let (ask, bid) = (
-        to_merkle_represent(orderbook.ask_size).unwrap(),
-        to_merkle_represent(orderbook.bid_size).unwrap(),
-    );
-    updates.push(new_orderbook_merkle_leaf(symbol, ask, bid));
-    outputs
-        .iter()
-        .flat_map(|r| {
-            let (ba, bf) = (
-                to_merkle_represent(r.base_available).unwrap(),
-                to_merkle_represent(r.base_frozen).unwrap(),
-            );
-            let leaf0 = new_account_merkle_leaf(r.user_id, symbol.0, ba, bf);
-            let (qa, qf) = (
-                to_merkle_represent(r.quote_available).unwrap(),
-                to_merkle_represent(r.quote_frozen).unwrap(),
-            );
-            let leaf1 = new_account_merkle_leaf(r.user_id, symbol.1, qa, qf);
-            vec![leaf0, leaf1].into_iter()
-        })
-        .for_each(|n| updates.push(n));
-    let proof = Proof {
-        event_id,
-        symbol,
-        cmd: ask_or_bid.into(),
-        nonce: nonce,
-        encoded_updates: updates.clone(),
-        proofs: gen_proofs(merkle_tree, updates),
-    };
 }

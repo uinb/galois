@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use crate::{assets, clearing, core::*, matcher, orderbook::*, output, sequence, server, snapshot};
+use cfg_if::cfg_if;
 use rust_decimal::{prelude::Zero, Decimal};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -90,10 +91,16 @@ pub enum EventsError {
     EventRejected(u64),
 }
 
-type EventExecutionResult = Result<(), EventsError>;
+type EventExecutionResult = Result<Vec<output::Output>, EventsError>;
 
 pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>>, mut data: Data) {
     thread::spawn(move || -> EventExecutionResult {
+        cfg_if! {
+            if #[cfg(feature = "prover")] {
+                use crate::prover::Prover;
+                let prover = Prover::init();
+            }
+        }
         loop {
             let fusion = recv.recv().unwrap();
             match fusion {
@@ -119,7 +126,8 @@ pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>
                         continue;
                     }
                     let event = seq.to_event().ok_or(EventsError::Interrupted)?;
-                    match handle_event(event, &mut data, &sender) {
+                    let result = handle_event(event, &mut data);
+                    match result {
                         Err(EventsError::EventRejected(id)) => {
                             log::info!("execute sequence {:?} failed", seq);
                             sequence::update_sequence_status(id, sequence::ERROR)
@@ -128,7 +136,9 @@ pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>
                         Err(EventsError::Interrupted) => {
                             panic!("sequence thread panic");
                         }
-                        Ok(()) => {}
+                        Ok(cr) => {
+                            sender.send(cr).map_err(|_| EventsError::Interrupted)?;
+                        }
                     }
                 }
             }
@@ -136,11 +146,7 @@ pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>
     });
 }
 
-fn handle_event(
-    event: Event,
-    data: &mut Data,
-    sender: &Sender<Vec<output::Output>>,
-) -> EventExecutionResult {
+fn handle_event(event: Event, data: &mut Data) -> EventExecutionResult {
     match event {
         Event::Limit(id, symbol, user, order, price, amount, ask_or_bid, time) => {
             let orderbook = data
@@ -154,7 +160,7 @@ fn handle_event(
             assets::try_freeze(&mut data.accounts, user, currency, val)
                 .map_err(|_| EventsError::EventRejected(id))?;
             let mr = matcher::execute_limit(orderbook, user, order, price, amount, ask_or_bid);
-            let cr = clearing::clear(
+            Ok(clearing::clear(
                 &mut data.accounts,
                 id,
                 &symbol,
@@ -162,9 +168,7 @@ fn handle_event(
                 orderbook.maker_fee,
                 &mr,
                 time,
-            );
-            sender.send(cr).map_err(|_| EventsError::Interrupted)?;
-            Ok(())
+            ))
         }
         Event::Market(id, _, _, _, _, _, _) => Err(EventsError::EventRejected(id)),
         Event::Cancel(id, symbol, user, order_id, time) => {
@@ -181,7 +185,7 @@ fn handle_event(
                 return Err(EventsError::EventRejected(id));
             }
             let mr = matcher::cancel(orderbook, order_id).ok_or(EventsError::EventRejected(id))?;
-            let cr = clearing::clear(
+            Ok(clearing::clear(
                 &mut data.accounts,
                 id,
                 &symbol,
@@ -189,9 +193,7 @@ fn handle_event(
                 Decimal::zero(),
                 &mr,
                 time,
-            );
-            sender.send(cr).map_err(|_| EventsError::Interrupted)?;
-            Ok(())
+            ))
         }
         Event::CancelAll(id, symbol, time) => {
             let orderbook = data
@@ -204,19 +206,21 @@ fn handle_event(
                 .map(|id| matcher::cancel(orderbook, id))
                 .filter(|mr| mr.is_some())
                 .collect::<Vec<_>>();
-            for mr in mrs.iter() {
-                let out = clearing::clear(
-                    &mut data.accounts,
-                    id,
-                    &symbol,
-                    Decimal::zero(),
-                    Decimal::zero(),
-                    mr.as_ref().unwrap(),
-                    time,
-                );
-                sender.send(out).map_err(|_| EventsError::Interrupted)?;
-            }
-            Ok(())
+            Ok(mrs
+                .iter()
+                .map(|mr| {
+                    clearing::clear(
+                        &mut data.accounts,
+                        id,
+                        &symbol,
+                        Decimal::zero(),
+                        Decimal::zero(),
+                        mr.as_ref().unwrap(),
+                        time,
+                    )
+                })
+                .flatten()
+                .collect::<Vec<_>>())
         }
         Event::Open(id, symbol, _) => {
             let orderbook = data
@@ -224,7 +228,7 @@ fn handle_event(
                 .get_mut(&symbol)
                 .ok_or(EventsError::EventRejected(id))?;
             orderbook.open = true;
-            Ok(())
+            Ok(vec![])
         }
         Event::Close(id, symbol, _) => {
             let orderbook = data
@@ -232,27 +236,29 @@ fn handle_event(
                 .get_mut(&symbol)
                 .ok_or(EventsError::EventRejected(id))?;
             orderbook.open = false;
-            Ok(())
+            Ok(vec![])
         }
         Event::OpenAll(_, _) => {
             data.orderbooks.iter_mut().for_each(|(_, v)| v.open = true);
-            Ok(())
+            Ok(vec![])
         }
         Event::CloseAll(_, _) => {
             data.orderbooks.iter_mut().for_each(|(_, v)| v.open = false);
-            Ok(())
+            Ok(vec![])
         }
         Event::TransferOut(id, user, currency, amount, _) => {
             let ok = assets::deduct_available(&mut data.accounts, user, currency, amount);
             if ok {
-                Ok(())
+                // TODO
+                Ok(vec![])
             } else {
                 Err(EventsError::EventRejected(id))
             }
         }
         Event::TransferIn(_, user, currency, amount, _) => {
             assets::add_to_available(&mut data.accounts, user, currency, amount);
-            Ok(())
+            // TODO
+            Ok(vec![])
         }
         Event::NewSymbol(
             id,
@@ -277,7 +283,7 @@ fn handle_event(
                     enable_market_order,
                 );
                 data.orderbooks.insert(symbol, orderbook);
-                Ok(())
+                Ok(vec![])
             } else {
                 Err(EventsError::EventRejected(id))
             }
@@ -302,13 +308,13 @@ fn handle_event(
                 orderbook.min_amount = min_amount;
                 orderbook.min_vol = min_vol;
                 orderbook.enable_market_order = enable_market_order;
-                Ok(())
+                Ok(vec![])
             }
             None => Err(EventsError::EventRejected(id)),
         },
         Event::Dump(id, time) => {
             snapshot::dump(id, time, data);
-            Ok(())
+            Ok(vec![])
         }
     }
 }
@@ -346,7 +352,7 @@ fn do_inspect(inspection: Inspection, data: &Data) -> EventExecutionResult {
             sequence::confirm(from, exclude).map_err(|_| EventsError::Interrupted)?;
         }
     }
-    Ok(())
+    Ok(vec![])
 }
 
 #[test]
