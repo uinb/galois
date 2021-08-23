@@ -52,19 +52,31 @@ pub struct Prover(mpsc::Sender<Proof>);
 
 impl Prover {
     pub fn init() -> anyhow::Result<Self> {
-        let signer = sp_core::sr25519::Pair::from_string(&C.fuso.key_seed, None)
-            .map_err(|_| anyhow!("Invalid fusotao config"))?;
-        let client = WsRpcClient::new(&C.fuso.node_url);
+        let signer = sp_core::sr25519::Pair::from_string(
+            &C.fusotao
+                .as_ref()
+                .ok_or(anyhow!("Invalid fusotao config"))?
+                .key_seed,
+            None,
+        )
+        .map_err(|_| anyhow!("Invalid fusotao config"))?;
+        let client = WsRpcClient::new(
+            &C.fusotao
+                .as_ref()
+                .ok_or(anyhow!("Invalid fusotao config"))?
+                .node_url,
+        );
         let api = Api::new(client)
             .map(|api| api.set_signer(signer))
-            .map_err(|_| anyhow!("fusotao node not available"))?;
+            .map_err(|_| anyhow!("Fusotao node not available"))?;
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || loop {
             let _proofs = rx.recv().unwrap();
+            // TODO Receipts#verify
             let xt: UncheckedExtrinsicV4<_> =
                 compose_extrinsic!(api.clone(), "Balances", "transfer", Compact(42_u128));
-            api.send_extrinsic(xt.hex_encode(), XtStatus::InBlock)
-                .unwrap();
+            // TODO retry
+            api.send_extrinsic(xt.hex_encode(), XtStatus::InBlock);
         });
         Ok(Self(tx))
     }

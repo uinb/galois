@@ -153,12 +153,20 @@ pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>
                             cfg_if! {
                                 if #[cfg(feature = "prover")] {
                                     if event.is_trading_cmd() {
-                                        prover.prove_trading_cmd(&mut data, &out);
+                                        prover.prove_trading_cmd(&mut data, &out)
+                                            .map_err(|_| EventsError::Interrupted)?;
                                     } else if event.is_assets_cmd() {
+                                        use std::str::FromStr;
+                                        prover.prove_assets_cmd(&mut data, seq.id,
+                                                                UserId::from_str(seq.cmd.user_id.as_ref().unwrap()).as_ref().unwrap(),
+                                                                seq.cmd.currency.unwrap())
+                                            .map_err(|_| EventsError::Interrupted)?;
                                     }
                                 }
                             }
-                            sender.send(out).map_err(|_| EventsError::Interrupted)?;
+                            if !out.is_empty() {
+                                sender.send(out).map_err(|_| EventsError::Interrupted)?;
+                            }
                         }
                     }
                 }
