@@ -125,12 +125,12 @@ fn init_config(toml: &str) -> anyhow::Result<Config> {
             cfg.mysql.decrypt(&key)?;
         } else {
             let cfg: Config = toml::from_str(toml)?;
-            let log_conf = log4rs::config::Config::builder()
-                .appenders(cfg.log.appenders_lossy(&Default::default()).0)
-                .build(cfg.log.root())?;
-            log4rs::init_config(log_conf)?;
         }
     }
+    let log_conf = log4rs::config::Config::builder()
+        .appenders(cfg.log.appenders_lossy(&Default::default()).0)
+        .build(cfg.log.root())?;
+    log4rs::init_config(log_conf)?;
     Ok(cfg)
 }
 
