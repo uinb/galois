@@ -111,7 +111,7 @@ pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>
         cfg_if! {
             if #[cfg(feature = "prover")] {
                 use crate::prover::Prover;
-                let prover = Prover::init();
+                let prover = Prover::init().map_err(|_| EventsError::Interrupted)?;
             }
         }
         loop {

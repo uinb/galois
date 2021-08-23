@@ -26,7 +26,7 @@ pub struct Config {
     pub redis: RedisConfig,
     pub log: LogConfig,
     #[cfg(feature = "prover")]
-    pub fuso: Option<FusotaoConfig>,
+    pub fuso: FusotaoConfig,
 }
 
 #[cfg(feature = "enc-conf")]
@@ -81,7 +81,7 @@ impl EncryptedConfig for MysqlConfig {
 pub struct FusotaoConfig {
     pub node_url: String,
     pub ss58_addr: String,
-    pub pri_key: String,
+    pub key_seed: String,
 }
 
 #[cfg(feature = "prover, enc-conf")]
@@ -135,7 +135,7 @@ fn init_config(toml: &str) -> anyhow::Result<Config> {
 }
 
 #[test]
-#[cfg(not(feature = "enc-conf"))]
+#[cfg(not(feature = "prover"))]
 pub fn test_default() {
     let toml = r#"
 [server]

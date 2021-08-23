@@ -12,11 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{assets, core::*, output::Output};
+use crate::{assets, config::C, core::*, output::Output};
 use anyhow::anyhow;
 use rust_decimal::{prelude::*, Decimal};
 use sha2::{Digest, Sha256};
+use sp_core::Pair;
 use std::{sync::mpsc, thread};
+use substrate_api_client::{
+    compose_extrinsic, rpc::WsRpcClient, Api, UncheckedExtrinsicV4, XtStatus,
+};
 
 pub const ONE_ONCHAIN: u128 = 1_000_000_000_000_000_000;
 pub const SCALE_ONCHAIN: u32 = 18;
@@ -47,13 +51,22 @@ pub struct Signature {
 pub struct Prover(mpsc::Sender<Proof>);
 
 impl Prover {
-    pub fn init() -> Self {
+    pub fn init() -> anyhow::Result<Self> {
+        let signer = sp_core::sr25519::Pair::from_string(&C.fuso.key_seed, None)
+            .map_err(|_| anyhow!("Invalid fusotao config"))?;
+        let client = WsRpcClient::new(&C.fuso.node_url);
+        let api = Api::new(client)
+            .map(|api| api.set_signer(signer))
+            .map_err(|_| anyhow!("fusotao node not available"))?;
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || loop {
             let _proofs = rx.recv().unwrap();
-            // TODO update proofs
+            let xt: UncheckedExtrinsicV4<_> =
+                compose_extrinsic!(api.clone(), "Balances", "transfer", Compact(42_u128));
+            api.send_extrinsic(xt.hex_encode(), XtStatus::InBlock)
+                .unwrap();
         });
-        Self(tx)
+        Ok(Self(tx))
     }
 
     pub fn prove_trading_cmd(&self, data: &mut Data, outputs: &[Output]) -> anyhow::Result<()> {
