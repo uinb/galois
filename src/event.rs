@@ -70,6 +70,19 @@ pub enum Event {
     Dump(EventId, Timestamp),
 }
 
+impl Event {
+    pub fn is_trading_cmd(&self) -> bool {
+        matches!(self, Event::Limit(_, _, _, _, _, _, _, _))
+            || matches!(self, Event::Market(_, _, _, _, _, _, _))
+            || matches!(self, Event::Cancel(_, _, _, _, _))
+    }
+
+    pub fn is_assets_cmd(&self) -> bool {
+        matches!(self, Event::TransferIn(_, _, _, _, _))
+            || matches!(self, Event::TransferOut(_, _, _, _, _))
+    }
+}
+
 #[derive(Debug, Eq, PartialEq, Clone, Deserialize, Serialize)]
 pub enum Inspection {
     ConfirmAll(u64, u64),
@@ -126,7 +139,7 @@ pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>
                         continue;
                     }
                     let event = seq.to_event().ok_or(EventsError::Interrupted)?;
-                    let result = handle_event(event, &mut data);
+                    let result = handle_event(event.clone(), &mut data);
                     match result {
                         Err(EventsError::EventRejected(id)) => {
                             log::info!("execute sequence {:?} failed", seq);
@@ -136,8 +149,16 @@ pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>
                         Err(EventsError::Interrupted) => {
                             panic!("sequence thread panic");
                         }
-                        Ok(cr) => {
-                            sender.send(cr).map_err(|_| EventsError::Interrupted)?;
+                        Ok(out) => {
+                            cfg_if! {
+                                if #[cfg(feature = "prover")] {
+                                    if event.is_trading_cmd() {
+                                        prover.prove_trading_cmd(&mut data, &out);
+                                    } else if event.is_assets_cmd() {
+                                    }
+                                }
+                            }
+                            sender.send(out).map_err(|_| EventsError::Interrupted)?;
                         }
                     }
                 }

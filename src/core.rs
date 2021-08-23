@@ -24,6 +24,7 @@ use std::{
     io::{BufReader, BufWriter},
 };
 
+pub type Bits256 = [u8; 32];
 pub type MerkleIdentity = H256;
 pub type MerkleLeaf = (H256, H256);
 pub type Base = u32;

@@ -13,12 +13,10 @@
 // limitations under the License.
 
 use argparse::{ArgumentParser, Store, StoreTrue};
+use cfg_if::cfg_if;
 use lazy_static::lazy_static;
-use magic_crypt::{new_magic_crypt, MagicCryptError, MagicCryptTrait};
+use log4rs::{config::Config as LogConfig, file::RawConfig};
 use serde::Deserialize;
-
-use std::env;
-use std::fs;
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
@@ -26,18 +24,12 @@ pub struct Config {
     pub sequence: SequenceConfig,
     pub mysql: MysqlConfig,
     pub redis: RedisConfig,
-    pub log: log4rs::file::RawConfig,
+    pub log: RawConfig,
 }
 
-pub fn decrypt(key: &str, content: &str) -> Result<String, MagicCryptError> {
-    let mc = new_magic_crypt!(key, 64);
-    mc.decrypt_base64_to_string(content)
-}
-
-#[allow(dead_code)]
-pub fn encrypt(key: &str, content: &str) -> String {
-    let mc = new_magic_crypt!(key, 64);
-    mc.encrypt_str_to_base64(content)
+#[cfg(feature = "enc-conf")]
+pub trait EncryptedConfig {
+    fn decrypt(&mut self, key: &str) -> anyhow::Result<()>;
 }
 
 #[derive(Debug, Deserialize)]
@@ -57,6 +49,29 @@ pub struct SequenceConfig {
 #[derive(Debug, Deserialize)]
 pub struct MysqlConfig {
     pub url: String,
+}
+
+#[cfg(feature = "enc-conf")]
+impl EncryptedConfig for MysqlConfig {
+    fn decrypt(&mut self, key: &str) -> anyhow::Result<()> {
+        use magic_crypt::MagicCryptTrait;
+        let opts = mysql::Opts::from_url(&self.url)?;
+        let (f, t) = (
+            self.url
+                .find(":")
+                .ok_or_else(|| anyhow::anyhow!("invalid mysql config"))?,
+            self.url
+                .find('@')
+                .ok_or_else(|| anyhow::anyhow!("invalid mysql config"))?,
+        );
+        let mc = magic_crypt::new_magic_crypt!(key, 64);
+        let dec = mc.decrypt_base64_to_string(
+            opts.get_pass()
+                .ok_or_else(|| anyhow::anyhow!("invalid mysql config"))?,
+        )?;
+        self.url.replace_range(f..=t, &dec);
+        Ok(())
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -80,45 +95,18 @@ fn init_config_file() -> anyhow::Result<Config> {
             .add_option(&["-g"], StoreTrue, "start from genesis");
         args.parse_args_or_exit();
     }
-    let mut cfg: Config = toml::from_str(&fs::read_to_string(file)?)?;
-    let opts = mysql::Opts::from_url(&cfg.mysql.url)?;
-    let pass = opts
-        .get_pass()
-        .ok_or_else(|| anyhow::anyhow!("passphrase not exist"))?;
-    if pass.starts_with("ENC(") && pass.ends_with(')') {
-        let content = pass.trim_start_matches("ENC(").trim_end_matches(')');
-        match env::var_os("PBE_KEY") {
-            Some(val) => {
-                let des = decrypt(val.to_str().unwrap(), content)?;
-                let (f, t) = (
-                    cfg.mysql
-                        .url
-                        .find("ENC(")
-                        .ok_or_else(|| anyhow::anyhow!("ENC( not found in passphrase"))?,
-                    cfg.mysql
-                        .url
-                        .find(')')
-                        .ok_or_else(|| anyhow::anyhow!(") not found in passphrase"))?,
-                );
-                cfg.mysql.url.replace_range(f..=t, &des);
-            }
-            None => panic!("$PBE_KEY is not defined in the environment."),
+    let mut cfg: Config = toml::from_str(&std::fs::read_to_string(file)?)?;
+    cfg_if! {
+        if #[cfg(feature = "enc-conf")] {
+            let key = std::env::var_os("MAGIC_KEY")
+                .ok_or_else(||anyhow::anyhow!("env PBE_KEY not set"))?;
+            let key = key.to_str().ok_or_else(||anyhow::anyhow!("env PBE_KEY not set"))?;
+            cfg.mysql.decrypt(&key)?;
         }
     }
-    let log_conf = log4rs::config::Config::builder()
-        .appenders(
-            cfg.log
-                .appenders_lossy(&log4rs::file::Deserializers::default())
-                .0,
-        )
+    let log_conf = LogConfig::builder()
+        .appenders(cfg.log.appenders_lossy(&Default::default()).0)
         .build(cfg.log.root())?;
     log4rs::init_config(log_conf)?;
     Ok(cfg)
-}
-
-#[test]
-pub fn test_encrypt() {
-    let encrypted = encrypt("hello", "root12345678");
-    println!("{}", encrypted);
-    assert_eq!("root12345678", decrypt("hello", &encrypted).unwrap());
 }

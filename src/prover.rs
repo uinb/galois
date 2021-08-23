@@ -12,11 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{
-    core::*,
-    orderbook::{AskOrBid, OrderBook},
-    output::Output,
-};
+use crate::{assets, core::*, output::Output};
+use anyhow::anyhow;
 use rust_decimal::{prelude::*, Decimal};
 use sha2::{Digest, Sha256};
 use std::{sync::mpsc, thread};
@@ -29,11 +26,22 @@ const ORDERBOOK_KEY: u8 = 0x01;
 #[derive(Debug, Clone)]
 pub struct Proof {
     pub event_id: u64,
-    pub symbol: Symbol,
-    pub cmd: u8,
-    pub nonce: u32,
+    // TODO signature
+    // pub symbol: Symbol,
+    // pub cmd: u8,
+    // pub nonce: u32,
     pub encoded_updates: Vec<MerkleLeaf>,
     pub proofs: Vec<u8>,
+}
+
+// TODO
+#[derive(Debug, Clone)]
+pub struct Signature {
+    pub user_id: UserId,
+    pub nonce: u32,
+    pub cmd: u8,
+    pub sig: Bits256,
+    pub params: Vec<u8>,
 }
 
 pub struct Prover(mpsc::Sender<Proof>);
@@ -48,17 +56,18 @@ impl Prover {
         Self(tx)
     }
 
-    pub fn prove_limit_cmd(
-        &self,
-        event_id: u64,
-        nonce: u32,
-        symbol: Symbol,
-        ask_or_bid: AskOrBid,
-        merkle_tree: &mut GlobalStates,
-        orderbook: &OrderBook,
-        outputs: &[Output],
-    ) -> anyhow::Result<()> {
+    pub fn prove_trading_cmd(&self, data: &mut Data, outputs: &[Output]) -> anyhow::Result<()> {
         let mut updates = vec![];
+        let symbol = outputs
+            .last()
+            .ok_or(anyhow!("won't happen"))?
+            .symbol
+            .clone();
+        let event_id = outputs.last().ok_or(anyhow!("won't happen"))?.event_id;
+        let orderbook = data
+            .orderbooks
+            .get(&symbol)
+            .ok_or(anyhow!("won't happen"))?;
         let (ask, bid) = (
             to_merkle_represent(orderbook.ask_size).unwrap(),
             to_merkle_represent(orderbook.bid_size).unwrap(),
@@ -66,27 +75,47 @@ impl Prover {
         updates.push(new_orderbook_merkle_leaf(symbol, ask, bid));
         outputs
             .iter()
-            .flat_map(|r| {
+            .flat_map(|ref r| {
                 let (ba, bf) = (
                     to_merkle_represent(r.base_available).unwrap(),
                     to_merkle_represent(r.base_frozen).unwrap(),
                 );
-                let leaf0 = new_account_merkle_leaf(r.user_id, symbol.0, ba, bf);
+                let leaf0 = new_account_merkle_leaf(&r.user_id, symbol.0, ba, bf);
                 let (qa, qf) = (
                     to_merkle_represent(r.quote_available).unwrap(),
                     to_merkle_represent(r.quote_frozen).unwrap(),
                 );
-                let leaf1 = new_account_merkle_leaf(r.user_id, symbol.1, qa, qf);
+                let leaf1 = new_account_merkle_leaf(&r.user_id, symbol.1, qa, qf);
                 vec![leaf0, leaf1].into_iter()
             })
             .for_each(|n| updates.push(n));
         let proof = Proof {
             event_id,
-            symbol,
-            cmd: ask_or_bid.into(),
-            nonce: nonce,
             encoded_updates: updates.clone(),
-            proofs: gen_proofs(merkle_tree, updates),
+            proofs: gen_proofs(&mut data.merkle_tree, updates),
+        };
+        self.0
+            .send(proof)
+            .map_err(|_| anyhow::anyhow!("memory channel broken on prover"))
+    }
+
+    pub fn prove_assets_cmd(
+        &self,
+        data: &mut Data,
+        event_id: u64,
+        user_id: &UserId,
+        currency: Currency,
+    ) -> anyhow::Result<()> {
+        let balance = assets::get_to_owned(&data.accounts, user_id, currency);
+        let (available, frozen) = (
+            to_merkle_represent(balance.available).unwrap(),
+            to_merkle_represent(balance.frozen).unwrap(),
+        );
+        let leaf = new_account_merkle_leaf(user_id, currency, available, frozen);
+        let proof = Proof {
+            event_id,
+            encoded_updates: vec![leaf],
+            proofs: gen_proofs(&mut data.merkle_tree, vec![leaf]),
         };
         self.0
             .send(proof)
@@ -103,7 +132,7 @@ pub fn to_merkle_represent(v: Decimal) -> Option<u128> {
 }
 
 fn new_account_merkle_leaf(
-    user_id: UserId,
+    user_id: &UserId,
     currency: Currency,
     avaiable: u128,
     frozen: u128,

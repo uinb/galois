@@ -13,7 +13,9 @@ name = "galois"
 path = "bin/galois.rs"
 
 [features]
+default = []
 prover = []
+enc-conf = ["magic-crypt"]
 
 [dependencies.rust_decimal]
 version = "1.15"
@@ -79,20 +81,15 @@ version = "0.4"
 
 [dependencies.magic-crypt]
 version = "3.1.5"
+optional = true
 
 [dependencies.anyhow]
 version =  "1"
 
+# TODO feature gateway
 [dependencies.primitive-types]
 version = "0.10.1"
 features = ["impl-serde"]
-
-[dependencies.fixed]
-version = "1.9"
-features = ["serde"]
-
-[dependencies.fixed-macro]
-version = "1.1"
 
 [dependencies.sparse-merkle-tree]
 version = "0.5.2-rc1"
@@ -105,6 +102,11 @@ version = "0.9"
 
 [dependencies.cfg-if]
 version = "1.0.0"
+
+# TODO
+#[dependencies.substrate-api-client]
+#git = "https://github.com/scs/substrate-api-client.git"
+#optional = true
 
 [dev-dependencies]
 tempdir = "0.3"
