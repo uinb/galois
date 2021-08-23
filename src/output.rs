@@ -12,15 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::{
+    core::*,
+    db::{DB, REDIS},
+    matcher::*,
+    orderbook::AskOrBid,
+    orderbook::Depth,
+};
 use mysql::{prelude::*, *};
 use redis::Commands;
-use std::collections::HashMap;
-use std::convert::Into;
-use std::sync::mpsc::{Receiver, Sender};
-use std::thread;
-use std::time::Duration;
-
-use crate::{core::*, db::DB, db::REDIS, matcher::*, orderbook::AskOrBid, orderbook::Depth};
+use std::{
+    collections::HashMap,
+    convert::Into,
+    sync::mpsc::{Receiver, Sender},
+    thread,
+    time::Duration,
+};
 
 #[derive(Debug)]
 pub struct Output {

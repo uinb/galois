@@ -14,7 +14,7 @@ path = "bin/galois.rs"
 
 [features]
 default = []
-prover = []
+prover = ["substrate-api-client"]
 enc-conf = ["magic-crypt"]
 
 [dependencies.rust_decimal]
@@ -88,13 +88,12 @@ version =  "1"
 
 # TODO feature gateway
 [dependencies.primitive-types]
-version = "0.10.1"
+version = "0.10"
 features = ["impl-serde"]
 
 [dependencies.sparse-merkle-tree]
 version = "0.5.2-rc1"
 git = "https://github.com/uinb/sparse-merkle-tree"
-#path = "../sparse-merkle-tree"
 features = ["serde-rs", "sha256"]
 
 [dependencies.sha2]
@@ -103,10 +102,10 @@ version = "0.9"
 [dependencies.cfg-if]
 version = "1.0.0"
 
-# TODO
-#[dependencies.substrate-api-client]
-#git = "https://github.com/scs/substrate-api-client.git"
-#optional = true
+[dependencies.substrate-api-client]
+#path = "../substrate-api-client"
+git = "https://github.com/uinb/substrate-api-client"
+optional = true
 
 [dev-dependencies]
 tempdir = "0.3"
