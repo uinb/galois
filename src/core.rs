@@ -16,8 +16,9 @@ use crate::{assets::Account, orderbook::OrderBook};
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use sparse_merkle_tree::H256;
-use sparse_merkle_tree::{default_store::DefaultStore, sha256::Sha256Hasher, SparseMerkleTree};
+use sparse_merkle_tree::{
+    default_store::DefaultStore, sha256::Sha256Hasher, SparseMerkleTree, H256,
+};
 use std::{
     collections::HashMap,
     fs::File,
@@ -26,7 +27,6 @@ use std::{
 
 pub type Bits256 = [u8; 32];
 pub type MerkleIdentity = H256;
-pub type MerkleLeaf = (H256, H256);
 pub type Base = u32;
 pub type Quote = u32;
 pub type Price = Decimal;
@@ -46,6 +46,21 @@ pub type Accounts = HashMap<UserId, Balances>;
 pub type Balance = Account;
 
 pub const SYSTEM: UserId = UserId::zero();
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MerkleLeaf {
+    pub key: H256,
+    pub value: H256,
+}
+
+impl MerkleLeaf {
+    pub fn as_bytes(&self) -> Vec<u8> {
+        let mut v = vec![];
+        v.extend_from_slice(self.key.as_slice());
+        v.extend_from_slice(self.value.as_slice());
+        v
+    }
+}
 
 #[must_use]
 pub fn max_support_number() -> Amount {

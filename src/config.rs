@@ -124,7 +124,9 @@ fn init_config(toml: &str) -> anyhow::Result<Config> {
                 .ok_or(anyhow::anyhow!("env MAGIC_KEY not set"))?;
             let key = key.to_str().ok_or_else(||anyhow::anyhow!("env MAGIC_KEY not set"))?;
             cfg.mysql.decrypt(&key)?;
-            cfg.fusotao.as_mut().ok_or(anyhow::anyhow!("Invalid fusotao config"))?.decrypt(&key)?;
+            if let Some(ref mut fuso) = cfg.fusotao {
+                fuso.decrypt(&key)?;
+            }
         } else {
             let cfg: Config = toml::from_str(toml)?;
         }
@@ -137,7 +139,7 @@ fn init_config(toml: &str) -> anyhow::Result<Config> {
 }
 
 #[test]
-#[cfg(not(feature = "prover"))]
+#[cfg(not(feature = "fusotao"))]
 pub fn test_default() {
     let toml = r#"
 [server]

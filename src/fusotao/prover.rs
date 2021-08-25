@@ -12,72 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{assets, config::C, core::*, output::Output};
+use super::Proof;
+use crate::{assets, core::*, output::Output};
 use anyhow::anyhow;
 use rust_decimal::{prelude::*, Decimal};
 use sha2::{Digest, Sha256};
-use sp_core::Pair;
-use std::{sync::mpsc, thread};
-use substrate_api_client::{
-    compose_extrinsic, rpc::WsRpcClient, Api, UncheckedExtrinsicV4, XtStatus,
-};
+use std::{sync::mpsc::Sender, time::Duration};
 
-pub const ONE_ONCHAIN: u128 = 1_000_000_000_000_000_000;
-pub const SCALE_ONCHAIN: u32 = 18;
+const ONE_ONCHAIN: u128 = 1_000_000_000_000_000_000;
+const SCALE_ONCHAIN: u32 = 18;
 const ACCOUNT_KEY: u8 = 0x00;
 const ORDERBOOK_KEY: u8 = 0x01;
 
-#[derive(Debug, Clone)]
-pub struct Proof {
-    pub event_id: u64,
-    // TODO signature
-    // pub symbol: Symbol,
-    // pub cmd: u8,
-    // pub nonce: u32,
-    pub encoded_updates: Vec<MerkleLeaf>,
-    pub proofs: Vec<u8>,
-}
-
-// TODO
-#[derive(Debug, Clone)]
-pub struct Signature {
-    pub user_id: UserId,
-    pub nonce: u32,
-    pub cmd: u8,
-    pub sig: Bits256,
-    pub params: Vec<u8>,
-}
-
-pub struct Prover(mpsc::Sender<Proof>);
+pub struct Prover(Sender<Option<Proof>>);
 
 impl Prover {
-    pub fn init() -> anyhow::Result<Self> {
-        let signer = sp_core::sr25519::Pair::from_string(
-            &C.fusotao
-                .as_ref()
-                .ok_or(anyhow!("Invalid fusotao config"))?
-                .key_seed,
-            None,
-        )
-        .map_err(|_| anyhow!("Invalid fusotao config"))?;
-        let client = WsRpcClient::new(
-            &C.fusotao
-                .as_ref()
-                .ok_or(anyhow!("Invalid fusotao config"))?
-                .node_url,
-        );
-        let api = Api::new(client)
-            .map(|api| api.set_signer(signer))
-            .map_err(|_| anyhow!("Fusotao node not available"))?;
-        let (tx, rx) = mpsc::channel();
-        thread::spawn(move || loop {
-            let _proofs = rx.recv().unwrap();
-            // TODO Receipts#verify
-            let xt: UncheckedExtrinsicV4<_> =
-                compose_extrinsic!(api.clone(), "Balances", "transfer", Compact(42_u128));
-            // TODO retry
-            api.send_extrinsic(xt.hex_encode(), XtStatus::InBlock);
-        });
+    pub fn new(tx: Sender<Option<Proof>>) -> anyhow::Result<Self> {
+        let txc = tx.clone();
+        // std::thread::spawn(move || loop {
+        //     std::thread::sleep(Duration::from_millis(1000));
+        //     // txc.send(None).unwrap();
+        // });
         Ok(Self(tx))
     }
 
@@ -116,11 +71,16 @@ impl Prover {
             .for_each(|n| updates.push(n));
         let proof = Proof {
             event_id,
-            encoded_updates: updates.clone(),
+            // TODO
+            user_id: UserId::zero(),
+            nonce: 0,
+            signature: vec![0; 32],
+            cmd: "".to_string(),
+            leaves: updates.clone(),
             proofs: gen_proofs(&mut data.merkle_tree, updates),
         };
         self.0
-            .send(proof)
+            .send(Some(proof))
             .map_err(|_| anyhow::anyhow!("memory channel broken on prover"))
     }
 
@@ -139,20 +99,25 @@ impl Prover {
         let leaf = new_account_merkle_leaf(user_id, currency, available, frozen);
         let proof = Proof {
             event_id,
-            encoded_updates: vec![leaf],
+            // TODO
+            user_id: UserId::zero(),
+            nonce: 0,
+            signature: vec![0; 32],
+            cmd: "".to_string(),
+            leaves: vec![leaf.clone()],
             proofs: gen_proofs(&mut data.merkle_tree, vec![leaf]),
         };
         self.0
-            .send(proof)
+            .send(Some(proof))
             .map_err(|_| anyhow::anyhow!("memory channel broken on prover"))
     }
 }
 
-pub fn d18() -> Amount {
+fn d18() -> Amount {
     ONE_ONCHAIN.into()
 }
 
-pub fn to_merkle_represent(v: Decimal) -> Option<u128> {
+fn to_merkle_represent(v: Decimal) -> Option<u128> {
     Some((v.fract() * d18()).to_u128()? + (v.floor().to_u128()? * ONE_ONCHAIN))
 }
 
@@ -164,33 +129,48 @@ fn new_account_merkle_leaf(
 ) -> MerkleLeaf {
     let mut hasher = Sha256::new();
     let mut value: [u8; 32] = Default::default();
-    value.copy_from_slice(&[&avaiable.to_be_bytes()[..], &frozen.to_be_bytes()[..]].concat());
+    value[..16].copy_from_slice(&avaiable.to_be_bytes());
+    value[16..].copy_from_slice(&frozen.to_be_bytes());
     hasher.update(&[ACCOUNT_KEY][..]);
     hasher.update(user_id.as_bytes());
     hasher.update(&currency.to_be_bytes()[..]);
-    (hasher.finalize().into(), MerkleIdentity::from(value))
+    MerkleLeaf {
+        key: hasher.finalize().into(),
+        value: MerkleIdentity::from(value),
+    }
 }
 
 fn new_orderbook_merkle_leaf(symbol: Symbol, ask_size: u128, bid_size: u128) -> MerkleLeaf {
     let mut hasher = Sha256::new();
     let mut value: [u8; 32] = Default::default();
-    value.copy_from_slice(&[&ask_size.to_be_bytes()[..], &bid_size.to_be_bytes()[..]].concat());
-    // FIXME shall we use C-repr feature to serialize `Symbol` directly?
+    value[..16].copy_from_slice(&ask_size.to_be_bytes()[..]);
+    value[16..].copy_from_slice(&bid_size.to_be_bytes()[..]);
     let mut symbol_bits: [u8; 8] = Default::default();
-    symbol_bits
-        .copy_from_slice(&[&symbol.0.to_be_bytes()[..], &symbol.1.to_be_bytes()[..]].concat());
+    symbol_bits[..4].copy_from_slice(&symbol.0.to_be_bytes()[..]);
+    symbol_bits[4..].copy_from_slice(&symbol.1.to_be_bytes()[..]);
     hasher.update(&[ORDERBOOK_KEY][..]);
     hasher.update(&symbol_bits[..]);
-    (hasher.finalize().into(), MerkleIdentity::from(value))
+    MerkleLeaf {
+        key: hasher.finalize().into(),
+        value: MerkleIdentity::from(value),
+    }
 }
 
 // FIXME unwrap
 fn gen_proofs(merkle_tree: &mut GlobalStates, leaves: Vec<MerkleLeaf>) -> Vec<u8> {
-    leaves.iter().for_each(|(k, v)| {
-        merkle_tree.update(*k, *v).unwrap();
+    leaves.iter().for_each(|leaf| {
+        merkle_tree.update(leaf.key, leaf.value).unwrap();
     });
     let proof = merkle_tree
-        .merkle_proof(leaves.iter().map(|(k, _)| *k).collect::<Vec<_>>())
+        .merkle_proof(leaves.iter().map(|leaf| leaf.key).collect::<Vec<_>>())
         .unwrap();
-    proof.compile(leaves).unwrap().into()
+    proof
+        .compile(
+            leaves
+                .into_iter()
+                .map(|leaf| (leaf.key, leaf.value))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap()
+        .into()
 }

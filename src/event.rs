@@ -17,7 +17,7 @@ use cfg_if::cfg_if;
 use rust_decimal::{prelude::Zero, Decimal};
 use serde::{Deserialize, Serialize};
 use std::{
-    sync::mpsc::{Receiver, Sender},
+    sync::mpsc::{channel, Receiver, Sender},
     thread,
 };
 
@@ -109,9 +109,11 @@ type EventExecutionResult = Result<Vec<output::Output>, EventsError>;
 pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>>, mut data: Data) {
     thread::spawn(move || -> EventExecutionResult {
         cfg_if! {
-            if #[cfg(feature = "prover")] {
-                use crate::prover::Prover;
-                let prover = Prover::init().map_err(|_| EventsError::Interrupted)?;
+            if #[cfg(feature = "fusotao")] {
+                use crate::fusotao;
+                let (tx, rx) = channel();
+                fusotao::init(rx).map_err(|_| EventsError::Interrupted)?;
+                let prover = fusotao::Prover::new(tx).map_err(|_| EventsError::Interrupted)?;
             }
         }
         loop {
@@ -151,7 +153,7 @@ pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>
                         }
                         Ok(out) => {
                             cfg_if! {
-                                if #[cfg(feature = "prover")] {
+                                if #[cfg(feature = "fusotao")] {
                                     if event.is_trading_cmd() {
                                         prover.prove_trading_cmd(&mut data, &out)
                                             .map_err(|_| EventsError::Interrupted)?;

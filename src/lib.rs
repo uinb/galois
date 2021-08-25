@@ -26,11 +26,11 @@ pub mod config;
 pub mod core;
 pub mod db;
 pub mod event;
+#[cfg(feature = "fusotao")]
+pub mod fusotao;
 pub mod matcher;
 pub mod orderbook;
 pub mod output;
-#[cfg(feature = "prover")]
-pub mod prover;
 pub mod sequence;
 pub mod server;
 pub mod snapshot;
