@@ -21,14 +21,14 @@ enc-conf = ["magic-crypt"]
 version = "1.15"
 features = ["serde-bincode"]
 
-[dependencies.rust_decimal_macros]
+[dev-dependencies.rust_decimal_macros]
 version = "1.15"
 
 [dependencies.bincode]
 version = "1.3.1"
 
 [dependencies.serde]
-version = "1.0.115"
+version = "1.0"
 features = ["derive"]
 
 [dependencies.serde_json]
@@ -38,6 +38,10 @@ version = "1.0"
 version = "1.0"
 features = ["zlib"]
 default-features = false
+
+[dependencies.primitive-types]
+version = "0.10.1"
+features = ["impl-serde"]
 
 [dependencies.mysql]
 version = "18.2.0"
@@ -86,11 +90,6 @@ optional = true
 [dependencies.anyhow]
 version =  "1"
 
-# TODO feature gateway
-[dependencies.primitive-types]
-version = "0.10"
-features = ["impl-serde"]
-
 [dependencies.sparse-merkle-tree]
 version = "0.5.2-rc1"
 git = "https://github.com/uinb/sparse-merkle-tree"
@@ -100,7 +99,10 @@ features = ["serde-rs", "sha256"]
 version = "0.9"
 
 [dependencies.cfg-if]
-version = "1.0.0"
+version = "1.0"
+
+[dependencies.hex]
+version = "0.4"
 
 [dependencies.substrate-api-client]
 #path = "../substrate-api-client"
@@ -109,6 +111,7 @@ optional = true
 
 [dependencies.sp-core]
 version = "3.0.0"
+features = ["full_crypto"]
 optional = true
 
 [dependencies.sp-runtime]

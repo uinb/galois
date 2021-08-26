@@ -17,7 +17,7 @@ use cfg_if::cfg_if;
 use rust_decimal::{prelude::Zero, Decimal};
 use serde::{Deserialize, Serialize};
 use std::{
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::mpsc::{Receiver, Sender},
     thread,
 };
 
@@ -111,7 +111,7 @@ pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>
         cfg_if! {
             if #[cfg(feature = "fusotao")] {
                 use crate::fusotao;
-                let (tx, rx) = channel();
+                let (tx, rx) = std::sync::mpsc::channel();
                 fusotao::init(rx).map_err(|_| EventsError::Interrupted)?;
                 let prover = fusotao::Prover::new(tx).map_err(|_| EventsError::Interrupted)?;
             }

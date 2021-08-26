@@ -41,7 +41,7 @@ pub struct Proof {
 /// AccountId of chain = MultiAddress<sp_runtime::AccountId32, ()>::Id = GenericAddress::Id
 /// 1. from_ss58check() or from_ss58check_with_version()
 /// 2. new or from public
-pub fn init(rx: Receiver<Option<Proof>>) -> anyhow::Result<()> {
+pub fn init(rx: Receiver<Proof>) -> anyhow::Result<()> {
     let signer = Sr25519::from_string(
         &C.fusotao
             .as_ref()
@@ -76,15 +76,6 @@ pub fn init(rx: Receiver<Option<Proof>>) -> anyhow::Result<()> {
                 Compact(42000000000000000000_u128)
             );
             api.send_extrinsic(xt.hex_encode(), XtStatus::InBlock);
-            // match proof {
-            //     Some(p) => {
-            //         buf.push(p);
-            //         if buf.len() >= 10 {
-            //             flush(&mut buf);
-            //         }
-            //     }
-            //     None => flush(&mut buf),
-            // }
         }
     });
     Ok(())

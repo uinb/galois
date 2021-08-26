@@ -13,6 +13,8 @@
 // limitations under the License.
 
 use crate::{assets::Account, orderbook::OrderBook};
+use anyhow::anyhow;
+use cfg_if::cfg_if;
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -25,7 +27,6 @@ use std::{
     io::{BufReader, BufWriter},
 };
 
-pub type Bits256 = [u8; 32];
 pub type MerkleIdentity = H256;
 pub type Base = u32;
 pub type Quote = u32;
@@ -33,7 +34,6 @@ pub type Price = Decimal;
 pub type Amount = Decimal;
 pub type Vol = Decimal;
 pub type Currency = u32;
-pub type UserId = primitive_types::H256;
 pub type Symbol = (Base, Quote);
 pub type EventId = u64;
 pub type OrderId = u64;
@@ -44,6 +44,106 @@ pub type GlobalStates = SparseMerkleTree<Sha256Hasher, H256, DefaultStore<H256>>
 pub type Balances = HashMap<Currency, Account>;
 pub type Accounts = HashMap<UserId, Balances>;
 pub type Balance = Account;
+pub type UserId = B256;
+//pub type UserId = primitive_types::H256;
+
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default)]
+pub struct B256(pub [u8; 32]);
+
+impl B256 {
+    pub const fn zero() -> Self {
+        Self([0; 32])
+    }
+
+    pub fn new(x: [u8; 32]) -> Self {
+        Self(x)
+    }
+
+    pub fn from_hex_str(s: &str) -> anyhow::Result<Self> {
+        let hex = s.trim_start_matches("0x");
+        if hex.len() == 64 {
+            let mut bytes = [0u8; 32];
+            hex::decode_to_slice(hex, &mut bytes)
+                .map_err(|_| anyhow!("invalid hex string"))
+                .map(|_| Self::from(bytes))
+        } else {
+            Err(anyhow!("invalid hex string"))
+        }
+    }
+
+    // dummy
+    pub fn from_low_u64_be(x: u64) -> Self {
+        let mut s = [0u8; 32];
+        s[24..].copy_from_slice(&x.to_be_bytes());
+        Self::new(s)
+    }
+}
+
+impl std::str::FromStr for B256 {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> anyhow::Result<Self> {
+        if s.starts_with("0x") {
+            Self::from_hex_str(s)
+        } else {
+            cfg_if! {
+                if #[cfg(feature = "fusotao")] {
+                    use sp_core::crypto::Ss58Codec;
+                    Self::from_ss58check(s).map_err(|_| anyhow!("invalid ss58 format"))
+                } else {
+                    Err(anyhow!("invalid hex string"))
+                }
+            }
+        }
+    }
+}
+
+impl std::fmt::Debug for B256 {
+    #[cfg(feature = "fusotao")]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use sp_core::crypto::Ss58Codec;
+        let s = self.to_ss58check();
+        write!(f, "{}", &s)
+    }
+
+    #[cfg(not(feature = "fusotao"))]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "0x{}", &hex::encode(self.0))
+    }
+}
+
+impl AsRef<[u8]> for B256 {
+    fn as_ref(&self) -> &[u8] {
+        &self.0[..]
+    }
+}
+
+impl AsMut<[u8]> for B256 {
+    fn as_mut(&mut self) -> &mut [u8] {
+        &mut self.0[..]
+    }
+}
+
+impl AsRef<[u8; 32]> for B256 {
+    fn as_ref(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+impl AsMut<[u8; 32]> for B256 {
+    fn as_mut(&mut self) -> &mut [u8; 32] {
+        &mut self.0
+    }
+}
+
+impl From<[u8; 32]> for B256 {
+    fn from(x: [u8; 32]) -> Self {
+        Self::new(x)
+    }
+}
+
+#[cfg(feature = "fusotao")]
+impl sp_core::crypto::Ss58Codec for B256 {}
 
 pub const SYSTEM: UserId = UserId::zero();
 
@@ -141,4 +241,26 @@ pub fn test_dump() {
     assert_eq!(test.orderbooks, de.orderbooks);
     assert_eq!(test.accounts, de.accounts);
     assert_eq!(test.merkle_tree.root(), de.merkle_tree.root());
+}
+
+#[test]
+#[cfg(not(feature = "fusotao"))]
+pub fn test_debug_b256() {
+    let u = B256::zero();
+    assert_eq!(
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
+        format!("{:?}", u)
+    );
+}
+
+#[test]
+#[cfg(feature = "fusotao")]
+pub fn test_debug_b256_on_fusotao() {
+    use std::str::FromStr;
+    let u = B256::from_str("0x0ae466861e8397f1e3beadac1a49dc111beea3b62d34a6eb4b5be370f5aada30")
+        .unwrap();
+    assert_eq!(
+        "5CJzBh1SeBJ5qKzEpz1yzk8dF45erM5VWzwz4Ef2Zs1y2nKQ",
+        format!("{:?}", u)
+    );
 }

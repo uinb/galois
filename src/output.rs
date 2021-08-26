@@ -121,7 +121,7 @@ VALUES
             params! {
                 "event_id" => p.event_id,
                 "order_id" => p.order_id,
-                "user_id" => format!("{:#x}", p.user_id),
+                "user_id" => format!("{:?}", p.user_id),
                 "state" => p.state.into(): u32,
                 "role" => p.role.into(): u32,
                 "ask_or_bid" => p.ask_or_bid.into(): u32,

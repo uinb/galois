@@ -17,22 +17,16 @@ use crate::{assets, core::*, output::Output};
 use anyhow::anyhow;
 use rust_decimal::{prelude::*, Decimal};
 use sha2::{Digest, Sha256};
-use std::{sync::mpsc::Sender, time::Duration};
+use std::sync::mpsc::Sender;
 
 const ONE_ONCHAIN: u128 = 1_000_000_000_000_000_000;
-const SCALE_ONCHAIN: u32 = 18;
 const ACCOUNT_KEY: u8 = 0x00;
 const ORDERBOOK_KEY: u8 = 0x01;
 
-pub struct Prover(Sender<Option<Proof>>);
+pub struct Prover(Sender<Proof>);
 
 impl Prover {
-    pub fn new(tx: Sender<Option<Proof>>) -> anyhow::Result<Self> {
-        let txc = tx.clone();
-        // std::thread::spawn(move || loop {
-        //     std::thread::sleep(Duration::from_millis(1000));
-        //     // txc.send(None).unwrap();
-        // });
+    pub fn new(tx: Sender<Proof>) -> anyhow::Result<Self> {
         Ok(Self(tx))
     }
 
@@ -80,8 +74,8 @@ impl Prover {
             proofs: gen_proofs(&mut data.merkle_tree, updates),
         };
         self.0
-            .send(Some(proof))
-            .map_err(|_| anyhow::anyhow!("memory channel broken on prover"))
+            .send(proof)
+            .map_err(|_| anyhow!("prover channel broken"))
     }
 
     pub fn prove_assets_cmd(
@@ -108,8 +102,8 @@ impl Prover {
             proofs: gen_proofs(&mut data.merkle_tree, vec![leaf]),
         };
         self.0
-            .send(Some(proof))
-            .map_err(|_| anyhow::anyhow!("memory channel broken on prover"))
+            .send(proof)
+            .map_err(|_| anyhow!("prover channel broken"))
     }
 }
 
@@ -132,7 +126,7 @@ fn new_account_merkle_leaf(
     value[..16].copy_from_slice(&avaiable.to_be_bytes());
     value[16..].copy_from_slice(&frozen.to_be_bytes());
     hasher.update(&[ACCOUNT_KEY][..]);
-    hasher.update(user_id.as_bytes());
+    hasher.update(<B256 as AsRef<[u8]>>::as_ref(user_id));
     hasher.update(&currency.to_be_bytes()[..]);
     MerkleLeaf {
         key: hasher.finalize().into(),
