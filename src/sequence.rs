@@ -507,10 +507,10 @@ pub const ERROR: u32 = 2;
 
 #[test]
 pub fn test_deserialize_cmd() {
-    let transfer_in = r#"{"currency":100, "amount":"100.0", "user_id":"0000000000000000000000000000000000000000000000000000000000000001", "cmd":11}"#;
+    let transfer_in = r#"{"currency":100, "amount":"100.0", "user_id":"0x0000000000000000000000000000000000000000000000000000000000000001", "cmd":11}"#;
     let e = serde_json::from_str::<Command>(transfer_in).unwrap();
     assert!(e.validate());
-    let bid_limit = r#"{"quote":100, "base":101, "cmd":1, "price":"10.0", "amount":"0.5", "order_id":1, "user_id":"0000000000000000000000000000000000000000000000000000000000000001"}"#;
+    let bid_limit = r#"{"quote":100, "base":101, "cmd":1, "price":"10.0", "amount":"0.5", "order_id":1, "user_id":"0x0000000000000000000000000000000000000000000000000000000000000001"}"#;
     let e = serde_json::from_str::<Command>(bid_limit).unwrap();
     assert!(e.validate());
 }

@@ -13,12 +13,10 @@
 // limitations under the License.
 
 use argparse::{ArgumentParser, Store, StoreTrue};
+use cfg_if::cfg_if;
 use lazy_static::lazy_static;
-use magic_crypt::{new_magic_crypt, MagicCryptError, MagicCryptTrait};
+use log4rs::file::RawConfig as LogConfig;
 use serde::Deserialize;
-
-use std::env;
-use std::fs;
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
@@ -26,18 +24,13 @@ pub struct Config {
     pub sequence: SequenceConfig,
     pub mysql: MysqlConfig,
     pub redis: RedisConfig,
-    pub log: log4rs::file::RawConfig,
+    pub log: LogConfig,
+    pub fusotao: Option<FusotaoConfig>,
 }
 
-pub fn decrypt(key: &str, content: &str) -> Result<String, MagicCryptError> {
-    let mc = new_magic_crypt!(key, 64);
-    mc.decrypt_base64_to_string(content)
-}
-
-#[allow(dead_code)]
-pub fn encrypt(key: &str, content: &str) -> String {
-    let mc = new_magic_crypt!(key, 64);
-    mc.encrypt_str_to_base64(content)
+#[cfg(feature = "enc-conf")]
+pub trait EncryptedConfig {
+    fn decrypt(&mut self, key: &str) -> anyhow::Result<()>;
 }
 
 #[derive(Debug, Deserialize)]
@@ -57,6 +50,46 @@ pub struct SequenceConfig {
 #[derive(Debug, Deserialize)]
 pub struct MysqlConfig {
     pub url: String,
+}
+
+#[cfg(feature = "enc-conf")]
+impl EncryptedConfig for MysqlConfig {
+    fn decrypt(&mut self, key: &str) -> anyhow::Result<()> {
+        use magic_crypt::MagicCryptTrait;
+        let opts = mysql::Opts::from_url(&self.url)?;
+        let (f, t) = (
+            self.url
+                .find(":")
+                .ok_or_else(|| anyhow::anyhow!("invalid mysql config"))?,
+            self.url
+                .find('@')
+                .ok_or_else(|| anyhow::anyhow!("invalid mysql config"))?,
+        );
+        let mc = magic_crypt::new_magic_crypt!(key, 64);
+        let dec = mc.decrypt_base64_to_string(
+            opts.get_pass()
+                .ok_or_else(|| anyhow::anyhow!("invalid mysql config"))?,
+        )?;
+        self.url.replace_range(f..=t, &dec);
+        Ok(())
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FusotaoConfig {
+    pub node_url: String,
+    pub key_seed: String,
+}
+
+#[cfg(feature = "enc-conf")]
+impl EncryptedConfig for FusotaoConfig {
+    fn decrypt(&mut self, key: &str) -> anyhow::Result<()> {
+        use magic_crypt::MagicCryptTrait;
+        let mc = magic_crypt::new_magic_crypt!(key, 64);
+        let dec = mc.decrypt_base64_to_string(&self.key_seed)?;
+        self.node_url.replace_range(.., &dec);
+        Ok(())
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -80,45 +113,55 @@ fn init_config_file() -> anyhow::Result<Config> {
             .add_option(&["-g"], StoreTrue, "start from genesis");
         args.parse_args_or_exit();
     }
-    let mut cfg: Config = toml::from_str(&fs::read_to_string(file)?)?;
-    let opts = mysql::Opts::from_url(&cfg.mysql.url)?;
-    let pass = opts
-        .get_pass()
-        .ok_or_else(|| anyhow::anyhow!("passphrase not exist"))?;
-    if pass.starts_with("ENC(") && pass.ends_with(')') {
-        let content = pass.trim_start_matches("ENC(").trim_end_matches(')');
-        match env::var_os("PBE_KEY") {
-            Some(val) => {
-                let des = decrypt(val.to_str().unwrap(), content)?;
-                let (f, t) = (
-                    cfg.mysql
-                        .url
-                        .find("ENC(")
-                        .ok_or_else(|| anyhow::anyhow!("ENC( not found in passphrase"))?,
-                    cfg.mysql
-                        .url
-                        .find(')')
-                        .ok_or_else(|| anyhow::anyhow!(") not found in passphrase"))?,
-                );
-                cfg.mysql.url.replace_range(f..=t, &des);
+    init_config(&std::fs::read_to_string(file)?)
+}
+
+fn init_config(toml: &str) -> anyhow::Result<Config> {
+    cfg_if! {
+        if #[cfg(feature = "enc-conf")] {
+            let mut cfg: Config = toml::from_str(toml)?;
+            let key = std::env::var_os("MAGIC_KEY")
+                .ok_or(anyhow::anyhow!("env MAGIC_KEY not set"))?;
+            let key = key.to_str().ok_or_else(||anyhow::anyhow!("env MAGIC_KEY not set"))?;
+            cfg.mysql.decrypt(&key)?;
+            if let Some(ref mut fuso) = cfg.fusotao {
+                fuso.decrypt(&key)?;
             }
-            None => panic!("$PBE_KEY is not defined in the environment."),
+        } else {
+            let cfg: Config = toml::from_str(toml)?;
         }
     }
     let log_conf = log4rs::config::Config::builder()
-        .appenders(
-            cfg.log
-                .appenders_lossy(&log4rs::file::Deserializers::default())
-                .0,
-        )
+        .appenders(cfg.log.appenders_lossy(&Default::default()).0)
         .build(cfg.log.root())?;
     log4rs::init_config(log_conf)?;
     Ok(cfg)
 }
 
 #[test]
-pub fn test_encrypt() {
-    let encrypted = encrypt("hello", "root12345678");
-    println!("{}", encrypted);
-    assert_eq!("root12345678", decrypt("hello", &encrypted).unwrap());
+#[cfg(not(feature = "fusotao"))]
+pub fn test_default() {
+    let toml = r#"
+[server]
+bind_addr = "127.0.0.1:8097"
+[mysql]
+url = "mysql://username:password@localhost:3306/galois"
+[redis]
+url = "redis://localhost:6379/0"
+[sequence]
+checkpoint = 100000
+coredump_dir = "/tmp/snapshot"
+batch_size = 1000
+dump_mode = "disk"
+fetch_intervel_ms = 5
+[log]
+[log.appenders.console]
+kind = "console"
+[log.root]
+level = "info"
+appenders = ["console"]
+"#;
+    let config = init_config(&toml).unwrap();
+    let mysql_opts = mysql::Opts::from_url(&config.mysql.url).unwrap();
+    assert_eq!("password", mysql_opts.get_pass().unwrap());
 }
