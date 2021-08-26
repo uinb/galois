@@ -38,6 +38,18 @@ impl Into<u32> for AskOrBid {
     }
 }
 
+impl std::convert::TryFrom<u32> for AskOrBid {
+    type Error = anyhow::Error;
+
+    fn try_from(x: u32) -> anyhow::Result<Self> {
+        match x {
+            0 => Ok(AskOrBid::Ask),
+            1 => Ok(AskOrBid::Bid),
+            _ => Err(anyhow::anyhow!("")),
+        }
+    }
+}
+
 impl Into<u8> for AskOrBid {
     fn into(self) -> u8 {
         match self {
@@ -139,7 +151,7 @@ pub type Tape = BTreeMap<Price, OrderPage>;
 
 pub type Index = HashMap<u64, Price>;
 
-#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Default)]
 pub struct OrderBook {
     pub asks: Tape,
     pub bids: Tape,
@@ -173,6 +185,7 @@ impl OrderBook {
         min_amount: Amount,
         min_vol: Amount,
         enable_market_order: bool,
+        open: bool,
     ) -> Self {
         Self {
             asks: Tape::new(),
@@ -187,7 +200,7 @@ impl OrderBook {
             min_amount,
             min_vol,
             enable_market_order,
-            open: true,
+            open: open,
         }
     }
 

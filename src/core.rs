@@ -163,7 +163,7 @@ impl MerkleLeaf {
 }
 
 #[must_use]
-pub fn max_support_number() -> Amount {
+pub fn max_number() -> Amount {
     u64::MAX.into()
 }
 
@@ -216,6 +216,7 @@ pub fn test_dump() {
         dec!(0.001),
         dec!(1.0),
         false,
+        true,
     );
     let v = bincode::serialize(&orderbook).unwrap();
     let des: OrderBook = bincode::deserialize(&v).unwrap();
@@ -231,6 +232,7 @@ pub fn test_dump() {
             dec!(0.001),
             dec!(1.0),
             false,
+            true,
         ),
     );
     let temp_dir = tempdir::TempDir::new(".").unwrap();

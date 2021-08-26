@@ -16,70 +16,78 @@ use crate::{assets, clearing, core::*, matcher, orderbook::*, output, sequence, 
 use cfg_if::cfg_if;
 use rust_decimal::{prelude::Zero, Decimal};
 use serde::{Deserialize, Serialize};
-use std::{
-    sync::mpsc::{Receiver, Sender},
-    thread,
-};
+use std::convert::TryInto;
+use std::sync::mpsc::{Receiver, Sender};
 
-#[derive(Debug, Eq, PartialEq, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum Event {
-    Limit(
-        EventId,
-        Symbol,
-        UserId,
-        OrderId,
-        Price,
-        Amount,
-        AskOrBid,
-        Timestamp,
-    ),
-    Market(EventId, Symbol, UserId, OrderId, Vol, AskOrBid, Timestamp),
-    Cancel(EventId, Symbol, UserId, OrderId, Timestamp),
+    Limit(EventId, LimitCmd, Timestamp),
+    Cancel(EventId, CancelCmd, Timestamp),
+    TransferOut(EventId, AssetsCmd, Timestamp),
+    TransferIn(EventId, AssetsCmd, Timestamp),
+    UpdateSymbol(EventId, SymbolCmd, Timestamp),
+    #[cfg(not(feature = "fusotao"))]
     CancelAll(EventId, Symbol, Timestamp),
-    Open(EventId, Symbol, Timestamp),
-    Close(EventId, Symbol, Timestamp),
-    OpenAll(EventId, Timestamp),
-    CloseAll(EventId, Timestamp),
-    TransferOut(EventId, UserId, Currency, Amount, Timestamp),
-    TransferIn(EventId, UserId, Currency, Amount, Timestamp),
-    NewSymbol(
-        EventId,
-        Symbol,
-        Scale,
-        Scale,
-        Fee, // Taker
-        Fee, // Maker
-        Amount,
-        Vol,
-        bool,
-        Timestamp,
-    ),
-    UpdateSymbol(
-        EventId,
-        Symbol,
-        Scale,
-        Scale,
-        Fee, // Taker
-        Fee, // Maker
-        Amount,
-        Vol,
-        bool,
-        Timestamp,
-    ),
     // special: `EventId` means dump at `EventId`
     Dump(EventId, Timestamp),
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LimitCmd {
+    pub symbol: Symbol,
+    pub user_id: UserId,
+    pub order_id: OrderId,
+    pub price: Price,
+    pub amount: Amount,
+    pub ask_or_bid: AskOrBid,
+    #[cfg(feature = "fusotao")]
+    pub nonce: u32,
+    #[cfg(feature = "fusotao")]
+    pub signature: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CancelCmd {
+    pub symbol: Symbol,
+    pub user_id: UserId,
+    pub order_id: OrderId,
+    #[cfg(feature = "fusotao")]
+    pub nonce: u32,
+    #[cfg(feature = "fusotao")]
+    pub signature: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AssetsCmd {
+    pub user_id: UserId,
+    pub currency: Currency,
+    pub amount: Amount,
+    #[cfg(feature = "fusotao")]
+    pub nonce_or_block_number: u32,
+    #[cfg(feature = "fusotao")]
+    pub signature_or_hash: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SymbolCmd {
+    pub symbol: Symbol,
+    pub open: bool,
+    pub base_scale: Scale,
+    pub quote_scale: Scale,
+    pub taker_fee: Fee,
+    pub maker_fee: Fee,
+    pub min_amount: Amount,
+    pub min_vol: Vol,
+    pub enable_market_order: bool,
+}
+
 impl Event {
     pub fn is_trading_cmd(&self) -> bool {
-        matches!(self, Event::Limit(_, _, _, _, _, _, _, _))
-            || matches!(self, Event::Market(_, _, _, _, _, _, _))
-            || matches!(self, Event::Cancel(_, _, _, _, _))
+        matches!(self, Event::Limit(_, _, _)) || matches!(self, Event::Cancel(_, _, _))
     }
 
     pub fn is_assets_cmd(&self) -> bool {
-        matches!(self, Event::TransferIn(_, _, _, _, _))
-            || matches!(self, Event::TransferOut(_, _, _, _, _))
+        matches!(self, Event::TransferIn(_, _, _)) || matches!(self, Event::TransferOut(_, _, _))
     }
 }
 
@@ -104,10 +112,12 @@ pub enum EventsError {
     EventRejected(u64),
 }
 
-type EventExecutionResult = Result<Vec<output::Output>, EventsError>;
+type EventExecutionResult = Result<(), EventsError>;
+type OutputChannel = Sender<Vec<output::Output>>;
+type DriverChannel = Receiver<sequence::Fusion>;
 
-pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>>, mut data: Data) {
-    thread::spawn(move || -> EventExecutionResult {
+pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data) {
+    std::thread::spawn(move || -> EventExecutionResult {
         cfg_if! {
             if #[cfg(feature = "fusotao")] {
                 use crate::fusotao;
@@ -119,57 +129,37 @@ pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>
         loop {
             let fusion = recv.recv().unwrap();
             match fusion {
-                // come from request or inner counter
                 sequence::Fusion::R(watch) => {
-                    if !watch.cmd.validate() {
-                        log::info!("illegal request {:?}", watch);
-                        server::publish(server::Message::with_payload(
-                            watch.session,
-                            watch.req_id,
-                            vec![],
-                        ));
-                        continue;
+                    let (s, r) = (watch.session, watch.req_id);
+                    if let Ok(inspection) = watch.try_into() {
+                        do_inspect(inspection, &data)?;
+                    } else {
+                        server::publish(server::Message::with_payload(s, r, vec![]));
                     }
-                    let inspection = watch.to_inspection().ok_or(EventsError::Interrupted)?;
-                    do_inspect(inspection, &data)?;
                 }
                 sequence::Fusion::W(seq) => {
-                    if !seq.cmd.validate() {
-                        log::info!("illegal sequence {:?}", seq);
-                        sequence::update_sequence_status(seq.id, sequence::ERROR)
+                    let id = seq.id;
+                    if let Ok(event) = seq.try_into() {
+                        cfg_if! {
+                            if #[cfg(feature = "fusotao")] {
+                                let result = handle_event(event, &mut data, &sender, &prover);
+                            } else {
+                                let result = handle_event(event, &mut data, &sender);
+                            }
+                        }
+                        match result {
+                            Err(EventsError::EventRejected(id)) => {
+                                sequence::update_sequence_status(id, sequence::ERROR)
+                                    .map_err(|_| EventsError::Interrupted)?;
+                            }
+                            Err(EventsError::Interrupted) => {
+                                panic!("sequence thread panic");
+                            }
+                            Ok(()) => {}
+                        }
+                    } else {
+                        sequence::update_sequence_status(id, sequence::ERROR)
                             .map_err(|_| EventsError::Interrupted)?;
-                        continue;
-                    }
-                    let event = seq.to_event().ok_or(EventsError::Interrupted)?;
-                    let result = handle_event(event.clone(), &mut data);
-                    match result {
-                        Err(EventsError::EventRejected(id)) => {
-                            log::info!("execute sequence {:?} failed", seq);
-                            sequence::update_sequence_status(id, sequence::ERROR)
-                                .map_err(|_| EventsError::Interrupted)?;
-                        }
-                        Err(EventsError::Interrupted) => {
-                            panic!("sequence thread panic");
-                        }
-                        Ok(out) => {
-                            cfg_if! {
-                                if #[cfg(feature = "fusotao")] {
-                                    if event.is_trading_cmd() {
-                                        prover.prove_trading_cmd(&mut data, &out)
-                                            .map_err(|_| EventsError::Interrupted)?;
-                                    } else if event.is_assets_cmd() {
-                                        use std::str::FromStr;
-                                        prover.prove_assets_cmd(&mut data, seq.id,
-                                                                UserId::from_str(seq.cmd.user_id.as_ref().unwrap()).as_ref().unwrap(),
-                                                                seq.cmd.currency.unwrap())
-                                            .map_err(|_| EventsError::Interrupted)?;
-                                    }
-                                }
-                            }
-                            if !out.is_empty() {
-                                sender.send(out).map_err(|_| EventsError::Interrupted)?;
-                            }
-                        }
                     }
                 }
             }
@@ -177,55 +167,85 @@ pub fn init(recv: Receiver<sequence::Fusion>, sender: Sender<Vec<output::Output>
     });
 }
 
-fn handle_event(event: Event, data: &mut Data) -> EventExecutionResult {
+fn handle_event(
+    event: Event,
+    data: &mut Data,
+    sender: &OutputChannel,
+    #[cfg(feature = "fusotao")] prover: &crate::fusotao::Prover,
+) -> EventExecutionResult {
     match event {
-        Event::Limit(id, symbol, user, order, price, amount, ask_or_bid, time) => {
+        Event::Limit(id, cmd, time) => {
             let orderbook = data
                 .orderbooks
-                .get_mut(&symbol)
+                .get_mut(&cmd.symbol)
                 .ok_or(EventsError::EventRejected(id))?;
-            if !orderbook.should_accept(price, amount) {
+            if !orderbook.should_accept(cmd.price, cmd.amount) {
                 return Err(EventsError::EventRejected(id));
             }
-            let (currency, val) = assets::freeze_if(&symbol, ask_or_bid, price, amount);
-            assets::try_freeze(&mut data.accounts, user, currency, val)
+            let (currency, val) =
+                assets::freeze_if(&cmd.symbol, cmd.ask_or_bid, cmd.price, cmd.amount);
+            assets::try_freeze(&mut data.accounts, cmd.user_id, currency, val)
                 .map_err(|_| EventsError::EventRejected(id))?;
-            let mr = matcher::execute_limit(orderbook, user, order, price, amount, ask_or_bid);
-            Ok(clearing::clear(
+            let mr = matcher::execute_limit(
+                orderbook,
+                cmd.user_id,
+                cmd.order_id,
+                cmd.price,
+                cmd.amount,
+                cmd.ask_or_bid,
+            );
+            let out = clearing::clear(
                 &mut data.accounts,
                 id,
-                &symbol,
+                &cmd.symbol,
                 orderbook.taker_fee,
                 orderbook.maker_fee,
                 &mr,
                 time,
-            ))
+            );
+            cfg_if! {
+                if #[cfg(feature = "fusotao")] {
+                    prover.prove_trading_cmd(data, &out, cmd.nonce, vec![], "".to_string())
+                          .map_err(|_| EventsError::Interrupted)?;
+                }
+            }
+            sender.send(out).map_err(|_| EventsError::Interrupted)?;
+            Ok(())
         }
-        Event::Market(id, _, _, _, _, _, _) => Err(EventsError::EventRejected(id)),
-        Event::Cancel(id, symbol, user, order_id, time) => {
+        Event::Cancel(id, cmd, time) => {
             // 0. symbol exsits
             // 1. check order's owner
             let orderbook = data
                 .orderbooks
-                .get_mut(&symbol)
+                .get_mut(&cmd.symbol)
                 .ok_or(EventsError::EventRejected(id))?;
             let order = orderbook
-                .find_order(order_id)
+                .find_order(cmd.order_id)
                 .ok_or(EventsError::EventRejected(id))?;
-            if order.user != user {
+            if order.user != cmd.user_id {
                 return Err(EventsError::EventRejected(id));
             }
-            let mr = matcher::cancel(orderbook, order_id).ok_or(EventsError::EventRejected(id))?;
-            Ok(clearing::clear(
+            let mr =
+                matcher::cancel(orderbook, cmd.order_id).ok_or(EventsError::EventRejected(id))?;
+            let out = clearing::clear(
                 &mut data.accounts,
                 id,
-                &symbol,
+                &cmd.symbol,
                 Decimal::zero(),
                 Decimal::zero(),
                 &mr,
                 time,
-            ))
+            );
+            cfg_if! {
+                if #[cfg(feature = "fusotao")] {
+                    prover.prove_trading_cmd(data, &out, cmd.nonce, vec![], "".to_string())
+                          .map_err(|_| EventsError::Interrupted)?;
+                }
+            }
+            sender.send(out).map_err(|_| EventsError::Interrupted)?;
+            Ok(())
         }
+        #[cfg(not(feature = "fusotao"))]
         Event::CancelAll(id, symbol, time) => {
             let orderbook = data
                 .orderbooks
@@ -237,7 +257,7 @@ fn handle_event(event: Event, data: &mut Data) -> EventExecutionResult {
                 .map(|id| matcher::cancel(orderbook, id))
                 .filter(|mr| mr.is_some())
                 .collect::<Vec<_>>();
-            Ok(mrs
+            let out = mrs
                 .iter()
                 .map(|mr| {
                     clearing::clear(
@@ -251,101 +271,56 @@ fn handle_event(event: Event, data: &mut Data) -> EventExecutionResult {
                     )
                 })
                 .flatten()
-                .collect::<Vec<_>>())
+                .collect::<Vec<_>>();
+            sender.send(out).map_err(|_| EventsError::Interrupted)?;
+            Ok(())
         }
-        Event::Open(id, symbol, _) => {
-            let orderbook = data
-                .orderbooks
-                .get_mut(&symbol)
-                .ok_or(EventsError::EventRejected(id))?;
-            orderbook.open = true;
-            Ok(vec![])
-        }
-        Event::Close(id, symbol, _) => {
-            let orderbook = data
-                .orderbooks
-                .get_mut(&symbol)
-                .ok_or(EventsError::EventRejected(id))?;
-            orderbook.open = false;
-            Ok(vec![])
-        }
-        Event::OpenAll(_, _) => {
-            data.orderbooks.iter_mut().for_each(|(_, v)| v.open = true);
-            Ok(vec![])
-        }
-        Event::CloseAll(_, _) => {
-            data.orderbooks.iter_mut().for_each(|(_, v)| v.open = false);
-            Ok(vec![])
-        }
-        Event::TransferOut(id, user, currency, amount, _) => {
-            let ok = assets::deduct_available(&mut data.accounts, user, currency, amount);
-            if ok {
-                // TODO
-                Ok(vec![])
-            } else {
-                Err(EventsError::EventRejected(id))
+        Event::TransferOut(id, cmd, _) => {
+            assets::deduct_available(&mut data.accounts, cmd.user_id, cmd.currency, cmd.amount)
+                .map_err(|_| EventsError::EventRejected(id))?;
+            cfg_if! {
+                if #[cfg(feature = "fusotao")] {
+                }
             }
+            Ok(())
         }
-        Event::TransferIn(_, user, currency, amount, _) => {
-            assets::add_to_available(&mut data.accounts, user, currency, amount);
-            // TODO
-            Ok(vec![])
+        Event::TransferIn(_, cmd, _) => {
+            assets::add_to_available(&mut data.accounts, cmd.user_id, cmd.currency, cmd.amount);
+            cfg_if! {
+                if #[cfg(feature = "fusotao")] {
+                }
+            }
+            Ok(())
         }
-        Event::NewSymbol(
-            id,
-            symbol,
-            base_scale,
-            quote_scale,
-            taker_fee,
-            maker_fee,
-            min_amount,
-            min_vol,
-            enable_market_order,
-            _,
-        ) => {
-            if !data.orderbooks.contains_key(&symbol) {
+        Event::UpdateSymbol(_, cmd, _) => {
+            if !data.orderbooks.contains_key(&cmd.symbol) {
                 let orderbook = OrderBook::new(
-                    base_scale,
-                    quote_scale,
-                    taker_fee,
-                    maker_fee,
-                    min_amount,
-                    min_vol,
-                    enable_market_order,
+                    cmd.base_scale,
+                    cmd.quote_scale,
+                    cmd.taker_fee,
+                    cmd.maker_fee,
+                    cmd.min_amount,
+                    cmd.min_vol,
+                    cmd.enable_market_order,
+                    cmd.open,
                 );
-                data.orderbooks.insert(symbol, orderbook);
-                Ok(vec![])
+                data.orderbooks.insert(cmd.symbol, orderbook);
             } else {
-                Err(EventsError::EventRejected(id))
+                let orderbook = data.orderbooks.get_mut(&cmd.symbol).unwrap();
+                orderbook.base_scale = cmd.base_scale;
+                orderbook.quote_scale = cmd.quote_scale;
+                orderbook.taker_fee = cmd.taker_fee;
+                orderbook.maker_fee = cmd.maker_fee;
+                orderbook.min_amount = cmd.min_amount;
+                orderbook.min_vol = cmd.min_vol;
+                orderbook.enable_market_order = cmd.enable_market_order;
+                orderbook.open = cmd.open;
             }
+            Ok(())
         }
-        Event::UpdateSymbol(
-            id,
-            symbol,
-            base_scale,
-            quote_scale,
-            taker_fee,
-            maker_fee,
-            min_amount,
-            min_vol,
-            enable_market_order,
-            _,
-        ) => match data.orderbooks.get_mut(&symbol) {
-            Some(orderbook) => {
-                orderbook.base_scale = base_scale;
-                orderbook.quote_scale = quote_scale;
-                orderbook.taker_fee = taker_fee;
-                orderbook.maker_fee = maker_fee;
-                orderbook.min_amount = min_amount;
-                orderbook.min_vol = min_vol;
-                orderbook.enable_market_order = enable_market_order;
-                Ok(vec![])
-            }
-            None => Err(EventsError::EventRejected(id)),
-        },
         Event::Dump(id, time) => {
             snapshot::dump(id, time, data);
-            Ok(vec![])
+            Ok(())
         }
     }
 }
@@ -383,7 +358,7 @@ fn do_inspect(inspection: Inspection, data: &Data) -> EventExecutionResult {
             sequence::confirm(from, exclude).map_err(|_| EventsError::Interrupted)?;
         }
     }
-    Ok(vec![])
+    Ok(())
 }
 
 #[test]

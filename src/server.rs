@@ -164,12 +164,6 @@ async fn handle_req(upstream: &mut Sender<Fusion>, session: u64, req_id: u64, js
             return;
         }
     };
-    if !cmd.validate() {
-        send(Message::with_payload(session, req_id, vec![]))
-            .await
-            .unwrap();
-        return;
-    }
     if !cmd.is_read() {
         return;
     }

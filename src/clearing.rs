@@ -130,12 +130,13 @@ pub fn clear(
                         quote_sum += quote_decr;
                         // maker is bid, incr base available(filled), decr quote frozen(quot_decr)
                         assets::add_to_available(accounts, m.user_id, base, m.filled);
-                        assets::deduct_frozen(accounts, m.user_id, quote, quote_decr);
+                        assets::deduct_frozen(accounts, m.user_id, quote, quote_decr).unwrap();
                         // charge fee for maker
                         if maker_fee.is_sign_positive() {
                             // maker is bid, incr base, decr quote, so we charge base
                             let charge_fee = m.filled * maker_fee;
-                            assets::deduct_available(accounts, m.user_id, base, charge_fee);
+                            assets::deduct_available(accounts, m.user_id, base, charge_fee)
+                                .unwrap();
                             assets::add_to_available(accounts, SYSTEM, base, charge_fee);
                             let base_account = assets::get_to_owned(accounts, &m.user_id, base);
                             let quote_account = assets::get_to_owned(accounts, &m.user_id, quote);
@@ -194,19 +195,21 @@ pub fn clear(
                     }
                     // taker base account frozen decr sum(filled)
                     // taker quote account available incr sum(filled * price)
-                    assets::deduct_frozen(accounts, mr.taker.user_id, base, base_sum);
+                    assets::deduct_frozen(accounts, mr.taker.user_id, base, base_sum).unwrap();
                     assets::add_to_available(accounts, mr.taker.user_id, quote, quote_sum);
                     // charge fee for taker
                     let charge_fee = quote_sum * taker_fee;
                     if maker_fee.is_sign_positive() {
                         // taker is ask, incr quote, decr base, so we charge quote
-                        assets::deduct_available(accounts, mr.taker.user_id, quote, charge_fee);
+                        assets::deduct_available(accounts, mr.taker.user_id, quote, charge_fee)
+                            .unwrap();
                         assets::add_to_available(accounts, SYSTEM, quote, charge_fee);
                     } else {
                         // maker_fee is negative
                         // taker is ask, incr quote, decr base, we give some of quote to maker
                         // and leave rest of quote to us
-                        assets::deduct_available(accounts, mr.taker.user_id, quote, charge_fee);
+                        assets::deduct_available(accounts, mr.taker.user_id, quote, charge_fee)
+                            .unwrap();
                         assets::add_to_available(
                             accounts,
                             SYSTEM,
@@ -254,13 +257,14 @@ pub fn clear(
                         quote_sum += quote_incr;
                         return_quote += m.filled * mr.taker.price - m.filled * m.price;
                         // maker is ask, incr quote available(quote_incr), decr base frozen(filled)
-                        assets::deduct_frozen(accounts, m.user_id, base, m.filled);
+                        assets::deduct_frozen(accounts, m.user_id, base, m.filled).unwrap();
                         assets::add_to_available(accounts, m.user_id, quote, quote_incr);
                         // charge fee for maker
                         if maker_fee.is_sign_positive() {
                             // maker is ask, incr quote, decr base, so we charge quote
                             let charge_fee = quote_incr * maker_fee;
-                            assets::deduct_available(accounts, m.user_id, quote, charge_fee);
+                            assets::deduct_available(accounts, m.user_id, quote, charge_fee)
+                                .unwrap();
                             assets::add_to_available(accounts, SYSTEM, quote, charge_fee);
                             let base_account =
                                 assets::get_to_owned(accounts, &mr.taker.user_id, base);
@@ -323,17 +327,19 @@ pub fn clear(
                     // taker base account available incr sum(filled)
                     // taker quote account frozen decr sum(filled * price=quote_sum)
                     assets::add_to_available(accounts, mr.taker.user_id, base, base_sum);
-                    assets::deduct_frozen(accounts, mr.taker.user_id, quote, quote_sum);
+                    assets::deduct_frozen(accounts, mr.taker.user_id, quote, quote_sum).unwrap();
                     // charge fee for taker
                     let charge_fee = base_sum * taker_fee;
                     if maker_fee.is_sign_positive() {
                         // taker is bid, incr base, decr quote, so we charge base
-                        assets::deduct_available(accounts, mr.taker.user_id, base, charge_fee);
+                        assets::deduct_available(accounts, mr.taker.user_id, base, charge_fee)
+                            .unwrap();
                         assets::add_to_available(accounts, SYSTEM, base, charge_fee);
                     } else {
                         // taker is bid, incr base, decr quote, we give some base to maker,
                         // and leave rest of base to us
-                        assets::deduct_available(accounts, mr.taker.user_id, base, charge_fee);
+                        assets::deduct_available(accounts, mr.taker.user_id, base, charge_fee)
+                            .unwrap();
                         assets::add_to_available(
                             accounts,
                             SYSTEM,
@@ -1078,6 +1084,7 @@ pub mod test {
             min_amount,
             min_vol,
             true,
+            true,
         );
         let mut accounts = Accounts::new();
         assets::add_to_available(
@@ -1193,6 +1200,7 @@ pub mod test {
             maker_fee,
             min_amount,
             min_vol,
+            true,
             true,
         );
         let mut accounts = Accounts::new();
@@ -1323,6 +1331,7 @@ pub mod test {
             maker_fee,
             min_amount,
             min_vol,
+            true,
             true,
         );
         let mut accounts = Accounts::new();
