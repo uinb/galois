@@ -285,6 +285,7 @@ mod test {
             min_amount,
             min_vol,
             true,
+            true,
         );
 
         let price = dec!(0.1);

@@ -93,17 +93,13 @@ pub fn deduct_available(
     user: UserId,
     currency: Currency,
     amount: Amount,
-) -> bool {
-    match get_mut(accounts, user, currency) {
-        Some(account) => {
-            if account.available < amount {
-                false
-            } else {
-                account.available -= amount;
-                true
-            }
-        }
-        None => false,
+) -> anyhow::Result<()> {
+    let account = get_mut(accounts, user, currency).ok_or(anyhow!(""))?;
+    if account.available >= amount {
+        account.available -= amount;
+        Ok(())
+    } else {
+        Err(anyhow!("Insufficient available account"))
     }
 }
 
@@ -112,17 +108,13 @@ pub fn deduct_frozen(
     user: UserId,
     currency: Currency,
     amount: Amount,
-) -> bool {
-    match get_mut(accounts, user, currency) {
-        Some(account) => {
-            if account.frozen < amount {
-                false
-            } else {
-                account.frozen -= amount;
-                true
-            }
-        }
-        None => false,
+) -> anyhow::Result<()> {
+    let account = get_mut(accounts, user, currency).ok_or(anyhow!(""))?;
+    if account.frozen >= amount {
+        account.frozen -= amount;
+        Ok(())
+    } else {
+        Err(anyhow!("Insufficient frozen account"))
     }
 }
 
@@ -188,10 +180,10 @@ mod test {
             get(&all, UserId::zero(), 101).unwrap().available,
             dec!(7.77777)
         );
-        deduct_available(&mut all, UserId::zero(), 101, dec!(7.67777));
+        deduct_available(&mut all, UserId::zero(), 101, dec!(7.67777)).unwrap();
         assert_eq!(get(&all, UserId::zero(), 101).unwrap().available, dec!(0.1));
         let ok = deduct_available(&mut all, UserId::zero(), 101, dec!(1.0));
-        assert!(!ok);
+        assert!(ok.is_err());
         assert_eq!(get(&all, UserId::zero(), 101).unwrap().available, dec!(0.1));
     }
 
@@ -223,7 +215,8 @@ mod test {
                 UserId::from_str(&cmd.user_id.unwrap()).unwrap(),
                 cmd.currency.unwrap(),
                 cmd.amount.unwrap(),
-            );
+            )
+            .unwrap();
         }
     }
 

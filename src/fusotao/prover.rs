@@ -30,18 +30,19 @@ impl Prover {
         Ok(Self(tx))
     }
 
-    pub fn prove_trading_cmd(&self, data: &mut Data, outputs: &[Output]) -> anyhow::Result<()> {
+    pub fn prove_trading_cmd(
+        &self,
+        data: &mut Data,
+        outputs: &[Output],
+        nonce: u32,
+        signature: Vec<u8>,
+        cmd: String,
+    ) -> anyhow::Result<()> {
         let mut updates = vec![];
-        let symbol = outputs
-            .last()
-            .ok_or(anyhow!("won't happen"))?
-            .symbol
-            .clone();
-        let event_id = outputs.last().ok_or(anyhow!("won't happen"))?.event_id;
-        let orderbook = data
-            .orderbooks
-            .get(&symbol)
-            .ok_or(anyhow!("won't happen"))?;
+        let symbol = outputs.last().unwrap().symbol.clone();
+        let event_id = outputs.last().unwrap().event_id;
+        let user_id = outputs.last().unwrap().user_id;
+        let orderbook = data.orderbooks.get(&symbol).unwrap();
         let (ask, bid) = (
             to_merkle_represent(orderbook.ask_size).unwrap(),
             to_merkle_represent(orderbook.bid_size).unwrap(),
@@ -65,11 +66,10 @@ impl Prover {
             .for_each(|n| updates.push(n));
         let proof = Proof {
             event_id,
-            // TODO
-            user_id: UserId::zero(),
-            nonce: 0,
-            signature: vec![0; 32],
-            cmd: "".to_string(),
+            user_id,
+            nonce,
+            signature,
+            cmd,
             leaves: updates.clone(),
             proofs: gen_proofs(&mut data.merkle_tree, updates),
         };
