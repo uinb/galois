@@ -39,52 +39,48 @@ version = "1.0"
 features = ["zlib"]
 default-features = false
 
-[dependencies.primitive-types]
-version = "0.10.1"
-features = ["impl-serde"]
-
 [dependencies.mysql]
-version = "18.2.0"
+version = "18.2"
 
 [dependencies.redis]
-version = "0.17.0"
+version = "0.17"
 
 [dependencies.argparse]
-version = "0.2.2"
+version = "0.2"
 
 [dependencies.toml]
-version = "0.5.6"
+version = "0.5"
 
 [dependencies.lazy_static]
-version = "1.4.0"
+version = "1.4"
 
 [dependencies.linked-hash-map]
 version = "0.5.3"
 features = ["serde_impl"]
 
 [dependencies.async-std]
-version = "1.6.3"
+version = "1.6"
 default-features = false
 features = ["std"]
 
 [dependencies.futures]
-version = "0.3.5"
+version = "0.3"
 
 [dependencies.chashmap]
-version = "2.2.0"
+version = "2.2"
 
 [dependencies.log]
-version = "0.4.8"
+version = "0.4"
 
 [dependencies.log4rs]
-version = "0.13.0"
+version = "0.13"
 features = ["json_encoder", "toml_format"]
 
 [dependencies.chrono]
 version = "0.4"
 
 [dependencies.magic-crypt]
-version = "3.1.5"
+version = "3.1"
 optional = true
 
 [dependencies.anyhow]
@@ -120,3 +116,6 @@ optional = true
 
 [dev-dependencies]
 tempdir = "0.3"
+
+[patch.crates-io]
+crypto-mac = { git = "https://github.com/uinb/traits", package = "crypto-mac", tag = "crypto-mac-v0.7.0" }
