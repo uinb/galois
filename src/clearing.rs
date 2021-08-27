@@ -744,9 +744,91 @@ pub mod test {
         let b1_101 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 101);
         assert_eq!(b1_101.available, dec!(0.9));
         assert_eq!(b1_101.frozen, Decimal::zero());
-        assert_eq!(
-            assets::get_balance_to_owned(&accounts, &SYSTEM, 101).available,
-            dec!(0.0001),
+        let system_101 = assets::get_balance_to_owned(&accounts, &SYSTEM, 101).available;
+        assert_eq!(system_101, dec!(0.0001));
+        let system_100 = assets::get_balance_to_owned(&accounts, &SYSTEM, 100).available;
+        assert_eq!(system_100, dec!(1));
+    }
+
+    #[test]
+    pub fn test_dealing_rights_on_taker_ask() {
+        let base_scale = 6;
+        let quote_scale = 2;
+        let taker_fee = dec!(0.001);
+        let maker_fee = dec!(0.001);
+        let min_amount = dec!(0.01);
+        let min_vol = dec!(10);
+        let mut book = OrderBook::new(
+            base_scale,
+            quote_scale,
+            taker_fee,
+            maker_fee,
+            min_amount,
+            min_vol,
+            true,
+            true,
         );
+        let mut accounts = Accounts::new();
+        assets::add_to_available(&mut accounts, &UserId::from_low_u64_be(1), 101, dec!(1));
+        assets::add_to_available(&mut accounts, &UserId::from_low_u64_be(2), 100, dec!(10000));
+
+        let price = dec!(13333);
+        let amount = dec!(0.5);
+        assets::try_freeze(
+            &mut accounts,
+            &UserId::from_low_u64_be(2),
+            100,
+            price * amount,
+        )
+        .unwrap();
+        execute_limit(
+            &mut book,
+            UserId::from_low_u64_be(2),
+            1,
+            price,
+            amount,
+            AskOrBid::Bid,
+        );
+
+        let price = dec!(10000);
+        let amount = dec!(0.1);
+        assets::try_freeze(&mut accounts, &UserId::from_low_u64_be(1), 101, amount).unwrap();
+        let mr = execute_limit(
+            &mut book,
+            UserId::from_low_u64_be(1),
+            2,
+            price,
+            amount,
+            AskOrBid::Ask,
+        );
+
+        let symbol = (101, 100);
+        let out = super::clear(&mut accounts, 2, &symbol, taker_fee, maker_fee, &mr, 0);
+        // 2: maker bid
+        assert_eq!(out[0].base_delta, dec!(0.1));
+        assert_eq!(out[0].quote_delta, dec!(-1333.3));
+        assert_eq!(out[0].base_charge, dec!(-0.0001));
+        assert_eq!(out[0].quote_charge, Decimal::zero());
+        let b2_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(2), 100);
+        assert_eq!(b2_100.available, dec!(3333.5));
+        assert_eq!(b2_100.frozen, dec!(5333.2));
+        let b2_101 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(2), 101);
+        assert_eq!(b2_101.available, dec!(0.0999));
+        assert_eq!(b2_101.frozen, Decimal::zero());
+        // 1: taker ask
+        assert_eq!(out[1].base_delta, dec!(-0.1));
+        assert_eq!(out[1].quote_delta, dec!(1333.3));
+        assert_eq!(out[1].base_charge, Decimal::zero());
+        assert_eq!(out[1].quote_charge, dec!(-1.3333));
+        let b1_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 100);
+        assert_eq!(b1_100.available, dec!(1331.9667));
+        assert_eq!(b1_100.frozen, Decimal::zero());
+        let b1_101 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 101);
+        assert_eq!(b1_101.available, dec!(0.9));
+        assert_eq!(b1_101.frozen, Decimal::zero());
+        let system_100 = assets::get_balance_to_owned(&accounts, &SYSTEM, 100).available;
+        let system_101 = assets::get_balance_to_owned(&accounts, &SYSTEM, 101).available;
+        assert_eq!(system_100, dec!(1.3333));
+        assert_eq!(system_101, dec!(0.0001));
     }
 }
