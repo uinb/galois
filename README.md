@@ -4,7 +4,7 @@
 
 ## Introduction
 
-Galois is an extremely high performance matching engine written in Rust, typically used for the crypto currency exchange service.
+Galois is an extremely high performance matching engine written in Rust.
 
 Galois uses Event Sourcing pattern to handle tens of thousands of orders per second or even better, depending on the performance of persistence. Basic architecture is shown below.
 
@@ -21,10 +21,8 @@ events(mysql)  >>  |  galois  |  >> match results(mysql)/best n price(redis)
                        
 ```
 
-If you would like to use Galois in your product, you should implement the order/user management known as broker, as well as the blockchain client to handle crypto coin withdraw/deposition.
-
 ## Notice
-Galois works as a component of [Fusotao](https://github.com/uinb/fusotao) with feature `prover` enabled. The type `UserId` has been changed to `H256` after `v1.0.1` to adapt to Fusotao.
+Galois works as a component of [Fusotao](https://github.com/uinb/fusotao) which is being WIP. The version without `fusotao` feature enabled can be used for building a high performance exchange with broker(refer to [Guide to implement a broker](#)). Buttttt, we *strongly* recommend you shall hire an expert before you do the business, seriously.
 
 ## Getting Started
 
@@ -35,7 +33,7 @@ Galois works as a component of [Fusotao](https://github.com/uinb/fusotao) with f
 
 ### Quick Start
 
-Download the binary release and extract to any directory you prefer. Then `cp galois.toml.example galois.toml` and modify the `galois.toml` the mysql and redis configurations, as well as the snapshot directory.
+Compile galois with nightly version. Then `cp galois.toml.example galois.toml` and modify the `galois.toml` the mysql and redis configurations, as well as the snapshot directory.
 
 ```
 # init mysql
@@ -47,7 +45,7 @@ redis-server
 galois -c galois.toml
 ```
 
-Galois is now waiting for the incoming events and execute. Before you can execute orders, you need to issue a new pair and create a mysql table to receive the matching result outputs.
+Galois is now waiting for the incoming events and execute. Before you can execute orders, you need to issue a new pair and create a mysql table to receive the matching result outputs. The `UserId` is hex format of `H256` with a mandatory `0x` prefix when `fusotao` is disabled.
 
 ```
 # create a table to receive outputs from galois, 100 and 101 represent the base currency code and the quote currency code.

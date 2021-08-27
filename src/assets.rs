@@ -14,108 +14,85 @@
 
 use crate::{core::*, orderbook::AskOrBid};
 use anyhow::{anyhow, ensure};
-use rust_decimal::{prelude::Zero, Decimal};
+use rust_decimal::prelude::Zero;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq, Default)]
-pub struct Account {
-    pub available: Decimal,
-    pub frozen: Decimal,
+pub struct Balance {
+    pub available: Amount,
+    pub frozen: Amount,
 }
 
-pub fn get_mut(accounts: &mut Accounts, user: UserId, currency: Currency) -> Option<&mut Account> {
-    match accounts.get_mut(&user) {
-        None => None,
-        Some(account) => account.get_mut(&currency),
-    }
+pub fn get_account_to_owned(accounts: &Accounts, user: &UserId) -> Account {
+    accounts.get(user).map_or(Account::default(), |b| b.clone())
 }
 
-pub fn get(accounts: &Accounts, user: UserId, currency: Currency) -> Option<&Account> {
-    match accounts.get(&user) {
-        None => None,
-        Some(account) => account.get(&currency),
-    }
-}
-
-pub fn get_all_to_owned(accounts: &Accounts, user: &UserId) -> Balances {
-    accounts
-        .get(user)
-        .map_or(Balances::default(), |b| b.clone())
-}
-
-pub fn get_to_owned(accounts: &Accounts, user: &UserId, currency: Currency) -> Account {
+pub fn get_balance_to_owned(accounts: &Accounts, user: &UserId, currency: Currency) -> Balance {
     match accounts.get(user) {
-        None => Account::default(),
+        None => Balance::default(),
         Some(account) => account
             .get(&currency)
-            .map_or(Account::default(), |a| a.clone()),
+            .map_or(Balance::default(), |a| a.clone()),
     }
 }
 
-fn new_account() -> HashMap<Currency, Account> {
-    HashMap::with_capacity(64)
-}
-
-fn init_wallet(available: Decimal) -> Account {
-    Account {
+fn init_balance(available: Amount) -> Balance {
+    Balance {
         available,
-        frozen: Zero::zero(),
+        frozen: Amount::zero(),
     }
 }
 
 pub fn add_to_available(
     accounts: &mut Accounts,
-    user: UserId,
+    user: &UserId,
     currency: Currency,
-    amount: Decimal,
-) -> bool {
+    amount: Amount,
+) {
     accounts
-        .entry(user)
-        .and_modify(|user_account| {
-            user_account
+        .entry(*user)
+        .and_modify(|account| {
+            account
                 .entry(currency)
-                .and_modify(|account| {
-                    account.available += amount;
+                .and_modify(|balance| {
+                    balance.available += amount;
                 })
-                .or_insert_with(|| init_wallet(amount));
+                .or_insert_with(|| init_balance(amount));
         })
         .or_insert_with(|| {
-            let mut new_account = new_account();
-            new_account.insert(currency, init_wallet(amount));
-            new_account
+            let mut account = Account::default();
+            account.insert(currency, init_balance(amount));
+            account
         });
-    true
 }
 
 pub fn deduct_available(
     accounts: &mut Accounts,
-    user: UserId,
+    user: &UserId,
     currency: Currency,
     amount: Amount,
 ) -> anyhow::Result<()> {
-    let account = get_mut(accounts, user, currency).ok_or(anyhow!(""))?;
-    if account.available >= amount {
-        account.available -= amount;
-        Ok(())
-    } else {
-        Err(anyhow!("Insufficient available account"))
-    }
+    let account = accounts.get_mut(user).ok_or(anyhow!(""))?;
+    let balance = account.get_mut(&currency).ok_or(anyhow!(""))?;
+    ensure!(
+        balance.available >= amount,
+        "Insufficient available balance"
+    );
+    balance.available -= amount;
+    Ok(())
 }
 
 pub fn deduct_frozen(
     accounts: &mut Accounts,
-    user: UserId,
+    user: &UserId,
     currency: Currency,
     amount: Amount,
 ) -> anyhow::Result<()> {
-    let account = get_mut(accounts, user, currency).ok_or(anyhow!(""))?;
-    if account.frozen >= amount {
-        account.frozen -= amount;
-        Ok(())
-    } else {
-        Err(anyhow!("Insufficient frozen account"))
-    }
+    let account = accounts.get_mut(user).ok_or(anyhow!(""))?;
+    let balance = account.get_mut(&currency).ok_or(anyhow!(""))?;
+    ensure!(balance.frozen >= amount, "Insufficient frozen balance");
+    balance.frozen -= amount;
+    Ok(())
 }
 
 pub fn freeze_if(
@@ -132,30 +109,30 @@ pub fn freeze_if(
 
 pub fn try_freeze(
     accounts: &mut Accounts,
-    user: UserId,
+    user: &UserId,
     currency: Currency,
     amount: Amount,
-) -> anyhow::Result<Account> {
-    let account = get_mut(accounts, user, currency).ok_or(anyhow!("Account not found"))?;
-    ensure!(account.available >= amount, anyhow!("Available not enough"));
-    account.available -= amount;
-    account.frozen += amount;
-    Ok(account.clone())
+) -> anyhow::Result<Balance> {
+    let account = accounts.get_mut(user).ok_or(anyhow!(""))?;
+    let balance = account.get_mut(&currency).ok_or(anyhow!(""))?;
+    ensure!(balance.available >= amount, anyhow!("Available not enough"));
+    balance.available -= amount;
+    balance.frozen += amount;
+    Ok(balance.clone())
 }
 
-pub fn unfreeze(accounts: &mut Accounts, user: UserId, currency: Currency, amount: Amount) -> bool {
-    match get_mut(accounts, user, currency) {
-        None => false,
-        Some(account) => {
-            if account.frozen < amount {
-                false
-            } else {
-                account.available += amount;
-                account.frozen -= amount;
-                true
-            }
-        }
-    }
+pub fn try_unfreeze(
+    accounts: &mut Accounts,
+    user: &UserId,
+    currency: Currency,
+    amount: Amount,
+) -> anyhow::Result<Balance> {
+    let account = accounts.get_mut(user).ok_or(anyhow!(""))?;
+    let balance = account.get_mut(&currency).ok_or(anyhow!(""))?;
+    ensure!(balance.frozen >= amount, anyhow!("Frozen not enough"));
+    balance.available += amount;
+    balance.frozen -= amount;
+    Ok(balance.clone())
 }
 
 #[cfg(test)]
@@ -163,39 +140,42 @@ mod test {
     use super::*;
     use crate::core::UserId;
     use rust_decimal_macros::dec;
-    use serde_json;
     use std::str::FromStr;
 
     #[test]
     pub fn test_transfer() {
         let mut all = Accounts::new();
-        add_to_available(&mut all, UserId::zero(), 101, dec!(1.11111));
-        add_to_available(&mut all, UserId::zero(), 101, dec!(1.11111));
-        add_to_available(&mut all, UserId::zero(), 101, dec!(1.11111));
-        add_to_available(&mut all, UserId::zero(), 101, dec!(1.11111));
-        add_to_available(&mut all, UserId::zero(), 101, dec!(1.11111));
-        add_to_available(&mut all, UserId::zero(), 101, dec!(1.11111));
-        add_to_available(&mut all, UserId::zero(), 101, dec!(1.11111));
+        add_to_available(&mut all, &UserId::zero(), 101, dec!(1.11111));
+        add_to_available(&mut all, &UserId::zero(), 101, dec!(1.11111));
+        add_to_available(&mut all, &UserId::zero(), 101, dec!(1.11111));
+        add_to_available(&mut all, &UserId::zero(), 101, dec!(1.11111));
+        add_to_available(&mut all, &UserId::zero(), 101, dec!(1.11111));
+        add_to_available(&mut all, &UserId::zero(), 101, dec!(1.11111));
+        add_to_available(&mut all, &UserId::zero(), 101, dec!(1.11111));
         assert_eq!(
-            get(&all, UserId::zero(), 101).unwrap().available,
+            get_balance_to_owned(&all, &UserId::zero(), 101).available,
             dec!(7.77777)
         );
-        deduct_available(&mut all, UserId::zero(), 101, dec!(7.67777)).unwrap();
-        assert_eq!(get(&all, UserId::zero(), 101).unwrap().available, dec!(0.1));
-        let ok = deduct_available(&mut all, UserId::zero(), 101, dec!(1.0));
+        deduct_available(&mut all, &UserId::zero(), 101, dec!(7.67777)).unwrap();
+        assert_eq!(
+            get_balance_to_owned(&all, &UserId::zero(), 101).available,
+            dec!(0.1)
+        );
+        let ok = deduct_available(&mut all, &UserId::zero(), 101, dec!(1.0));
         assert!(ok.is_err());
-        assert_eq!(get(&all, UserId::zero(), 101).unwrap().available, dec!(0.1));
+        assert_eq!(
+            get_balance_to_owned(&all, &UserId::zero(), 101).available,
+            dec!(0.1)
+        );
     }
 
     #[test]
     pub fn test_freeze() {
         let mut all = Accounts::new();
-        add_to_available(&mut all, UserId::zero(), 101, dec!(1.11111));
-        let r = try_freeze(&mut all, UserId::zero(), 101, dec!(0.00011));
+        add_to_available(&mut all, &UserId::zero(), 101, dec!(1.11111));
+        let r = try_freeze(&mut all, &UserId::zero(), 101, dec!(0.00011));
         assert!(r.is_ok());
-        let a = get(&all, UserId::zero(), 101);
-        assert!(a.is_some());
-        let a = a.unwrap();
+        let a = get_balance_to_owned(&all, &UserId::zero(), 101);
         assert_eq!(a.available, dec!(1.111));
         assert_eq!(a.frozen, dec!(0.00011));
     }
@@ -205,14 +185,14 @@ mod test {
         if cmd.cmd == crate::sequence::TRANSFER_IN {
             add_to_available(
                 all,
-                UserId::from_str(&cmd.user_id.unwrap()).unwrap(),
+                &UserId::from_str(&cmd.user_id.unwrap()).unwrap(),
                 cmd.currency.unwrap(),
                 cmd.amount.unwrap(),
             );
         } else if cmd.cmd == crate::sequence::TRANSFER_OUT {
             deduct_available(
                 all,
-                UserId::from_str(&cmd.user_id.unwrap()).unwrap(),
+                &UserId::from_str(&cmd.user_id.unwrap()).unwrap(),
                 cmd.currency.unwrap(),
                 cmd.amount.unwrap(),
             )
@@ -238,15 +218,14 @@ mod test {
         let s = r#"{"amount":"3.81","cmd":10,"currency":101,"user_id":"0x0000000000000000000000000000000000000000000000000000000000000002"}"#;
         help(&mut all, s);
         assert_eq!(
-            get(
+            get_balance_to_owned(
                 &all,
-                UserId::from_str(
+                &UserId::from_str(
                     "0x0000000000000000000000000000000000000000000000000000000000000002"
                 )
                 .unwrap(),
                 101
             )
-            .unwrap()
             .available,
             dec!(9996.02)
         );

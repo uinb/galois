@@ -12,22 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{assets::Account, orderbook::OrderBook};
-use anyhow::anyhow;
-use cfg_if::cfg_if;
+#[cfg(feature = "fusotao")]
+use crate::fusotao::GlobalStates;
+use crate::{assets::Balance, orderbook::OrderBook};
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use sparse_merkle_tree::{
-    default_store::DefaultStore, sha256::Sha256Hasher, SparseMerkleTree, H256,
-};
 use std::{
     collections::HashMap,
     fs::File,
     io::{BufReader, BufWriter},
 };
 
-pub type MerkleIdentity = H256;
 pub type Base = u32;
 pub type Quote = u32;
 pub type Price = Decimal;
@@ -40,12 +36,9 @@ pub type OrderId = u64;
 pub type Fee = Decimal;
 pub type Scale = u32;
 pub type Timestamp = u64;
-pub type GlobalStates = SparseMerkleTree<Sha256Hasher, H256, DefaultStore<H256>>;
-pub type Balances = HashMap<Currency, Account>;
-pub type Accounts = HashMap<UserId, Balances>;
-pub type Balance = Account;
+pub type Account = HashMap<Currency, Balance>;
+pub type Accounts = HashMap<UserId, Account>;
 pub type UserId = B256;
-//pub type UserId = primitive_types::H256;
 
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, Default)]
 pub struct B256(pub [u8; 32]);
@@ -64,10 +57,10 @@ impl B256 {
         if hex.len() == 64 {
             let mut bytes = [0u8; 32];
             hex::decode_to_slice(hex, &mut bytes)
-                .map_err(|_| anyhow!("invalid hex string"))
+                .map_err(|_| anyhow::anyhow!("invalid hex string"))
                 .map(|_| Self::from(bytes))
         } else {
-            Err(anyhow!("invalid hex string"))
+            Err(anyhow::anyhow!("invalid hex string"))
         }
     }
 
@@ -86,12 +79,12 @@ impl std::str::FromStr for B256 {
         if s.starts_with("0x") {
             Self::from_hex_str(s)
         } else {
-            cfg_if! {
+            cfg_if::cfg_if! {
                 if #[cfg(feature = "fusotao")] {
                     use sp_core::crypto::Ss58Codec;
-                    Self::from_ss58check(s).map_err(|_| anyhow!("invalid ss58 format"))
+                    Self::from_ss58check(s).map_err(|_| anyhow::anyhow!("invalid ss58 format"))
                 } else {
-                    Err(anyhow!("invalid hex string"))
+                    Err(anyhow::anyhow!("invalid hex string"))
                 }
             }
         }
@@ -147,21 +140,6 @@ impl sp_core::crypto::Ss58Codec for B256 {}
 
 pub const SYSTEM: UserId = UserId::zero();
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct MerkleLeaf {
-    pub key: H256,
-    pub value: H256,
-}
-
-impl MerkleLeaf {
-    pub fn as_bytes(&self) -> Vec<u8> {
-        let mut v = vec![];
-        v.extend_from_slice(self.key.as_slice());
-        v.extend_from_slice(self.value.as_slice());
-        v
-    }
-}
-
 #[must_use]
 pub fn max_number() -> Amount {
     u64::MAX.into()
@@ -171,6 +149,7 @@ pub fn max_number() -> Amount {
 pub struct Data {
     pub orderbooks: HashMap<Symbol, OrderBook>,
     pub accounts: Accounts,
+    #[cfg(feature = "fusotao")]
     pub merkle_tree: GlobalStates,
 }
 
@@ -181,6 +160,7 @@ impl Data {
         Self {
             orderbooks: HashMap::new(),
             accounts: HashMap::new(),
+            #[cfg(feature = "fusotao")]
             merkle_tree: GlobalStates::default(),
         }
     }
@@ -242,7 +222,6 @@ pub fn test_dump() {
     let de = Data::from_raw(File::open(&file_path).unwrap()).unwrap();
     assert_eq!(test.orderbooks, de.orderbooks);
     assert_eq!(test.accounts, de.accounts);
-    assert_eq!(test.merkle_tree.root(), de.merkle_tree.root());
 }
 
 #[test]

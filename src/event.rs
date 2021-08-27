@@ -14,7 +14,6 @@
 
 use crate::{assets, clearing, core::*, matcher, orderbook::*, output, sequence, server, snapshot};
 use cfg_if::cfg_if;
-use rust_decimal::{prelude::Zero, Decimal};
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 use std::sync::mpsc::{Receiver, Sender};
@@ -182,9 +181,15 @@ fn handle_event(
             if !orderbook.should_accept(cmd.price, cmd.amount) {
                 return Err(EventsError::EventRejected(id));
             }
-            let (currency, val) =
-                assets::freeze_if(&cmd.symbol, cmd.ask_or_bid, cmd.price, cmd.amount);
-            assets::try_freeze(&mut data.accounts, cmd.user_id, currency, val)
+            cfg_if! {
+                if #[cfg(feature = "fusotao")] {
+                    let size = (orderbook.ask_size, orderbook.bid_size);
+                    let taker_base_before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.0);
+                    let taker_quote_before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.1);
+                }
+            }
+            let (c, val) = assets::freeze_if(&cmd.symbol, cmd.ask_or_bid, cmd.price, cmd.amount);
+            assets::try_freeze(&mut data.accounts, &cmd.user_id, c, val)
                 .map_err(|_| EventsError::EventRejected(id))?;
             let mr = matcher::execute_limit(
                 orderbook,
@@ -205,8 +210,17 @@ fn handle_event(
             );
             cfg_if! {
                 if #[cfg(feature = "fusotao")] {
-                    prover.prove_trading_cmd(data, &out, cmd.nonce, vec![], "".to_string())
-                          .map_err(|_| EventsError::Interrupted)?;
+                    prover.prove_trade_cmd(
+                        data,
+                        cmd.nonce,
+                        vec![],
+                        vec![],
+                        size.0,
+                        size.1,
+                        &taker_base_before,
+                        &taker_quote_before,
+                        &out,
+                    );
                 }
             }
             sender.send(out).map_err(|_| EventsError::Interrupted)?;
@@ -225,21 +239,37 @@ fn handle_event(
             if order.user != cmd.user_id {
                 return Err(EventsError::EventRejected(id));
             }
+            cfg_if! {
+                if #[cfg(feature = "fusotao")] {
+                    let size = (orderbook.ask_size, orderbook.bid_size);
+                    let taker_base_before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.0);
+                    let taker_quote_before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.1);
+                }
+            }
             let mr =
                 matcher::cancel(orderbook, cmd.order_id).ok_or(EventsError::EventRejected(id))?;
             let out = clearing::clear(
                 &mut data.accounts,
                 id,
                 &cmd.symbol,
-                Decimal::zero(),
-                Decimal::zero(),
+                orderbook.taker_fee,
+                orderbook.maker_fee,
                 &mr,
                 time,
             );
             cfg_if! {
                 if #[cfg(feature = "fusotao")] {
-                    prover.prove_trading_cmd(data, &out, cmd.nonce, vec![], "".to_string())
-                          .map_err(|_| EventsError::Interrupted)?;
+                    prover.prove_trade_cmd(
+                        data,
+                        cmd.nonce,
+                        vec![],
+                        vec![],
+                        size.0,
+                        size.1,
+                        &taker_base_before,
+                        &taker_quote_before,
+                        &out,
+                    );
                 }
             }
             sender.send(out).map_err(|_| EventsError::Interrupted)?;
@@ -264,8 +294,8 @@ fn handle_event(
                         &mut data.accounts,
                         id,
                         &symbol,
-                        Decimal::zero(),
-                        Decimal::zero(),
+                        orderbook.taker_fee,
+                        orderbook.maker_fee,
                         mr.as_ref().unwrap(),
                         time,
                     )
@@ -276,7 +306,7 @@ fn handle_event(
             Ok(())
         }
         Event::TransferOut(id, cmd, _) => {
-            assets::deduct_available(&mut data.accounts, cmd.user_id, cmd.currency, cmd.amount)
+            assets::deduct_available(&mut data.accounts, &cmd.user_id, cmd.currency, cmd.amount)
                 .map_err(|_| EventsError::EventRejected(id))?;
             cfg_if! {
                 if #[cfg(feature = "fusotao")] {
@@ -285,7 +315,7 @@ fn handle_event(
             Ok(())
         }
         Event::TransferIn(_, cmd, _) => {
-            assets::add_to_available(&mut data.accounts, cmd.user_id, cmd.currency, cmd.amount);
+            assets::add_to_available(&mut data.accounts, &cmd.user_id, cmd.currency, cmd.amount);
             cfg_if! {
                 if #[cfg(feature = "fusotao")] {
                 }
@@ -337,12 +367,12 @@ fn do_inspect(inspection: Inspection, data: &Data) -> EventExecutionResult {
             server::publish(server::Message::with_payload(session, req_id, v));
         }
         Inspection::QueryBalance(user_id, currency, session, req_id) => {
-            let a = assets::get_to_owned(&data.accounts, &user_id, currency);
+            let a = assets::get_balance_to_owned(&data.accounts, &user_id, currency);
             let v = serde_json::to_vec(&a).unwrap_or_default();
             server::publish(server::Message::with_payload(session, req_id, v));
         }
         Inspection::QueryAccounts(user_id, session, req_id) => {
-            let a = assets::get_all_to_owned(&data.accounts, &user_id);
+            let a = assets::get_account_to_owned(&data.accounts, &user_id);
             let v = serde_json::to_vec(&a).unwrap_or_default();
             server::publish(server::Message::with_payload(session, req_id, v));
         }
@@ -364,12 +394,12 @@ fn do_inspect(inspection: Inspection, data: &Data) -> EventExecutionResult {
 #[test]
 pub fn test_serialize() {
     assert_eq!("{}", serde_json::to_string(&Accounts::new()).unwrap());
-    let mut account = std::collections::HashMap::<u32, assets::Account>::new();
+    let mut account = Account::default();
     account.insert(
         100,
-        assets::Account {
-            available: Decimal::new(200, 1),
-            frozen: Decimal::new(0, 0),
+        assets::Balance {
+            available: Amount::new(200, 1),
+            frozen: Amount::new(0, 0),
         },
     );
     assert_eq!(
@@ -378,12 +408,10 @@ pub fn test_serialize() {
     );
     assert_eq!(
         r#"{"available":"0","frozen":"0"}"#,
-        serde_json::to_string(&assets::Account {
-            available: Decimal::new(0, 0),
-            frozen: Decimal::new(0, 0),
+        serde_json::to_string(&assets::Balance {
+            available: Amount::new(0, 0),
+            frozen: Amount::new(0, 0),
         })
         .unwrap()
     );
-    assert_eq!(true, Decimal::zero().is_sign_positive());
-    assert_eq!(false, Decimal::zero().is_sign_negative());
 }
