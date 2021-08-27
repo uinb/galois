@@ -18,23 +18,45 @@ pub use prover::Prover;
 
 use crate::{config::C, core::*};
 use anyhow::anyhow;
+use serde::{Deserialize, Serialize};
+use smt::{default_store::DefaultStore, sha256::Sha256Hasher, SparseMerkleTree, H256};
 use sp_core::{
     crypto::{Pair, Ss58Codec},
     sr25519::Pair as Sr25519,
 };
 use std::sync::mpsc::Receiver;
-use substrate_api_client::rpc::WsRpcClient;
-use substrate_api_client::{compose_extrinsic, Api, UncheckedExtrinsicV4, XtStatus};
+use sub_api::{compose_extrinsic, rpc::WsRpcClient, Api, UncheckedExtrinsicV4, XtStatus};
+
+// pub type MerkleIdentity = H256;
+pub type GlobalStates = SparseMerkleTree<Sha256Hasher, H256, DefaultStore<H256>>;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MerkleLeaf {
+    pub old_v: H256,
+    pub new_v: H256,
+}
+
+impl MerkleLeaf {
+    pub fn as_bytes(&self) -> Vec<u8> {
+        let mut v = vec![];
+        v.extend_from_slice(self.old_v.as_slice());
+        v.extend_from_slice(self.new_v.as_slice());
+        v
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Proof {
     pub event_id: u64,
     pub user_id: UserId,
     pub nonce: u32,
-    pub signature: Vec<u8>,
-    pub cmd: String,
+    pub signature: [u8; 64],
+    pub cmd: Vec<u8>,
+    pub keys: Vec<H256>,
     pub leaves: Vec<MerkleLeaf>,
-    pub proofs: Vec<u8>,
+    pub proof_of_exists: Vec<u8>,
+    pub proof_of_cmd: Vec<u8>,
+    pub root: H256,
 }
 
 // TODO get last seq id after launched

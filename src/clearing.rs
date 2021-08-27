@@ -33,8 +33,8 @@ pub fn clear(
     let base = symbol.0;
     let quote = symbol.1;
     if mr.taker.state == State::Submitted {
-        let base_account = assets::get_to_owned(accounts, &mr.taker.user_id, base);
-        let quote_account = assets::get_to_owned(accounts, &mr.taker.user_id, quote);
+        let base_account = assets::get_balance_to_owned(accounts, &mr.taker.user_id, base);
+        let quote_account = assets::get_balance_to_owned(accounts, &mr.taker.user_id, quote);
         return vec![Output {
             event_id,
             order_id: mr.taker.order_id,
@@ -60,9 +60,10 @@ pub fn clear(
         true => match mr.taker.ask_or_bid {
             AskOrBid::Ask => {
                 // revert base
-                assets::unfreeze(accounts, mr.taker.user_id, base, mr.taker.unfilled);
-                let base_account = assets::get_to_owned(accounts, &mr.taker.user_id, base);
-                let quote_account = assets::get_to_owned(accounts, &mr.taker.user_id, quote);
+                assets::try_unfreeze(accounts, &mr.taker.user_id, base, mr.taker.unfilled).unwrap();
+                let base_account = assets::get_balance_to_owned(accounts, &mr.taker.user_id, base);
+                let quote_account =
+                    assets::get_balance_to_owned(accounts, &mr.taker.user_id, quote);
                 vec![Output {
                     event_id,
                     order_id: mr.taker.order_id,
@@ -85,15 +86,16 @@ pub fn clear(
             }
             AskOrBid::Bid => {
                 // revert quote
-                assets::unfreeze(
+                assets::try_unfreeze(
                     accounts,
-                    mr.taker.user_id,
+                    &mr.taker.user_id,
                     quote,
                     mr.taker.unfilled * mr.taker.price,
-                );
-                assets::unfreeze(accounts, mr.taker.user_id, base, mr.taker.unfilled);
-                let base_account = assets::get_to_owned(accounts, &mr.taker.user_id, base);
-                let quote_account = assets::get_to_owned(accounts, &mr.taker.user_id, quote);
+                )
+                .unwrap();
+                let base_account = assets::get_balance_to_owned(accounts, &mr.taker.user_id, base);
+                let quote_account =
+                    assets::get_balance_to_owned(accounts, &mr.taker.user_id, quote);
                 vec![Output {
                     event_id,
                     order_id: mr.taker.order_id,
@@ -129,96 +131,50 @@ pub fn clear(
                         let quote_decr = m.filled * m.price;
                         quote_sum += quote_decr;
                         // maker is bid, incr base available(filled), decr quote frozen(quot_decr)
-                        assets::add_to_available(accounts, m.user_id, base, m.filled);
-                        assets::deduct_frozen(accounts, m.user_id, quote, quote_decr).unwrap();
+                        assets::add_to_available(accounts, &m.user_id, base, m.filled);
+                        assets::deduct_frozen(accounts, &m.user_id, quote, quote_decr).unwrap();
                         // charge fee for maker
-                        if maker_fee.is_sign_positive() {
-                            // maker is bid, incr base, decr quote, so we charge base
-                            let charge_fee = m.filled * maker_fee;
-                            assets::deduct_available(accounts, m.user_id, base, charge_fee)
-                                .unwrap();
-                            assets::add_to_available(accounts, SYSTEM, base, charge_fee);
-                            let base_account = assets::get_to_owned(accounts, &m.user_id, base);
-                            let quote_account = assets::get_to_owned(accounts, &m.user_id, quote);
-                            cr.push(Output {
-                                event_id,
-                                order_id: m.order_id,
-                                user_id: m.user_id,
-                                symbol: *symbol,
-                                role: Role::Maker,
-                                state: m.state,
-                                ask_or_bid: AskOrBid::Bid,
-                                price: m.price,
-                                base_delta: m.filled,
-                                quote_delta: -quote_decr,
-                                base_charge: -charge_fee,
-                                quote_charge: Decimal::zero(),
-                                base_available: base_account.available,
-                                quote_available: quote_account.available,
-                                base_frozen: base_account.frozen,
-                                quote_frozen: quote_account.frozen,
-                                timestamp: time,
-                            });
-                        } else {
-                            // maker_fee is negative
-                            // maker is bid, incr base, decr quote,
-                            // we give it some quote from taker cost
-                            // and we charge nothing from maker
-                            assets::add_to_available(
-                                accounts,
-                                m.user_id,
-                                quote,
-                                quote_decr * maker_fee.abs(),
-                            );
-                            let base_account = assets::get_to_owned(accounts, &m.user_id, base);
-                            let quote_account = assets::get_to_owned(accounts, &m.user_id, quote);
-                            cr.push(Output {
-                                event_id,
-                                order_id: m.order_id,
-                                user_id: m.user_id,
-                                symbol: *symbol,
-                                role: Role::Maker,
-                                state: m.state,
-                                ask_or_bid: AskOrBid::Bid,
-                                price: m.price,
-                                base_delta: m.filled,
-                                quote_delta: -quote_decr,
-                                base_charge: Decimal::zero(),
-                                quote_charge: quote_decr * maker_fee.abs(),
-                                base_available: base_account.available,
-                                quote_available: quote_account.available,
-                                base_frozen: base_account.frozen,
-                                quote_frozen: quote_account.frozen,
-                                timestamp: time,
-                            });
-                        }
+                        // maker is bid, incr base, decr quote, so we charge base
+                        let charge_fee = m.filled * maker_fee;
+                        assets::deduct_available(accounts, &m.user_id, base, charge_fee).unwrap();
+                        assets::add_to_available(accounts, &SYSTEM, base, charge_fee);
+                        let base_account = assets::get_balance_to_owned(accounts, &m.user_id, base);
+                        let quote_account =
+                            assets::get_balance_to_owned(accounts, &m.user_id, quote);
+                        cr.push(Output {
+                            event_id,
+                            order_id: m.order_id,
+                            user_id: m.user_id,
+                            symbol: *symbol,
+                            role: Role::Maker,
+                            state: m.state,
+                            ask_or_bid: AskOrBid::Bid,
+                            price: m.price,
+                            base_delta: m.filled,
+                            quote_delta: -quote_decr,
+                            base_charge: -charge_fee,
+                            quote_charge: Decimal::zero(),
+                            base_available: base_account.available,
+                            quote_available: quote_account.available,
+                            base_frozen: base_account.frozen,
+                            quote_frozen: quote_account.frozen,
+                            timestamp: time,
+                        });
                     }
                     // taker base account frozen decr sum(filled)
                     // taker quote account available incr sum(filled * price)
-                    assets::deduct_frozen(accounts, mr.taker.user_id, base, base_sum).unwrap();
-                    assets::add_to_available(accounts, mr.taker.user_id, quote, quote_sum);
+                    assets::deduct_frozen(accounts, &mr.taker.user_id, base, base_sum).unwrap();
+                    assets::add_to_available(accounts, &mr.taker.user_id, quote, quote_sum);
                     // charge fee for taker
                     let charge_fee = quote_sum * taker_fee;
-                    if maker_fee.is_sign_positive() {
-                        // taker is ask, incr quote, decr base, so we charge quote
-                        assets::deduct_available(accounts, mr.taker.user_id, quote, charge_fee)
-                            .unwrap();
-                        assets::add_to_available(accounts, SYSTEM, quote, charge_fee);
-                    } else {
-                        // maker_fee is negative
-                        // taker is ask, incr quote, decr base, we give some of quote to maker
-                        // and leave rest of quote to us
-                        assets::deduct_available(accounts, mr.taker.user_id, quote, charge_fee)
-                            .unwrap();
-                        assets::add_to_available(
-                            accounts,
-                            SYSTEM,
-                            quote,
-                            quote_sum * (taker_fee - maker_fee.abs()),
-                        );
-                    }
-                    let base_account = assets::get_to_owned(accounts, &mr.taker.user_id, base);
-                    let quote_account = assets::get_to_owned(accounts, &mr.taker.user_id, quote);
+                    // taker is ask, incr quote, decr base, so we charge quote
+                    assets::deduct_available(accounts, &mr.taker.user_id, quote, charge_fee)
+                        .unwrap();
+                    assets::add_to_available(accounts, &SYSTEM, quote, charge_fee);
+                    let base_account =
+                        assets::get_balance_to_owned(accounts, &mr.taker.user_id, base);
+                    let quote_account =
+                        assets::get_balance_to_owned(accounts, &mr.taker.user_id, quote);
                     cr.push(Output {
                         event_id,
                         order_id: mr.taker.order_id,
@@ -257,96 +213,47 @@ pub fn clear(
                         quote_sum += quote_incr;
                         return_quote += m.filled * mr.taker.price - m.filled * m.price;
                         // maker is ask, incr quote available(quote_incr), decr base frozen(filled)
-                        assets::deduct_frozen(accounts, m.user_id, base, m.filled).unwrap();
-                        assets::add_to_available(accounts, m.user_id, quote, quote_incr);
+                        assets::deduct_frozen(accounts, &m.user_id, base, m.filled).unwrap();
+                        assets::add_to_available(accounts, &m.user_id, quote, quote_incr);
                         // charge fee for maker
-                        if maker_fee.is_sign_positive() {
-                            // maker is ask, incr quote, decr base, so we charge quote
-                            let charge_fee = quote_incr * maker_fee;
-                            assets::deduct_available(accounts, m.user_id, quote, charge_fee)
-                                .unwrap();
-                            assets::add_to_available(accounts, SYSTEM, quote, charge_fee);
-                            let base_account =
-                                assets::get_to_owned(accounts, &mr.taker.user_id, base);
-                            let quote_account =
-                                assets::get_to_owned(accounts, &mr.taker.user_id, quote);
-                            cr.push(Output {
-                                event_id,
-                                order_id: m.order_id,
-                                user_id: m.user_id,
-                                symbol: *symbol,
-                                role: Role::Maker,
-                                state: m.state,
-                                ask_or_bid: AskOrBid::Ask,
-                                price: m.price,
-                                base_delta: -m.filled,
-                                quote_delta: quote_incr,
-                                base_charge: Decimal::zero(),
-                                quote_charge: -charge_fee,
-                                base_available: base_account.available,
-                                quote_available: quote_account.available,
-                                base_frozen: base_account.frozen,
-                                quote_frozen: quote_account.frozen,
-                                timestamp: time,
-                            });
-                        } else {
-                            // maker_fee is negative
-                            // maker is ask, incr quote, decr base,
-                            // we give it some base from taker cost, and charge nothing from maker
-                            assets::add_to_available(
-                                accounts,
-                                m.user_id,
-                                base,
-                                m.filled * maker_fee.abs(),
-                            );
-                            let base_account =
-                                assets::get_to_owned(accounts, &mr.taker.user_id, base);
-                            let quote_account =
-                                assets::get_to_owned(accounts, &mr.taker.user_id, quote);
-                            cr.push(Output {
-                                event_id,
-                                order_id: m.order_id,
-                                user_id: m.user_id,
-                                symbol: *symbol,
-                                role: Role::Maker,
-                                state: m.state,
-                                ask_or_bid: AskOrBid::Ask,
-                                price: m.price,
-                                base_delta: -m.filled,
-                                quote_delta: quote_incr,
-                                base_charge: m.filled * maker_fee.abs(),
-                                quote_charge: Decimal::zero(),
-                                base_available: base_account.available,
-                                quote_available: quote_account.available,
-                                base_frozen: base_account.frozen,
-                                quote_frozen: quote_account.frozen,
-                                timestamp: time,
-                            });
-                        }
+                        // maker is ask, incr quote, decr base, so we charge quote
+                        let charge_fee = quote_incr * maker_fee;
+                        assets::deduct_available(accounts, &m.user_id, quote, charge_fee).unwrap();
+                        assets::add_to_available(accounts, &SYSTEM, quote, charge_fee);
+                        let base_account =
+                            assets::get_balance_to_owned(accounts, &mr.taker.user_id, base);
+                        let quote_account =
+                            assets::get_balance_to_owned(accounts, &mr.taker.user_id, quote);
+                        cr.push(Output {
+                            event_id,
+                            order_id: m.order_id,
+                            user_id: m.user_id,
+                            symbol: *symbol,
+                            role: Role::Maker,
+                            state: m.state,
+                            ask_or_bid: AskOrBid::Ask,
+                            price: m.price,
+                            base_delta: -m.filled,
+                            quote_delta: quote_incr,
+                            base_charge: Decimal::zero(),
+                            quote_charge: -charge_fee,
+                            base_available: base_account.available,
+                            quote_available: quote_account.available,
+                            base_frozen: base_account.frozen,
+                            quote_frozen: quote_account.frozen,
+                            timestamp: time,
+                        });
                     }
                     // taker base account available incr sum(filled)
                     // taker quote account frozen decr sum(filled * price=quote_sum)
-                    assets::add_to_available(accounts, mr.taker.user_id, base, base_sum);
-                    assets::deduct_frozen(accounts, mr.taker.user_id, quote, quote_sum).unwrap();
+                    assets::add_to_available(accounts, &mr.taker.user_id, base, base_sum);
+                    assets::deduct_frozen(accounts, &mr.taker.user_id, quote, quote_sum).unwrap();
                     // charge fee for taker
                     let charge_fee = base_sum * taker_fee;
-                    if maker_fee.is_sign_positive() {
-                        // taker is bid, incr base, decr quote, so we charge base
-                        assets::deduct_available(accounts, mr.taker.user_id, base, charge_fee)
-                            .unwrap();
-                        assets::add_to_available(accounts, SYSTEM, base, charge_fee);
-                    } else {
-                        // taker is bid, incr base, decr quote, we give some base to maker,
-                        // and leave rest of base to us
-                        assets::deduct_available(accounts, mr.taker.user_id, base, charge_fee)
-                            .unwrap();
-                        assets::add_to_available(
-                            accounts,
-                            SYSTEM,
-                            base,
-                            base_sum * (taker_fee - maker_fee.abs()),
-                        );
-                    }
+                    // taker is bid, incr base, decr quote, so we charge base
+                    assets::deduct_available(accounts, &mr.taker.user_id, base, charge_fee)
+                        .unwrap();
+                    assets::add_to_available(accounts, &SYSTEM, base, charge_fee);
                     // maker has the dealing right
                     // for taker bid, maker ask, bid_price >= ask_price
                     // so we return some quote to taker as below formula:
@@ -357,10 +264,12 @@ pub fn clear(
                     //   +
                     // bid_price(taker) * maker_filledn - ask_pricen(makern) * maker_filledn
                     if return_quote > Decimal::zero() {
-                        assets::unfreeze(accounts, mr.taker.user_id, quote, return_quote);
+                        assets::try_unfreeze(accounts, &mr.taker.user_id, quote, return_quote);
                     }
-                    let base_account = assets::get_to_owned(accounts, &mr.taker.user_id, base);
-                    let quote_account = assets::get_to_owned(accounts, &mr.taker.user_id, quote);
+                    let base_account =
+                        assets::get_balance_to_owned(accounts, &mr.taker.user_id, base);
+                    let quote_account =
+                        assets::get_balance_to_owned(accounts, &mr.taker.user_id, quote);
                     cr.push(Output {
                         event_id,
                         order_id: mr.taker.order_id,
@@ -395,79 +304,34 @@ pub mod test {
     use crate::matcher::*;
     use crate::orderbook::*;
     use rust_decimal::{prelude::Zero, Decimal};
-    use std::str::FromStr;
+    use rust_decimal_macros::dec;
 
     #[test]
     pub fn test_clearing_on_bid_taker_price_gt_ask() {
         let mut accounts = Accounts::new();
         // taker: bid 1 btc price 10000
-        assets::add_to_available(
-            &mut accounts,
-            UserId::from_low_u64_be(1),
-            100,
-            Decimal::from_str("10000").unwrap(),
-        );
-        assets::try_freeze(
-            &mut accounts,
-            UserId::from_low_u64_be(1),
-            100,
-            Decimal::from_str("10000").unwrap(),
-        )
-        .unwrap();
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 100)
-                .unwrap()
-                .available
-        );
-        assert_eq!(
-            Decimal::from_str("10000").unwrap(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 100)
-                .unwrap()
-                .frozen
-        );
+        assets::add_to_available(&mut accounts, &UserId::from_low_u64_be(1), 100, dec!(10000));
+        assets::try_freeze(&mut accounts, &UserId::from_low_u64_be(1), 100, dec!(10000)).unwrap();
+        let b1_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 100);
+        assert_eq!(dec!(0), b1_100.available);
+        assert_eq!(dec!(10000), b1_100.frozen);
 
         // maker: ask 1 btc price 9999
-        assets::add_to_available(
-            &mut accounts,
-            UserId::from_low_u64_be(2),
-            101,
-            Decimal::from_str("1").unwrap(),
-        );
-        assets::try_freeze(
-            &mut accounts,
-            UserId::from_low_u64_be(2),
-            101,
-            Decimal::from_str("1").unwrap(),
-        )
-        .unwrap();
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 101)
-                .unwrap()
-                .available
-        );
-        assert_eq!(
-            Decimal::from_str("1").unwrap(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 101)
-                .unwrap()
-                .frozen
-        );
+        assets::add_to_available(&mut accounts, &UserId::from_low_u64_be(2), 101, dec!(1));
+        assets::try_freeze(&mut accounts, &UserId::from_low_u64_be(2), 101, dec!(1)).unwrap();
+        let b2_101 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(2), 101);
+        assert_eq!(dec!(0), b2_101.available);
+        assert_eq!(dec!(1), b2_101.frozen);
 
         let symbol = (101, 100);
         let mr = Match {
             maker: vec![Maker::maker_filled(
                 UserId::from_low_u64_be(2),
                 1,
-                Decimal::from_str("9999").unwrap(),
-                Decimal::from_str("1").unwrap(),
+                dec!(9999),
+                dec!(1),
             )],
-            taker: Taker::taker_filled(
-                UserId::from_low_u64_be(1),
-                2,
-                Decimal::from_str("10000").unwrap(),
-                AskOrBid::Bid,
-            ),
+            taker: Taker::taker_filled(UserId::from_low_u64_be(1), 2, dec!(10000), AskOrBid::Bid),
         };
         super::clear(
             &mut accounts,
@@ -478,128 +342,46 @@ pub mod test {
             &mr,
             0,
         );
-        assert_eq!(
-            Decimal::from_str("1").unwrap(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 100)
-                .unwrap()
-                .available
-        );
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 100)
-                .unwrap()
-                .frozen
-        );
-        assert_eq!(
-            Decimal::from_str("1").unwrap(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 101)
-                .unwrap()
-                .available
-        );
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 101)
-                .unwrap()
-                .frozen
-        );
-
-        assert_eq!(
-            Decimal::from_str("9999").unwrap(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 100)
-                .unwrap()
-                .available
-        );
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 100)
-                .unwrap()
-                .frozen
-        );
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 101)
-                .unwrap()
-                .frozen
-        );
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 101)
-                .unwrap()
-                .available
-        );
+        let b1_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 100);
+        assert_eq!(dec!(1), b1_100.available,);
+        assert_eq!(dec!(0), b1_100.frozen);
+        let b1_101 = assets::get_balance_to_owned(&mut accounts, &UserId::from_low_u64_be(1), 101);
+        assert_eq!(dec!(1), b1_101.available);
+        assert_eq!(dec!(0), b1_101.frozen);
+        let b2_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(2), 100);
+        assert_eq!(dec!(9999), b2_100.available);
+        assert_eq!(dec!(0), b2_100.frozen);
+        let b2_101 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(2), 101);
+        assert_eq!(Decimal::zero(), b2_101.frozen);
+        assert_eq!(Decimal::zero(), b2_101.available);
     }
 
     #[test]
     pub fn test_clearing_on_ask_taker_price_lt_bid() {
         let mut accounts = Accounts::new();
         // maker: bid 1 btc price 10000
-        assets::add_to_available(
-            &mut accounts,
-            UserId::from_low_u64_be(1),
-            100,
-            Decimal::from_str("10000").unwrap(),
-        );
-        assets::try_freeze(
-            &mut accounts,
-            UserId::from_low_u64_be(1),
-            100,
-            Decimal::from_str("10000").unwrap(),
-        )
-        .unwrap();
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 100)
-                .unwrap()
-                .available
-        );
-        assert_eq!(
-            Decimal::from_str("10000").unwrap(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 100)
-                .unwrap()
-                .frozen
-        );
+        assets::add_to_available(&mut accounts, &UserId::from_low_u64_be(1), 100, dec!(10000));
+        assets::try_freeze(&mut accounts, &UserId::from_low_u64_be(1), 100, dec!(10000)).unwrap();
+        let b1_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 100);
+        assert_eq!(Decimal::zero(), b1_100.available);
+        assert_eq!(dec!(10000), b1_100.frozen);
 
         // taker: ask 1 btc price 9999
-        assets::add_to_available(
-            &mut accounts,
-            UserId::from_low_u64_be(2),
-            101,
-            Decimal::from_str("1").unwrap(),
-        );
-        assets::try_freeze(
-            &mut accounts,
-            UserId::from_low_u64_be(2),
-            101,
-            Decimal::from_str("1").unwrap(),
-        )
-        .unwrap();
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 101)
-                .unwrap()
-                .available
-        );
-        assert_eq!(
-            Decimal::from_str("1").unwrap(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 101)
-                .unwrap()
-                .frozen
-        );
+        assets::add_to_available(&mut accounts, &UserId::from_low_u64_be(2), 101, dec!(1));
+        assets::try_freeze(&mut accounts, &UserId::from_low_u64_be(2), 101, dec!(1)).unwrap();
+        let b2_101 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(2), 101);
+        assert_eq!(Decimal::zero(), b2_101.available);
+        assert_eq!(dec!(1), b2_101.frozen);
 
         let symbol = (101, 100);
         let mr = Match {
             maker: vec![Maker::maker_filled(
                 UserId::from_low_u64_be(1),
                 1,
-                Decimal::from_str("10000").unwrap(),
-                Decimal::from_str("1").unwrap(),
+                dec!(10000),
+                dec!(1),
             )],
-            taker: Taker::taker_filled(
-                UserId::from_low_u64_be(2),
-                2,
-                Decimal::from_str("9999").unwrap(),
-                AskOrBid::Ask,
-            ),
+            taker: Taker::taker_filled(UserId::from_low_u64_be(2), 2, dec!(9999), AskOrBid::Ask),
         };
         super::clear(
             &mut accounts,
@@ -610,102 +392,39 @@ pub mod test {
             &mr,
             0,
         );
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 100)
-                .unwrap()
-                .available
-        );
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 100)
-                .unwrap()
-                .frozen
-        );
-        assert_eq!(
-            Decimal::from_str("1").unwrap(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 101)
-                .unwrap()
-                .available
-        );
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 101)
-                .unwrap()
-                .frozen
-        );
+        let b1_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 100);
+        assert_eq!(Decimal::zero(), b1_100.available);
+        assert_eq!(Decimal::zero(), b1_100.frozen);
+        let b1_101 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 101);
+        assert_eq!(dec!(1), b1_101.available);
+        assert_eq!(Decimal::zero(), b1_101.frozen);
 
-        assert_eq!(
-            Decimal::from_str("10000").unwrap(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 100)
-                .unwrap()
-                .available
-        );
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 100)
-                .unwrap()
-                .frozen
-        );
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 101)
-                .unwrap()
-                .frozen
-        );
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 101)
-                .unwrap()
-                .available
-        );
+        let b2_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(2), 100);
+        assert_eq!(dec!(10000), b2_100.available);
+        assert_eq!(Decimal::zero(), b2_100.frozen);
+        let b2_101 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(2), 101);
+        assert_eq!(Decimal::zero(), b2_101.frozen);
+        assert_eq!(Decimal::zero(), b2_101.available);
     }
 
     #[test]
     pub fn test_clearing_on_cancel_bid() {
         let mut accounts = Accounts::new();
         // maker: bid 1 btc price 10000
-        assets::add_to_available(
-            &mut accounts,
-            UserId::from_low_u64_be(1),
-            100,
-            Decimal::from_str("10000").unwrap(),
-        );
-        assets::try_freeze(
-            &mut accounts,
-            UserId::from_low_u64_be(1),
-            100,
-            Decimal::from_str("10000").unwrap(),
-        )
-        .unwrap();
+        assets::add_to_available(&mut accounts, &UserId::from_low_u64_be(1), 100, dec!(10000));
+        assets::try_freeze(&mut accounts, &UserId::from_low_u64_be(1), 100, dec!(10000)).unwrap();
         // taker: ask 0.5 btc price 9999
-        assets::add_to_available(
-            &mut accounts,
-            UserId::from_low_u64_be(2),
-            101,
-            Decimal::from_str("1").unwrap(),
-        );
-        assets::try_freeze(
-            &mut accounts,
-            UserId::from_low_u64_be(2),
-            101,
-            Decimal::from_str("0.5").unwrap(),
-        )
-        .unwrap();
+        assets::add_to_available(&mut accounts, &UserId::from_low_u64_be(2), 101, dec!(1));
+        assets::try_freeze(&mut accounts, &UserId::from_low_u64_be(2), 101, dec!(0.5)).unwrap();
         let symbol = (101, 100);
         let mr = Match {
             maker: vec![Maker::maker_filled(
                 UserId::from_low_u64_be(1),
                 1,
-                Decimal::from_str("10000").unwrap(),
-                Decimal::from_str("0.5").unwrap(),
+                dec!(10000),
+                dec!(0.5),
             )],
-            taker: Taker::taker_filled(
-                UserId::from_low_u64_be(2),
-                2,
-                Decimal::from_str("9999").unwrap(),
-                AskOrBid::Ask,
-            ),
+            taker: Taker::taker_filled(UserId::from_low_u64_be(2), 2, dec!(9999), AskOrBid::Ask),
         };
         super::clear(
             &mut accounts,
@@ -716,62 +435,26 @@ pub mod test {
             &mr,
             0,
         );
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 100)
-                .unwrap()
-                .available
-        );
-        assert_eq!(
-            Decimal::from_str("5000").unwrap(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 100)
-                .unwrap()
-                .frozen
-        );
-        assert_eq!(
-            Decimal::from_str("0.5").unwrap(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 101)
-                .unwrap()
-                .available
-        );
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 101)
-                .unwrap()
-                .frozen
-        );
+        let b1_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 100);
+        assert_eq!(Decimal::zero(), b1_100.available);
+        assert_eq!(dec!(5000), b1_100.frozen);
+        let b1_101 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 101);
+        assert_eq!(dec!(0.5), b1_101.available);
+        assert_eq!(Decimal::zero(), b1_101.frozen);
 
-        assert_eq!(
-            Decimal::from_str("5000").unwrap(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 100)
-                .unwrap()
-                .available
-        );
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 100)
-                .unwrap()
-                .frozen
-        );
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 101)
-                .unwrap()
-                .frozen
-        );
-        assert_eq!(
-            Decimal::from_str("0.5").unwrap(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 101)
-                .unwrap()
-                .available
-        );
+        let b2_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(2), 100);
+        assert_eq!(dec!(5000), b2_100.available);
+        assert_eq!(Decimal::zero(), b2_100.frozen);
+        let b2_101 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(2), 101);
+        assert_eq!(Decimal::zero(), b2_101.frozen);
+        assert_eq!(dec!(0.5), b2_101.available);
         let mr = Match {
             maker: vec![],
             taker: Taker::cancel(
                 UserId::from_low_u64_be(1),
                 3,
-                Decimal::from_str("10000").unwrap(),
-                Decimal::from_str("0.5").unwrap(),
+                dec!(10000),
+                dec!(0.5),
                 AskOrBid::Bid,
             ),
         };
@@ -784,76 +467,36 @@ pub mod test {
             &mr,
             0,
         );
-        assert_eq!(
-            Decimal::from_str("5000").unwrap(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 100)
-                .unwrap()
-                .available
-        );
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 100)
-                .unwrap()
-                .frozen
-        );
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 101)
-                .unwrap()
-                .frozen
-        );
-        assert_eq!(
-            Decimal::from_str("0.5").unwrap(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 101)
-                .unwrap()
-                .available
-        );
+        let b1_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 100);
+        assert_eq!(dec!(5000), b1_100.available);
+        assert_eq!(Decimal::zero(), b1_100.frozen);
+        let b1_101 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 101);
+        assert_eq!(Decimal::zero(), b1_101.frozen);
+        assert_eq!(dec!(0.5), b1_101.available);
     }
 
     #[test]
     pub fn test_clearing_on_cancel_ask() {
         let mut accounts = Accounts::new();
         // maker: bid 1 btc price 10000
-        assets::add_to_available(
-            &mut accounts,
-            UserId::from_low_u64_be(1),
-            100,
-            Decimal::from_str("10000").unwrap(),
-        );
-        assets::try_freeze(
-            &mut accounts,
-            UserId::from_low_u64_be(1),
-            100,
-            Decimal::from_str("10000").unwrap(),
-        )
-        .unwrap();
+        assets::add_to_available(&mut accounts, &UserId::from_low_u64_be(1), 100, dec!(10000));
+        assets::try_freeze(&mut accounts, &UserId::from_low_u64_be(1), 100, dec!(10000)).unwrap();
         // taker: ask 1.5 btc price 9999
-        assets::add_to_available(
-            &mut accounts,
-            UserId::from_low_u64_be(2),
-            101,
-            Decimal::from_str("2").unwrap(),
-        );
-        assets::try_freeze(
-            &mut accounts,
-            UserId::from_low_u64_be(2),
-            101,
-            Decimal::from_str("1.5").unwrap(),
-        )
-        .unwrap();
+        assets::add_to_available(&mut accounts, &UserId::from_low_u64_be(2), 101, dec!(2));
+        assets::try_freeze(&mut accounts, &UserId::from_low_u64_be(2), 101, dec!(1.5)).unwrap();
         let symbol = (101, 100);
         let mr = Match {
             maker: vec![Maker::maker_filled(
                 UserId::from_low_u64_be(1),
                 1,
-                Decimal::from_str("10000").unwrap(),
-                Decimal::from_str("1").unwrap(),
+                dec!(10000),
+                dec!(1),
             )],
             taker: Taker::taker_placed(
                 UserId::from_low_u64_be(2),
                 2,
-                Decimal::from_str("9999").unwrap(),
-                Decimal::from_str("0.5").unwrap(),
+                dec!(9999),
+                dec!(0.5),
                 AskOrBid::Ask,
             ),
         };
@@ -866,62 +509,28 @@ pub mod test {
             &mr,
             0,
         );
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 100)
-                .unwrap()
-                .available
-        );
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 100)
-                .unwrap()
-                .frozen
-        );
-        assert_eq!(
-            Decimal::from_str("1").unwrap(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 101)
-                .unwrap()
-                .available
-        );
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 101)
-                .unwrap()
-                .frozen
-        );
+        let b1_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 100);
+        assert_eq!(Decimal::zero(), b1_100.available);
+        assert_eq!(Decimal::zero(), b1_100.frozen);
+        let b1_101 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 101);
+        assert_eq!(dec!(1), b1_101.available);
+        assert_eq!(Decimal::zero(), b1_101.frozen);
 
-        assert_eq!(
-            Decimal::from_str("10000").unwrap(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 100)
-                .unwrap()
-                .available
-        );
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 100)
-                .unwrap()
-                .frozen
-        );
-        assert_eq!(
-            Decimal::from_str("0.5").unwrap(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 101)
-                .unwrap()
-                .frozen
-        );
-        assert_eq!(
-            Decimal::from_str("0.5").unwrap(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 101)
-                .unwrap()
-                .available
-        );
+        let b2_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(2), 100);
+        assert_eq!(dec!(10000), b2_100.available);
+        assert_eq!(Decimal::zero(), b2_100.frozen);
+        let b2_101 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(2), 101);
+        assert_eq!(dec!(0.5), b2_101.frozen);
+        assert_eq!(dec!(0.5), b2_101.available);
         let mr = Match {
             maker: vec![],
-            taker: Taker::taker_placed(
+            // TODO tag here
+            // taker: Taker::taker_placed(
+            taker: Taker::cancel(
                 UserId::from_low_u64_be(2),
                 3,
-                Decimal::from_str("9999").unwrap(),
-                Decimal::from_str("0.5").unwrap(),
+                dec!(9999),
+                dec!(0.5),
                 AskOrBid::Ask,
             ),
         };
@@ -935,147 +544,58 @@ pub mod test {
             0,
         );
 
-        assert_eq!(
-            Decimal::from_str("10000").unwrap(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 100)
-                .unwrap()
-                .available
-        );
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 100)
-                .unwrap()
-                .frozen
-        );
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 101)
-                .unwrap()
-                .frozen
-        );
-        assert_eq!(
-            Decimal::from_str("1").unwrap(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 101)
-                .unwrap()
-                .available
-        );
+        let b2_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(2), 100);
+        assert_eq!(dec!(10000), b2_100.available);
+        assert_eq!(Decimal::zero(), b2_100.frozen);
+        let b2_101 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(2), 101);
+        assert_eq!(Decimal::zero(), b2_101.frozen);
+        assert_eq!(dec!(1), b2_101.available);
     }
 
     #[test]
     pub fn test_clearing_on_positive_fee() {
         let mut accounts = Accounts::new();
         // maker: bid 1 btc price 10000
-        assets::add_to_available(
-            &mut accounts,
-            UserId::from_low_u64_be(1),
-            100,
-            Decimal::from_str("10000").unwrap(),
-        );
-        assets::try_freeze(
-            &mut accounts,
-            UserId::from_low_u64_be(1),
-            100,
-            Decimal::from_str("10000").unwrap(),
-        )
-        .unwrap();
+        assets::add_to_available(&mut accounts, &UserId::from_low_u64_be(1), 100, dec!(10000));
+        assets::try_freeze(&mut accounts, &UserId::from_low_u64_be(1), 100, dec!(10000)).unwrap();
         // taker: ask 1 btc price 9999
-        assets::add_to_available(
-            &mut accounts,
-            UserId::from_low_u64_be(2),
-            101,
-            Decimal::from_str("1").unwrap(),
-        );
-        assets::try_freeze(
-            &mut accounts,
-            UserId::from_low_u64_be(2),
-            101,
-            Decimal::from_str("1").unwrap(),
-        )
-        .unwrap();
+        assets::add_to_available(&mut accounts, &UserId::from_low_u64_be(2), 101, dec!(1));
+        assets::try_freeze(&mut accounts, &UserId::from_low_u64_be(2), 101, dec!(1)).unwrap();
         let symbol = (101, 100);
         let mr = Match {
             maker: vec![Maker::maker_filled(
                 UserId::from_low_u64_be(1),
                 1,
-                Decimal::from_str("10000").unwrap(),
-                Decimal::from_str("1").unwrap(),
+                dec!(10000),
+                dec!(1),
             )],
-            taker: Taker::taker_filled(
-                UserId::from_low_u64_be(2),
-                2,
-                Decimal::from_str("9999").unwrap(),
-                AskOrBid::Ask,
-            ),
+            taker: Taker::taker_filled(UserId::from_low_u64_be(2), 2, dec!(9999), AskOrBid::Ask),
         };
-        super::clear(
-            &mut accounts,
-            2,
-            &symbol,
-            Decimal::from_str("0.001").unwrap(),
-            Decimal::from_str("0.001").unwrap(),
-            &mr,
-            0,
-        );
+        super::clear(&mut accounts, 2, &symbol, dec!(0.001), dec!(0.001), &mr, 0);
 
-        assert_eq!(
-            Decimal::from_str("9990").unwrap(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 100)
-                .unwrap()
-                .available
-        );
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 100)
-                .unwrap()
-                .frozen
-        );
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 101)
-                .unwrap()
-                .available
-        );
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(2), 101)
-                .unwrap()
-                .frozen
-        );
+        let b2_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(2), 100);
+        assert_eq!(dec!(9990), b2_100.available);
+        assert_eq!(Decimal::zero(), b2_100.frozen);
+        let b2_101 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(2), 101);
+        assert_eq!(Decimal::zero(), b2_101.available);
+        assert_eq!(Decimal::zero(), b2_101.frozen);
 
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 100)
-                .unwrap()
-                .available
-        );
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 100)
-                .unwrap()
-                .frozen
-        );
-        assert_eq!(
-            Decimal::from_str("0.999").unwrap(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 101)
-                .unwrap()
-                .available
-        );
-        assert_eq!(
-            Decimal::zero(),
-            assets::get_mut(&mut accounts, UserId::from_low_u64_be(1), 101)
-                .unwrap()
-                .frozen
-        );
+        let b1_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 100);
+        assert_eq!(Decimal::zero(), b1_100.available);
+        assert_eq!(Decimal::zero(), b1_100.frozen);
+        let b1_101 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 101);
+        assert_eq!(dec!(0.999), b1_101.available);
+        assert_eq!(Decimal::zero(), b1_101.frozen);
     }
 
     #[test]
     pub fn test_output() {
         let base_scale = 6;
         let quote_scale = 2;
-        let taker_fee = Decimal::from_str("0.001").unwrap();
-        let maker_fee = Decimal::from_str("-0.0005").unwrap();
-        let min_amount = Decimal::from_str("0.01").unwrap();
-        let min_vol = Decimal::from_str("10").unwrap();
+        let taker_fee = dec!(0.001);
+        let maker_fee = Decimal::zero();
+        let min_amount = dec!(0.01);
+        let min_vol = dec!(10);
         let mut book = OrderBook::new(
             base_scale,
             quote_scale,
@@ -1087,22 +607,12 @@ pub mod test {
             true,
         );
         let mut accounts = Accounts::new();
-        assets::add_to_available(
-            &mut accounts,
-            UserId::from_low_u64_be(1),
-            100,
-            Decimal::from_str("10000").unwrap(),
-        );
-        assets::add_to_available(
-            &mut accounts,
-            UserId::from_low_u64_be(1),
-            101,
-            Decimal::from_str("1").unwrap(),
-        );
+        assets::add_to_available(&mut accounts, &UserId::from_low_u64_be(1), 100, dec!(10000));
+        assets::add_to_available(&mut accounts, &UserId::from_low_u64_be(1), 101, dec!(1));
 
-        let price = Decimal::new(13333, 0);
-        let amount = Decimal::new(1, 1);
-        assets::try_freeze(&mut accounts, UserId::from_low_u64_be(1), 101, amount).unwrap();
+        let price = dec!(13333);
+        let amount = dec!(0.1);
+        assets::try_freeze(&mut accounts, &UserId::from_low_u64_be(1), 101, amount).unwrap();
         execute_limit(
             &mut book,
             UserId::from_low_u64_be(1),
@@ -1112,27 +622,18 @@ pub mod test {
             AskOrBid::Ask,
         );
 
-        let price = Decimal::new(13333, 0);
-        let amount = Decimal::new(5, 1);
+        let price = dec!(13333);
+        let amount = dec!(0.5);
         assets::try_freeze(
             &mut accounts,
-            UserId::from_low_u64_be(1),
+            &UserId::from_low_u64_be(1),
             100,
             price * amount,
         )
         .unwrap();
-        assert_eq!(
-            assets::get(&accounts, UserId::from_low_u64_be(1), 100)
-                .unwrap()
-                .frozen,
-            Decimal::from_str("6666.5").unwrap()
-        );
-        assert_eq!(
-            assets::get(&accounts, UserId::from_low_u64_be(1), 100)
-                .unwrap()
-                .available,
-            Decimal::from_str("3333.5").unwrap()
-        );
+        let b1_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 100);
+        assert_eq!(b1_100.frozen, dec!(6666.5));
+        assert_eq!(b1_100.available, dec!(3333.5));
         let mr = execute_limit(
             &mut book,
             UserId::from_low_u64_be(1),
@@ -1144,44 +645,26 @@ pub mod test {
 
         let symbol = (101, 100);
         let out = super::clear(&mut accounts, 2, &symbol, taker_fee, maker_fee, &mr, 0);
-        assert_eq!(out[0].base_delta, Decimal::new(-1, 1));
-        assert_eq!(out[0].quote_delta, Decimal::new(13333, 1));
-        assert_eq!(out[0].base_charge, Decimal::new(5, 5));
+        assert_eq!(out[0].base_delta, dec!(-0.1));
+        assert_eq!(out[0].quote_delta, dec!(1333.3));
+        assert_eq!(out[0].base_charge, Decimal::zero());
         assert_eq!(out[0].quote_charge, Decimal::zero());
 
-        assert_eq!(out[1].base_delta, Decimal::new(1, 1));
-        assert_eq!(out[1].quote_delta, Decimal::new(-13333, 1));
-        assert_eq!(out[1].base_charge, Decimal::new(-1, 4));
+        assert_eq!(out[1].base_delta, dec!(0.1));
+        assert_eq!(out[1].quote_delta, dec!(-1333.3));
+        assert_eq!(out[1].base_charge, dec!(-0.0001));
         assert_eq!(out[1].quote_charge, Decimal::zero());
 
-        assert_eq!(
-            assets::get(&accounts, UserId::from_low_u64_be(1), 100)
-                .unwrap()
-                .available,
-            Decimal::from_str("4666.8").unwrap()
-        );
-        assert_eq!(
-            assets::get(&accounts, UserId::from_low_u64_be(1), 100)
-                .unwrap()
-                .frozen,
-            Decimal::from_str("5333.2").unwrap()
-        );
-        assert_eq!(
-            assets::get(&accounts, UserId::from_low_u64_be(1), 101)
-                .unwrap()
-                .available,
-            Decimal::new(99995, 5)
-        );
-        assert_eq!(
-            assets::get(&accounts, UserId::from_low_u64_be(1), 101)
-                .unwrap()
-                .frozen,
-            Decimal::zero()
-        );
+        let b1_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 100);
+        assert_eq!(b1_100.available, dec!(4666.8));
+        assert_eq!(b1_100.frozen, dec!(5333.2));
+        let b1_101 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 101);
+        assert_eq!(b1_101.available, dec!(0.9999));
+        assert_eq!(b1_101.frozen, Decimal::zero());
 
         assert_eq!(
-            assets::get(&accounts, SYSTEM, 101).unwrap().available,
-            Decimal::new(5, 5)
+            assets::get_balance_to_owned(&accounts, &SYSTEM, 101).available,
+            dec!(0.0001),
         );
     }
 
@@ -1189,10 +672,10 @@ pub mod test {
     pub fn test_dealing_rights() {
         let base_scale = 6;
         let quote_scale = 2;
-        let taker_fee = Decimal::from_str("0.001").unwrap();
-        let maker_fee = Decimal::from_str("-0.0005").unwrap();
-        let min_amount = Decimal::from_str("0.01").unwrap();
-        let min_vol = Decimal::from_str("10").unwrap();
+        let taker_fee = dec!(0.001);
+        let maker_fee = dec!(0.001);
+        let min_amount = dec!(0.01);
+        let min_vol = dec!(10);
         let mut book = OrderBook::new(
             base_scale,
             quote_scale,
@@ -1204,22 +687,12 @@ pub mod test {
             true,
         );
         let mut accounts = Accounts::new();
-        assets::add_to_available(
-            &mut accounts,
-            UserId::from_low_u64_be(1),
-            101,
-            Decimal::from_str("1").unwrap(),
-        );
-        assets::add_to_available(
-            &mut accounts,
-            UserId::from_low_u64_be(2),
-            100,
-            Decimal::from_str("10000").unwrap(),
-        );
+        assets::add_to_available(&mut accounts, &UserId::from_low_u64_be(1), 101, dec!(1));
+        assets::add_to_available(&mut accounts, &UserId::from_low_u64_be(2), 100, dec!(10000));
 
-        let price = Decimal::new(10000, 0);
-        let amount = Decimal::new(1, 1);
-        assets::try_freeze(&mut accounts, UserId::from_low_u64_be(1), 101, amount).unwrap();
+        let price = dec!(10000);
+        let amount = dec!(0.1);
+        assets::try_freeze(&mut accounts, &UserId::from_low_u64_be(1), 101, amount).unwrap();
         execute_limit(
             &mut book,
             UserId::from_low_u64_be(1),
@@ -1229,11 +702,11 @@ pub mod test {
             AskOrBid::Ask,
         );
 
-        let price = Decimal::new(13333, 0);
-        let amount = Decimal::new(5, 1);
+        let price = dec!(13333);
+        let amount = dec!(0.5);
         assets::try_freeze(
             &mut accounts,
-            UserId::from_low_u64_be(2),
+            &UserId::from_low_u64_be(2),
             100,
             price * amount,
         )
@@ -1249,199 +722,31 @@ pub mod test {
 
         let symbol = (101, 100);
         let out = super::clear(&mut accounts, 2, &symbol, taker_fee, maker_fee, &mr, 0);
-        assert_eq!(out[0].base_delta, Decimal::new(-1, 1));
-        assert_eq!(out[0].quote_delta, Decimal::new(10000, 1));
-        assert_eq!(out[0].base_charge, Decimal::new(5, 5));
-        assert_eq!(out[0].quote_charge, Decimal::zero());
+        assert_eq!(out[0].base_delta, dec!(-0.1));
+        assert_eq!(out[0].quote_delta, dec!(1000));
+        assert_eq!(out[0].base_charge, Decimal::zero());
+        assert_eq!(out[0].quote_charge, dec!(-1));
 
-        assert_eq!(out[1].base_delta, Decimal::new(1, 1));
-        assert_eq!(out[1].quote_delta, Decimal::new(-10000, 1));
-        assert_eq!(out[1].base_charge, Decimal::new(-1, 4));
+        assert_eq!(out[1].base_delta, dec!(0.1));
+        assert_eq!(out[1].quote_delta, dec!(-1000));
+        assert_eq!(out[1].base_charge, dec!(-0.0001));
         assert_eq!(out[1].quote_charge, Decimal::zero());
 
-        println!("{:?}", mr);
+        let b2_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(2), 100);
+        assert_eq!(b2_100.available, dec!(3666.8));
+        assert_eq!(b2_100.frozen, dec!(5333.2));
+        let b2_101 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(2), 101);
+        assert_eq!(b2_101.available, dec!(0.0999));
+        assert_eq!(b2_101.frozen, Decimal::zero());
+        let b1_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 100);
+        assert_eq!(b1_100.available, dec!(999));
+        assert_eq!(b1_100.frozen, Decimal::zero());
+        let b1_101 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 101);
+        assert_eq!(b1_101.available, dec!(0.9));
+        assert_eq!(b1_101.frozen, Decimal::zero());
         assert_eq!(
-            assets::get(&accounts, UserId::from_low_u64_be(2), 100)
-                .unwrap()
-                .available,
-            Decimal::from_str("3666.8").unwrap()
-        );
-        assert_eq!(
-            assets::get(&accounts, UserId::from_low_u64_be(2), 100)
-                .unwrap()
-                .frozen,
-            Decimal::from_str("5333.2").unwrap()
-        );
-        assert_eq!(
-            assets::get(&accounts, UserId::from_low_u64_be(2), 101)
-                .unwrap()
-                .available,
-            Decimal::new(999, 4)
-        );
-        assert_eq!(
-            assets::get(&accounts, UserId::from_low_u64_be(2), 101)
-                .unwrap()
-                .frozen,
-            Decimal::zero()
-        );
-
-        assert_eq!(
-            assets::get(&accounts, UserId::from_low_u64_be(1), 100)
-                .unwrap()
-                .available,
-            Decimal::new(1000, 0)
-        );
-        assert_eq!(
-            assets::get(&accounts, UserId::from_low_u64_be(1), 100)
-                .unwrap()
-                .frozen,
-            Decimal::zero()
-        );
-        assert_eq!(
-            assets::get(&accounts, UserId::from_low_u64_be(1), 101)
-                .unwrap()
-                .available,
-            Decimal::new(90005, 5)
-        );
-        assert_eq!(
-            assets::get(&accounts, UserId::from_low_u64_be(1), 101)
-                .unwrap()
-                .frozen,
-            Decimal::zero()
-        );
-
-        assert_eq!(
-            assets::get(&accounts, SYSTEM, 101).unwrap().available,
-            Decimal::new(5, 5)
-        );
-    }
-
-    #[test]
-    pub fn test_dealing_rights_on_taker_ask() {
-        let base_scale = 6;
-        let quote_scale = 2;
-        let taker_fee = Decimal::from_str("0.001").unwrap();
-        let maker_fee = Decimal::from_str("-0.0005").unwrap();
-        let min_amount = Decimal::from_str("0.01").unwrap();
-        let min_vol = Decimal::from_str("10").unwrap();
-        let mut book = OrderBook::new(
-            base_scale,
-            quote_scale,
-            taker_fee,
-            maker_fee,
-            min_amount,
-            min_vol,
-            true,
-            true,
-        );
-        let mut accounts = Accounts::new();
-        assets::add_to_available(
-            &mut accounts,
-            UserId::from_low_u64_be(1),
-            101,
-            Decimal::from_str("1").unwrap(),
-        );
-        assets::add_to_available(
-            &mut accounts,
-            UserId::from_low_u64_be(2),
-            100,
-            Decimal::from_str("10000").unwrap(),
-        );
-
-        let price = Decimal::new(13333, 0);
-        let amount = Decimal::new(5, 1);
-        assets::try_freeze(
-            &mut accounts,
-            UserId::from_low_u64_be(2),
-            100,
-            price * amount,
-        )
-        .unwrap();
-        execute_limit(
-            &mut book,
-            UserId::from_low_u64_be(2),
-            1,
-            price,
-            amount,
-            AskOrBid::Bid,
-        );
-
-        let price = Decimal::new(10000, 0);
-        let amount = Decimal::new(1, 1);
-        assets::try_freeze(&mut accounts, UserId::from_low_u64_be(1), 101, amount).unwrap();
-        let mr = execute_limit(
-            &mut book,
-            UserId::from_low_u64_be(1),
-            2,
-            price,
-            amount,
-            AskOrBid::Ask,
-        );
-
-        let symbol = (101, 100);
-        let out = super::clear(&mut accounts, 2, &symbol, taker_fee, maker_fee, &mr, 0);
-        // 2: maker bid
-        assert_eq!(out[0].base_delta, Decimal::new(1, 1));
-        assert_eq!(out[0].quote_delta, Decimal::new(-13333, 1));
-        assert_eq!(out[0].base_charge, Decimal::zero());
-        assert_eq!(out[0].quote_charge, Decimal::new(66665, 5));
-        assert_eq!(
-            assets::get(&accounts, UserId::from_low_u64_be(2), 100)
-                .unwrap()
-                .available,
-            Decimal::from_str("3334.16665").unwrap()
-        );
-        assert_eq!(
-            assets::get(&accounts, UserId::from_low_u64_be(2), 100)
-                .unwrap()
-                .frozen,
-            Decimal::from_str("5333.2").unwrap()
-        );
-        assert_eq!(
-            assets::get(&accounts, UserId::from_low_u64_be(2), 101)
-                .unwrap()
-                .available,
-            Decimal::new(1, 1)
-        );
-        assert_eq!(
-            assets::get(&accounts, UserId::from_low_u64_be(2), 101)
-                .unwrap()
-                .frozen,
-            Decimal::zero()
-        );
-        // 1: taker ask
-        assert_eq!(out[1].base_delta, Decimal::new(-1, 1));
-        assert_eq!(out[1].quote_delta, Decimal::new(13333, 1));
-        assert_eq!(out[1].base_charge, Decimal::zero());
-        assert_eq!(out[1].quote_charge, Decimal::new(-13333, 4));
-        assert_eq!(
-            assets::get(&accounts, UserId::from_low_u64_be(1), 100)
-                .unwrap()
-                .available,
-            Decimal::from_str("1331.9667").unwrap()
-        );
-        assert_eq!(
-            assets::get(&accounts, UserId::from_low_u64_be(1), 100)
-                .unwrap()
-                .frozen,
-            Decimal::zero()
-        );
-        assert_eq!(
-            assets::get(&accounts, UserId::from_low_u64_be(1), 101)
-                .unwrap()
-                .available,
-            Decimal::new(9, 1)
-        );
-        assert_eq!(
-            assets::get(&accounts, UserId::from_low_u64_be(1), 101)
-                .unwrap()
-                .frozen,
-            Decimal::zero()
-        );
-
-        assert_eq!(
-            assets::get(&accounts, SYSTEM, 100).unwrap().available,
-            Decimal::from_str("0.66665").unwrap()
+            assets::get_balance_to_owned(&accounts, &SYSTEM, 101).available,
+            dec!(0.0001),
         );
     }
 }
