@@ -264,7 +264,8 @@ pub fn clear(
                     //   +
                     // bid_price(taker) * maker_filledn - ask_pricen(makern) * maker_filledn
                     if return_quote > Decimal::zero() {
-                        assets::try_unfreeze(accounts, &mr.taker.user_id, quote, return_quote);
+                        assets::try_unfreeze(accounts, &mr.taker.user_id, quote, return_quote)
+                            .unwrap();
                     }
                     let base_account =
                         assets::get_balance_to_owned(accounts, &mr.taker.user_id, base);

@@ -232,33 +232,9 @@ fn take(page: &mut OrderPage, taker: &mut Order) -> Vec<Maker> {
     matches
 }
 
-pub fn cancel(book: &mut OrderBook, order_id: u64) -> Option<Match> {
-    let price = book.indices.remove(&order_id)?;
-    let (from, removed) = match (book.get_best_ask(), book.get_best_bid()) {
-        (Some(best_ask), Some(_)) => {
-            if price >= best_ask {
-                (
-                    AskOrBid::Ask,
-                    OrderBook::remove(book, order_id, &price, AskOrBid::Ask),
-                )
-            } else {
-                (
-                    AskOrBid::Bid,
-                    OrderBook::remove(book, order_id, &price, AskOrBid::Bid),
-                )
-            }
-        }
-        (None, Some(_)) => (
-            AskOrBid::Bid,
-            OrderBook::remove(book, order_id, &price, AskOrBid::Bid),
-        ),
-        (Some(_), None) => (
-            AskOrBid::Ask,
-            OrderBook::remove(book, order_id, &price, AskOrBid::Ask),
-        ),
-        _ => (AskOrBid::Ask, None),
-    };
-    removed.map(|order| Match {
+// FIXME move indices
+pub fn cancel(orderbook: &mut OrderBook, order_id: u64) -> Option<Match> {
+    orderbook.remove(order_id).map(|(order, from)| Match {
         maker: vec![],
         taker: Taker::taker(order, from, State::Canceled),
     })
@@ -460,5 +436,39 @@ mod test {
         assert!(mr.is_none());
         assert!(!book.indices.contains_key(&1004));
         assert!(book.asks.is_empty());
+    }
+
+    #[test]
+    pub fn test_order_replay() {
+        let base_scale = 5;
+        let quote_scale = 1;
+        let taker_fee = dec!(0.001);
+        let maker_fee = dec!(0.001);
+        let min_amount = dec!(1);
+        let min_vol = dec!(1);
+        let mut book = OrderBook::new(
+            base_scale,
+            quote_scale,
+            taker_fee,
+            maker_fee,
+            min_amount,
+            min_vol,
+            true,
+            true,
+        );
+
+        let price = dec!(0.1);
+        let amount = dec!(100);
+        let mr = execute_limit(
+            &mut book,
+            UserId::from_low_u64_be(1),
+            1001,
+            price,
+            amount,
+            AskOrBid::Bid,
+        );
+        assert!(book.find_order(1001).is_some());
+        assert_eq!(State::Submitted, mr.taker.state);
+        assert!(mr.maker.is_empty());
     }
 }
