@@ -11,7 +11,7 @@ CREATE TABLE `t_clearing_result` (
   `f_id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `f_event_id` bigint unsigned NOT NULL,
   `f_order_id` bigint unsigned NOT NULL,
-  `f_user_id` varchar(64) NOT NULL,
+  `f_user_id` varchar(66) NOT NULL,
   `f_status` int unsigned NOT NULL,
   `f_role` int unsigned NOT NULL,
   `f_ask_or_bid` int unsigned NOT NULL,
