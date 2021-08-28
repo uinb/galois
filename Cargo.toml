@@ -86,12 +86,8 @@ optional = true
 [dependencies.anyhow]
 version =  "1"
 
-[dependencies.smt]
-version = "0.5.2"
-git = "https://github.com/uinb/sparse-merkle-tree"
-package = "sparse-merkle-tree"
-features = ["serde-rs", "sha256"]
-optional = true
+[dependencies.thiserror]
+version = "1.0"
 
 [dependencies.sha2]
 version = "0.9"
@@ -101,6 +97,13 @@ version = "1.0"
 
 [dependencies.hex]
 version = "0.4"
+
+[dependencies.smt]
+version = "0.5.2"
+git = "https://github.com/uinb/sparse-merkle-tree"
+package = "sparse-merkle-tree"
+features = ["serde-rs", "sha256"]
+optional = true
 
 [dependencies.sub-api]
 #path = "../substrate-api-client"

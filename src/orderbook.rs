@@ -250,6 +250,7 @@ impl OrderBook {
             .or_insert_with(|| OrderPage::with_init_order(order));
     }
 
+    // FIXME
     pub fn decr_size_on(&mut self, ask_or_bid: AskOrBid, amount: &Amount) {
         match ask_or_bid {
             AskOrBid::Ask => self.ask_size -= amount,
@@ -257,18 +258,23 @@ impl OrderBook {
         }
     }
 
-    pub fn remove(&mut self, order_id: u64, price: &Price, ask_or_bid: AskOrBid) -> Option<Order> {
-        match ask_or_bid {
-            AskOrBid::Ask => {
-                let order = Self::remove_from(&mut self.asks, order_id, price)?;
-                self.ask_size -= order.unfilled;
-                Some(order)
+    pub fn remove(&mut self, order_id: u64) -> Option<(Order, AskOrBid)> {
+        let price = self.indices.remove(&order_id)?;
+        match (self.get_best_ask(), self.get_best_bid()) {
+            (Some(best_ask), Some(_)) => {
+                if price >= best_ask {
+                    Self::remove_from(&mut self.asks, order_id, &price).map(|o| (o, AskOrBid::Ask))
+                } else {
+                    Self::remove_from(&mut self.bids, order_id, &price).map(|o| (o, AskOrBid::Bid))
+                }
             }
-            AskOrBid::Bid => {
-                let order = Self::remove_from(&mut self.bids, order_id, price)?;
-                self.bid_size -= order.unfilled;
-                Some(order)
+            (None, Some(_)) => {
+                Self::remove_from(&mut self.bids, order_id, &price).map(|o| (o, AskOrBid::Bid))
             }
+            (Some(_), None) => {
+                Self::remove_from(&mut self.asks, order_id, &price).map(|o| (o, AskOrBid::Ask))
+            }
+            _ => None,
         }
     }
 
@@ -302,16 +308,17 @@ impl OrderBook {
 
     pub fn find_order(&self, order_id: u64) -> Option<&Order> {
         let price = self.indices.get(&order_id)?;
-        let best_ask = self.get_best_ask()?;
-        if *price >= best_ask {
-            self.asks.get(price).and_then(|page| page.get(order_id))
-        } else {
-            let best_bid = self.get_best_bid()?;
-            if *price <= best_bid {
-                self.bids.get(price).and_then(|page| page.get(order_id))
-            } else {
-                None
+        match (self.get_best_ask(), self.get_best_bid()) {
+            (Some(best_ask), Some(_)) => {
+                if *price >= best_ask {
+                    self.asks.get(price).and_then(|page| page.get(order_id))
+                } else {
+                    self.bids.get(price).and_then(|page| page.get(order_id))
+                }
             }
+            (None, Some(_)) => self.bids.get(price).and_then(|page| page.get(order_id)),
+            (Some(_), None) => self.asks.get(price).and_then(|page| page.get(order_id)),
+            _ => None,
         }
     }
 
@@ -333,4 +340,46 @@ pub fn test_scale() {
     let mut amount = dec!(0.0001);
     amount.rescale(2);
     assert_eq!("0.00", amount.to_string());
+}
+
+#[test]
+pub fn test_orderbook() {
+    use rust_decimal_macros::dec;
+    let base_scale = 5;
+    let quote_scale = 1;
+    let taker_fee = dec!(0.001);
+    let maker_fee = dec!(0.001);
+    let min_amount = dec!(1);
+    let min_vol = dec!(1);
+    let mut book = OrderBook::new(
+        base_scale,
+        quote_scale,
+        taker_fee,
+        maker_fee,
+        min_amount,
+        min_vol,
+        true,
+        true,
+    );
+    book.insert(
+        Order::new(1, UserId::zero(), dec!(100), dec!(1)),
+        AskOrBid::Bid,
+    );
+    assert!(book.indices.contains_key(&1));
+    assert_eq!(book.bid_size, dec!(1));
+    assert_eq!(book.ask_size, dec!(0));
+    assert!(!book.bids.is_empty());
+    assert!(book.asks.is_empty());
+    assert_eq!(book.get_best_bid().unwrap(), dec!(100));
+    assert!(book.get_best_ask().is_none());
+    assert!(book.find_order(1).is_some());
+    book.insert(
+        Order::new(2, UserId::zero(), dec!(105), dec!(1)),
+        AskOrBid::Ask,
+    );
+    assert!(book.indices.contains_key(&2));
+    assert_eq!(book.ask_size, dec!(1));
+    assert!(book.find_order(2).is_some());
+    assert!(!book.asks.is_empty());
+    assert_eq!(book.get_best_ask().unwrap(), dec!(105));
 }

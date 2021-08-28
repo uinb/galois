@@ -13,10 +13,12 @@
 // limitations under the License.
 
 use crate::{assets, clearing, core::*, matcher, orderbook::*, output, sequence, server, snapshot};
+use anyhow::anyhow;
 use cfg_if::cfg_if;
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 use std::sync::mpsc::{Receiver, Sender};
+use thiserror::Error;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum Event {
@@ -105,10 +107,12 @@ impl Default for Inspection {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum EventsError {
+    #[error("Events execution thread interrupted")]
     Interrupted,
-    EventRejected(u64),
+    #[error("Error occurs in sequence {0}: {1}")]
+    EventRejected(u64, anyhow::Error),
 }
 
 type EventExecutionResult = Result<(), EventsError>;
@@ -138,27 +142,32 @@ pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data) {
                 }
                 sequence::Fusion::W(seq) => {
                     let id = seq.id;
-                    if let Ok(event) = seq.try_into() {
-                        cfg_if! {
-                            if #[cfg(feature = "fusotao")] {
-                                let result = handle_event(event, &mut data, &sender, &prover);
-                            } else {
-                                let result = handle_event(event, &mut data, &sender);
+                    match seq.try_into() {
+                        Ok(event) => {
+                            cfg_if! {
+                                if #[cfg(feature = "fusotao")] {
+                                    let result = handle_event(event, &mut data, &sender, &prover);
+                                } else {
+                                    let result = handle_event(event, &mut data, &sender);
+                                }
+                            }
+                            match result {
+                                Err(EventsError::EventRejected(id, msg)) => {
+                                    log::info!("Error occur in sequence {}: {:?}", id, msg);
+                                    sequence::update_sequence_status(id, sequence::ERROR)
+                                        .map_err(|_| EventsError::Interrupted)?;
+                                }
+                                Err(EventsError::Interrupted) => {
+                                    panic!("sequence thread panic");
+                                }
+                                Ok(()) => {}
                             }
                         }
-                        match result {
-                            Err(EventsError::EventRejected(id)) => {
-                                sequence::update_sequence_status(id, sequence::ERROR)
-                                    .map_err(|_| EventsError::Interrupted)?;
-                            }
-                            Err(EventsError::Interrupted) => {
-                                panic!("sequence thread panic");
-                            }
-                            Ok(()) => {}
+                        Err(e) => {
+                            log::info!("Error occur in sequence {}: {:?}", id, e);
+                            sequence::update_sequence_status(id, sequence::ERROR)
+                                .map_err(|_| EventsError::Interrupted)?;
                         }
-                    } else {
-                        sequence::update_sequence_status(id, sequence::ERROR)
-                            .map_err(|_| EventsError::Interrupted)?;
                     }
                 }
             }
@@ -177,10 +186,12 @@ fn handle_event(
             let orderbook = data
                 .orderbooks
                 .get_mut(&cmd.symbol)
-                .ok_or(EventsError::EventRejected(id))?;
-            if !orderbook.should_accept(cmd.price, cmd.amount) {
-                return Err(EventsError::EventRejected(id));
-            }
+                .filter(|b| b.should_accept(cmd.price, cmd.amount))
+                .filter(|b| b.find_order(cmd.order_id).is_none())
+                .ok_or(EventsError::EventRejected(
+                    id,
+                    anyhow!("order can't be accepted"),
+                ))?;
             cfg_if! {
                 if #[cfg(feature = "fusotao")] {
                     let size = (orderbook.ask_size, orderbook.bid_size);
@@ -190,7 +201,7 @@ fn handle_event(
             }
             let (c, val) = assets::freeze_if(&cmd.symbol, cmd.ask_or_bid, cmd.price, cmd.amount);
             assets::try_freeze(&mut data.accounts, &cmd.user_id, c, val)
-                .map_err(|_| EventsError::EventRejected(id))?;
+                .map_err(|e| EventsError::EventRejected(id, e))?;
             let mr = matcher::execute_limit(
                 orderbook,
                 cmd.user_id,
@@ -229,16 +240,17 @@ fn handle_event(
         Event::Cancel(id, cmd, time) => {
             // 0. symbol exsits
             // 1. check order's owner
-            let orderbook = data
-                .orderbooks
-                .get_mut(&cmd.symbol)
-                .ok_or(EventsError::EventRejected(id))?;
-            let order = orderbook
+            let orderbook =
+                data.orderbooks
+                    .get_mut(&cmd.symbol)
+                    .ok_or(EventsError::EventRejected(
+                        id,
+                        anyhow!("orderbook not exists"),
+                    ))?;
+            orderbook
                 .find_order(cmd.order_id)
-                .ok_or(EventsError::EventRejected(id))?;
-            if order.user != cmd.user_id {
-                return Err(EventsError::EventRejected(id));
-            }
+                .filter(|o| o.user == cmd.user_id)
+                .ok_or(EventsError::EventRejected(id, anyhow!("order not exists")))?;
             cfg_if! {
                 if #[cfg(feature = "fusotao")] {
                     let size = (orderbook.ask_size, orderbook.bid_size);
@@ -246,8 +258,8 @@ fn handle_event(
                     let taker_quote_before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.1);
                 }
             }
-            let mr =
-                matcher::cancel(orderbook, cmd.order_id).ok_or(EventsError::EventRejected(id))?;
+            let mr = matcher::cancel(orderbook, cmd.order_id)
+                .ok_or(EventsError::EventRejected(id, anyhow!("")))?;
             let out = clearing::clear(
                 &mut data.accounts,
                 id,
@@ -280,34 +292,33 @@ fn handle_event(
             let orderbook = data
                 .orderbooks
                 .get_mut(&symbol)
-                .ok_or(EventsError::EventRejected(id))?;
+                .ok_or(EventsError::EventRejected(
+                    id,
+                    anyhow!("orderbook not exists"),
+                ))?;
             let ids = orderbook.indices.keys().copied().collect::<Vec<_>>();
-            let mrs = ids
+            let matches = ids
                 .into_iter()
-                .map(|id| matcher::cancel(orderbook, id))
-                .filter(|mr| mr.is_some())
-                .collect::<Vec<_>>();
-            let out = mrs
-                .iter()
-                .map(|mr| {
-                    clearing::clear(
-                        &mut data.accounts,
-                        id,
-                        &symbol,
-                        orderbook.taker_fee,
-                        orderbook.maker_fee,
-                        mr.as_ref().unwrap(),
-                        time,
-                    )
-                })
-                .flatten()
-                .collect::<Vec<_>>();
-            sender.send(out).map_err(|_| EventsError::Interrupted)?;
+                .filter_map(|id| matcher::cancel(orderbook, id))
+                .collect::<Vec<crate::matcher::Match>>();
+            let (taker_fee, maker_fee) = (orderbook.taker_fee, orderbook.maker_fee);
+            matches.iter().for_each(|mr| {
+                let out = clearing::clear(
+                    &mut data.accounts,
+                    id,
+                    &symbol,
+                    taker_fee,
+                    maker_fee,
+                    mr,
+                    time,
+                );
+                sender.send(out).unwrap();
+            });
             Ok(())
         }
         Event::TransferOut(id, cmd, _) => {
             assets::deduct_available(&mut data.accounts, &cmd.user_id, cmd.currency, cmd.amount)
-                .map_err(|_| EventsError::EventRejected(id))?;
+                .map_err(|e| EventsError::EventRejected(id, e))?;
             cfg_if! {
                 if #[cfg(feature = "fusotao")] {
                 }

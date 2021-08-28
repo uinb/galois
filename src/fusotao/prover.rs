@@ -66,24 +66,24 @@ impl Prover {
         keys.push(k);
         leaves.push(l);
         if outputs.len() > 1 {
-            for output in outputs.iter() {
-                // for every output, x + delta - charge = y
-                // let (old_ba, old_bf) = (
-                //     // TODO
-                //     to_merkle_represent(r.base_available - r.base_delta + r.base_charge).unwrap(),
-                //     to_merkle_represent(r.base_frozen).unwrap(),
-                // );
-                // let (new_ba, new_bf) = (
-                //     to_merkle_represent(r.base_available).unwrap(),
-                //     to_merkle_represent(r.base_frozen).unwrap(),
-                // );
-                // let (k, leaf0) = new_account_merkle_leaf(&r.user_id, symbol.0, ba, bf);
-                // let (qa, qf) = (
-                //     to_merkle_represent(r.quote_available).unwrap(),
-                //     to_merkle_represent(r.quote_frozen).unwrap(),
-                // );
-                // let (_, leaf1) = new_account_merkle_leaf(&r.user_id, symbol.1, qa, qf);
-            }
+            // for output in outputs.iter() {
+            //     // for every output, x + delta - charge = y
+            //     let (old_ba, old_bf) = (
+            //         // TODO
+            //         to_merkle_represent(r.base_available - r.base_delta + r.base_charge).unwrap(),
+            //         to_merkle_represent(r.base_frozen).unwrap(),
+            //     );
+            //     let (new_ba, new_bf) = (
+            //         to_merkle_represent(r.base_available).unwrap(),
+            //         to_merkle_represent(r.base_frozen).unwrap(),
+            //     );
+            //     let (k, leaf0) = new_account_merkle_leaf(&r.user_id, symbol.0, ba, bf);
+            //     let (qa, qf) = (
+            //         to_merkle_represent(r.quote_available).unwrap(),
+            //         to_merkle_represent(r.quote_frozen).unwrap(),
+            //     );
+            //     let (_, leaf1) = new_account_merkle_leaf(&r.user_id, symbol.1, qa, qf);
+            // }
         }
         // outputs
         //     .iter()
