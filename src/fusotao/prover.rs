@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::*;
-use crate::{assets::Balance, core::*, event::*, output::Output};
+use crate::{assets::Balance, core::*, event::*, matcher::*, orderbook::AskOrBid, output::Output};
 use anyhow::anyhow;
 use rust_decimal::{prelude::*, Decimal};
 use sha2::{Digest, Sha256};
@@ -43,87 +43,111 @@ impl Prover {
         outputs: &[Output],
     ) {
         let mut leaves = vec![];
-        let mut keys = vec![];
-        let symbol = outputs.last().unwrap().symbol.clone();
-        let event_id = outputs.last().unwrap().event_id;
-        let user_id = outputs.last().unwrap().user_id;
+        let taker = outputs.last().unwrap();
+        let symbol = taker.symbol.clone();
+        let event_id = taker.event_id;
+        let user_id = taker.user_id;
         let orderbook = data.orderbooks.get(&symbol).unwrap();
-        let (old_ask_size, old_bid_size) = (
+        let (old_ask_size, old_bid_size, new_ask_size, new_bid_size) = (
             to_merkle_represent(ask_size_before).unwrap(),
             to_merkle_represent(bid_size_before).unwrap(),
-        );
-        let (new_ask_size, new_bid_size) = (
             to_merkle_represent(orderbook.ask_size).unwrap(),
             to_merkle_represent(orderbook.bid_size).unwrap(),
         );
-        let (k, l) = new_orderbook_merkle_leaf(
+        leaves.push(new_orderbook_merkle_leaf(
             symbol,
             old_ask_size,
             old_bid_size,
             new_ask_size,
             new_bid_size,
+        ));
+        outputs
+            .iter()
+            .take_while(|o| o.role == Role::Maker)
+            .for_each(|ref r| {
+                let (ba, bf, qa, qf) = match r.ask_or_bid {
+                    // -base_frozen, +quote_available
+                    // base_frozen0 + r.base_delta = base_frozen
+                    // quote_available0 + r.quote_delta + r.quote_charge = quote_available
+                    AskOrBid::Ask => (
+                        r.base_available,
+                        r.base_frozen - r.base_delta,
+                        r.quote_available - r.quote_delta - r.quote_charge,
+                        r.quote_frozen,
+                    ),
+                    // +base_available, -quote_frozen
+                    // quote_frozen0 + r.quote_delta = quote_frozen
+                    // base_available0 + r.base_delta + r.base_charge = base_available
+                    AskOrBid::Bid => (
+                        r.base_available - r.base_charge - r.base_delta,
+                        r.base_frozen,
+                        r.quote_available,
+                        r.quote_frozen - r.quote_delta,
+                    ),
+                };
+                let (new_ba, new_bf, old_ba, old_bf) = (
+                    to_merkle_represent(r.base_available).unwrap(),
+                    to_merkle_represent(r.base_frozen).unwrap(),
+                    to_merkle_represent(ba).unwrap(),
+                    to_merkle_represent(bf).unwrap(),
+                );
+                leaves.push(new_account_merkle_leaf(
+                    &r.user_id, symbol.0, old_ba, old_bf, new_ba, new_bf,
+                ));
+                let (new_qa, new_qf, old_qa, old_qf) = (
+                    to_merkle_represent(r.quote_available).unwrap(),
+                    to_merkle_represent(r.quote_frozen).unwrap(),
+                    to_merkle_represent(qa).unwrap(),
+                    to_merkle_represent(qf).unwrap(),
+                );
+                leaves.push(new_account_merkle_leaf(
+                    &r.user_id, symbol.1, old_qa, old_qf, new_qa, new_qf,
+                ));
+            });
+        let (new_taker_ba, new_taker_bf, old_taker_ba, old_taker_bf) = (
+            to_merkle_represent(taker.base_available).unwrap(),
+            to_merkle_represent(taker.base_frozen).unwrap(),
+            to_merkle_represent(taker_base_before.available).unwrap(),
+            to_merkle_represent(taker_base_before.frozen).unwrap(),
         );
-        keys.push(k);
-        leaves.push(l);
-        if outputs.len() > 1 {
-            // for output in outputs.iter() {
-            //     // for every output, x + delta - charge = y
-            //     let (old_ba, old_bf) = (
-            //         // TODO
-            //         to_merkle_represent(r.base_available - r.base_delta + r.base_charge).unwrap(),
-            //         to_merkle_represent(r.base_frozen).unwrap(),
-            //     );
-            //     let (new_ba, new_bf) = (
-            //         to_merkle_represent(r.base_available).unwrap(),
-            //         to_merkle_represent(r.base_frozen).unwrap(),
-            //     );
-            //     let (k, leaf0) = new_account_merkle_leaf(&r.user_id, symbol.0, ba, bf);
-            //     let (qa, qf) = (
-            //         to_merkle_represent(r.quote_available).unwrap(),
-            //         to_merkle_represent(r.quote_frozen).unwrap(),
-            //     );
-            //     let (_, leaf1) = new_account_merkle_leaf(&r.user_id, symbol.1, qa, qf);
-            // }
-        }
-        // outputs
-        //     .iter()
-        //     .flat_map(|ref r| {
-        //         let (ba, bf) = (
-        //             to_merkle_represent(r.base_available).unwrap(),
-        //             to_merkle_represent(r.base_frozen).unwrap(),
-        //         );
-        //         let leaf0 = new_account_merkle_leaf(&r.user_id, symbol.0, ba, bf);
-        //         let (qa, qf) = (
-        //             to_merkle_represent(r.quote_available).unwrap(),
-        //             to_merkle_represent(r.quote_frozen).unwrap(),
-        //         );
-        //         let leaf1 = new_account_merkle_leaf(&r.user_id, symbol.1, qa, qf);
-        //         vec![leaf0, leaf1].into_iter()
-        //     })
-        //     .for_each(|n| updates.push(n));
-        // let proof = Proof {
-        //     event_id,
-        //     user_id,
-        //     nonce,
-        //     signature,
-        //     cmd,
-        //     leaves: updates.clone(),
-        //     proofs: gen_proofs(&mut data.merkle_tree, updates),
-        // };
-        // self.0.send(proof).unwrap();
+        leaves.push(new_account_merkle_leaf(
+            &user_id,
+            symbol.0,
+            old_taker_ba,
+            old_taker_bf,
+            new_taker_ba,
+            new_taker_bf,
+        ));
+        let (new_taker_qa, new_taker_qf, old_taker_qa, old_taker_qf) = (
+            to_merkle_represent(taker.quote_available).unwrap(),
+            to_merkle_represent(taker.quote_frozen).unwrap(),
+            to_merkle_represent(taker_quote_before.available).unwrap(),
+            to_merkle_represent(taker_quote_before.frozen).unwrap(),
+        );
+        leaves.push(new_account_merkle_leaf(
+            &user_id,
+            symbol.1,
+            old_taker_qa,
+            old_taker_qf,
+            new_taker_qa,
+            new_taker_qf,
+        ));
+        let (keys, pr0, pr1) = gen_proofs(&mut data.merkle_tree, leaves);
+        self.0
+            .send(Proof {
+                event_id: event_id,
+                user_id: user_id,
+                nonce: nonce,
+                signature: signature,
+                cmd: encoded_cmd,
+                keys: keys,
+                proof_of_exists: pr0,
+                proof_of_cmd: pr1,
+                root: data.merkle_tree.root().clone(),
+            })
+            .unwrap();
     }
-    // pub struct Proof {
-    //     pub event_id: u64,
-    //     pub user_id: UserId,
-    //     pub nonce: u32,
-    //     pub signature: [u8; 64],
-    //     pub cmd: Vec<u8>,
-    //     pub keys: Vec<H256>,
-    //     pub leaves: Vec<MerkleLeaf>,
-    //     pub proof_of_exists: Vec<u8>,
-    //     pub proof_of_cmd: Vec<u8>,
-    //     pub root: H256,
-    // }
+
     pub fn prove_assets_cmd(
         &self,
         data: &mut Data,
@@ -132,24 +156,36 @@ impl Prover {
         account_before: &Balance,
         account_after: &Balance,
     ) {
-        // let balance = assets::get_to_owned(&data.accounts, user_id, currency);
-        // let (available, frozen) = (
-        //     to_merkle_represent(balance.available).unwrap(),
-        //     to_merkle_represent(balance.frozen).unwrap(),
-        // );
-        // let leaf = new_account_merkle_leaf(user_id, currency, available, frozen);
-        // let proof = Proof {
-        //     event_id,
-        //     // TODO
-        //     user_id: UserId::zero(),
-        //     nonce: 0,
-        //     signature: vec![0; 32],
-        //     cmd: vec![],
-        //     leaves: vec![leaf.clone()],
-        //     proofs: gen_proofs(&mut data.merkle_tree, vec![leaf]),
-        // };
-        // self.0.send(proof).unwrap();
     }
+}
+
+fn gen_proofs(
+    merkle_tree: &mut GlobalStates,
+    leaves: Vec<MerkleLeaf>,
+) -> (Vec<H256>, Vec<u8>, Vec<u8>) {
+    let keys = leaves.iter().map(|leaf| leaf.key).collect::<Vec<_>>();
+    let poe = merkle_tree.merkle_proof(keys.clone()).unwrap();
+    let pr0 = poe
+        .compile(
+            leaves
+                .iter()
+                .map(|leaf| (leaf.key, leaf.old_v))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+    leaves.iter().for_each(|leaf| {
+        merkle_tree.update(leaf.key, leaf.new_v).unwrap();
+    });
+    let poc = merkle_tree.merkle_proof(keys.clone()).unwrap();
+    let pr1 = poc
+        .compile(
+            leaves
+                .iter()
+                .map(|leaf| (leaf.key, leaf.new_v))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+    (keys, pr0.into(), pr1.into())
 }
 
 fn d18() -> Amount {
@@ -174,18 +210,16 @@ fn new_account_merkle_leaf(
     old_frozen: u128,
     new_available: u128,
     new_frozen: u128,
-) -> (H256, MerkleLeaf) {
+) -> MerkleLeaf {
     let mut hasher = Sha256::new();
     hasher.update(&[ACCOUNT_KEY][..]);
     hasher.update(<B256 as AsRef<[u8]>>::as_ref(user_id));
     hasher.update(&currency.to_be_bytes()[..]);
-    (
-        hasher.finalize().into(),
-        MerkleLeaf {
-            old_v: beu128_to_h256(old_available, old_frozen),
-            new_v: beu128_to_h256(new_available, new_frozen),
-        },
-    )
+    MerkleLeaf {
+        key: hasher.finalize().into(),
+        old_v: beu128_to_h256(old_available, old_frozen),
+        new_v: beu128_to_h256(new_available, new_frozen),
+    }
 }
 
 fn new_orderbook_merkle_leaf(
@@ -194,38 +228,16 @@ fn new_orderbook_merkle_leaf(
     old_bid_size: u128,
     new_ask_size: u128,
     new_bid_size: u128,
-) -> (H256, MerkleLeaf) {
+) -> MerkleLeaf {
     let mut hasher = Sha256::new();
     let mut symbol_bits: [u8; 8] = Default::default();
     symbol_bits[..4].copy_from_slice(&symbol.0.to_be_bytes()[..]);
     symbol_bits[4..].copy_from_slice(&symbol.1.to_be_bytes()[..]);
     hasher.update(&[ORDERBOOK_KEY][..]);
     hasher.update(&symbol_bits[..]);
-    (
-        hasher.finalize().into(),
-        MerkleLeaf {
-            old_v: beu128_to_h256(old_ask_size, old_bid_size),
-            new_v: beu128_to_h256(new_ask_size, new_bid_size),
-        },
-    )
-}
-
-// FIXME unwrap
-fn gen_proofs(merkle_tree: &mut GlobalStates, leaves: Vec<MerkleLeaf>) -> Vec<u8> {
-    vec![]
-    // leaves.iter().for_each(|leaf| {
-    //     merkle_tree.update(leaf.key, leaf.value).unwrap();
-    // });
-    // let proof = merkle_tree
-    //     .merkle_proof(leaves.iter().map(|leaf| leaf.key).collect::<Vec<_>>())
-    //     .unwrap();
-    // proof
-    //     .compile(
-    //         leaves
-    //             .into_iter()
-    //             .map(|leaf| (leaf.key, leaf.value))
-    //             .collect::<Vec<_>>(),
-    //     )
-    //     .unwrap()
-    //     .into()
+    MerkleLeaf {
+        key: hasher.finalize().into(),
+        old_v: beu128_to_h256(old_ask_size, old_bid_size),
+        new_v: beu128_to_h256(new_ask_size, new_bid_size),
+    }
 }
