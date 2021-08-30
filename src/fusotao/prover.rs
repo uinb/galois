@@ -14,11 +14,9 @@
 
 use super::*;
 use crate::{assets::Balance, core::*, event::*, matcher::*, orderbook::AskOrBid, output::Output};
-use rust_decimal::{prelude::*, Decimal};
 use sha2::{Digest, Sha256};
 use std::sync::mpsc::Sender;
 
-const ONE_ONCHAIN: u128 = 1_000_000_000_000_000_000;
 const ACCOUNT_KEY: u8 = 0x00;
 const ORDERBOOK_KEY: u8 = 0x01;
 
@@ -48,10 +46,10 @@ impl Prover {
         let user_id = taker.user_id;
         let orderbook = data.orderbooks.get(&symbol).unwrap();
         let (old_ask_size, old_bid_size, new_ask_size, new_bid_size) = (
-            to_merkle_represent(ask_size_before).unwrap(),
-            to_merkle_represent(bid_size_before).unwrap(),
-            to_merkle_represent(orderbook.ask_size).unwrap(),
-            to_merkle_represent(orderbook.bid_size).unwrap(),
+            to_merkle_represent(ask_size_before),
+            to_merkle_represent(bid_size_before),
+            to_merkle_represent(orderbook.ask_size),
+            to_merkle_represent(orderbook.bid_size),
         );
         leaves.push(new_orderbook_merkle_leaf(
             symbol,
@@ -85,29 +83,29 @@ impl Prover {
                     ),
                 };
                 let (new_ba, new_bf, old_ba, old_bf) = (
-                    to_merkle_represent(r.base_available).unwrap(),
-                    to_merkle_represent(r.base_frozen).unwrap(),
-                    to_merkle_represent(ba).unwrap(),
-                    to_merkle_represent(bf).unwrap(),
+                    to_merkle_represent(r.base_available),
+                    to_merkle_represent(r.base_frozen),
+                    to_merkle_represent(ba),
+                    to_merkle_represent(bf),
                 );
                 leaves.push(new_account_merkle_leaf(
                     &r.user_id, symbol.0, old_ba, old_bf, new_ba, new_bf,
                 ));
                 let (new_qa, new_qf, old_qa, old_qf) = (
-                    to_merkle_represent(r.quote_available).unwrap(),
-                    to_merkle_represent(r.quote_frozen).unwrap(),
-                    to_merkle_represent(qa).unwrap(),
-                    to_merkle_represent(qf).unwrap(),
+                    to_merkle_represent(r.quote_available),
+                    to_merkle_represent(r.quote_frozen),
+                    to_merkle_represent(qa),
+                    to_merkle_represent(qf),
                 );
                 leaves.push(new_account_merkle_leaf(
                     &r.user_id, symbol.1, old_qa, old_qf, new_qa, new_qf,
                 ));
             });
         let (new_taker_ba, new_taker_bf, old_taker_ba, old_taker_bf) = (
-            to_merkle_represent(taker.base_available).unwrap(),
-            to_merkle_represent(taker.base_frozen).unwrap(),
-            to_merkle_represent(taker_base_before.available).unwrap(),
-            to_merkle_represent(taker_base_before.frozen).unwrap(),
+            to_merkle_represent(taker.base_available),
+            to_merkle_represent(taker.base_frozen),
+            to_merkle_represent(taker_base_before.available),
+            to_merkle_represent(taker_base_before.frozen),
         );
         leaves.push(new_account_merkle_leaf(
             &user_id,
@@ -118,10 +116,10 @@ impl Prover {
             new_taker_bf,
         ));
         let (new_taker_qa, new_taker_qf, old_taker_qa, old_taker_qf) = (
-            to_merkle_represent(taker.quote_available).unwrap(),
-            to_merkle_represent(taker.quote_frozen).unwrap(),
-            to_merkle_represent(taker_quote_before.available).unwrap(),
-            to_merkle_represent(taker_quote_before.frozen).unwrap(),
+            to_merkle_represent(taker.quote_available),
+            to_merkle_represent(taker.quote_frozen),
+            to_merkle_represent(taker_quote_before.available),
+            to_merkle_represent(taker_quote_before.frozen),
         );
         leaves.push(new_account_merkle_leaf(
             &user_id,
@@ -149,17 +147,17 @@ impl Prover {
 
     pub fn prove_assets_cmd(
         &self,
-        data: &mut Data,
+        merkle_tree: &mut GlobalStates,
         event_id: u64,
         cmd: AssetsCmd,
         account_before: &Balance,
         account_after: &Balance,
     ) {
         let (new_available, new_frozen, old_available, old_frozen) = (
-            to_merkle_represent(account_after.available).unwrap(),
-            to_merkle_represent(account_after.frozen).unwrap(),
-            to_merkle_represent(account_before.available).unwrap(),
-            to_merkle_represent(account_before.frozen).unwrap(),
+            to_merkle_represent(account_after.available),
+            to_merkle_represent(account_after.frozen),
+            to_merkle_represent(account_before.available),
+            to_merkle_represent(account_before.frozen),
         );
         let leaves = vec![new_account_merkle_leaf(
             &cmd.user_id,
@@ -169,7 +167,7 @@ impl Prover {
             new_available,
             new_frozen,
         )];
-        let (pr0, pr1) = gen_proofs(&mut data.merkle_tree, &leaves);
+        let (pr0, pr1) = gen_proofs(merkle_tree, &leaves);
         self.0
             .send(Proof {
                 event_id: event_id,
@@ -180,7 +178,7 @@ impl Prover {
                 leaves: leaves,
                 proof_of_exists: pr0,
                 proof_of_cmd: pr1,
-                root: data.merkle_tree.root().clone(),
+                root: merkle_tree.root().clone(),
             })
             .unwrap();
     }
@@ -210,21 +208,6 @@ fn gen_proofs(merkle_tree: &mut GlobalStates, leaves: &Vec<MerkleLeaf>) -> (Vec<
         )
         .unwrap();
     (pr0.into(), pr1.into())
-}
-
-fn d18() -> Amount {
-    ONE_ONCHAIN.into()
-}
-
-fn to_merkle_represent(v: Decimal) -> Option<u128> {
-    Some((v.fract() * d18()).to_u128()? + (v.floor().to_u128()? * ONE_ONCHAIN))
-}
-
-fn beu128_to_h256(a0: u128, a1: u128) -> H256 {
-    let mut v: [u8; 32] = Default::default();
-    v[..16].copy_from_slice(&a0.to_be_bytes());
-    v[16..].copy_from_slice(&a1.to_be_bytes());
-    H256::from(v)
 }
 
 fn new_account_merkle_leaf(

@@ -16,8 +16,9 @@ mod prover;
 
 pub use prover::Prover;
 
-use crate::{config::C, core::*};
+use crate::{config::C, core::*, event::*};
 use anyhow::anyhow;
+use rust_decimal::{prelude::*, Decimal};
 use serde::{Deserialize, Serialize};
 use smt::{default_store::DefaultStore, sha256::Sha256Hasher, SparseMerkleTree, H256};
 use sp_core::{
@@ -28,6 +29,8 @@ use std::sync::mpsc::Receiver;
 use sub_api::{compose_extrinsic, rpc::WsRpcClient, Api, UncheckedExtrinsicV4, XtStatus};
 
 pub type GlobalStates = SparseMerkleTree<Sha256Hasher, H256, DefaultStore<H256>>;
+
+const ONE_ONCHAIN: u128 = 1_000_000_000_000_000_000;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MerkleLeaf {
@@ -91,4 +94,56 @@ pub fn init(rx: Receiver<Proof>) -> anyhow::Result<()> {
         }
     });
     Ok(())
+}
+
+impl Into<Vec<u8>> for LimitCmd {
+    fn into(self) -> Vec<u8> {
+        let mut v = vec![];
+        v.extend_from_slice(&self.symbol.0.to_be_bytes());
+        v.extend_from_slice(&self.symbol.1.to_be_bytes());
+        v.extend_from_slice(self.user_id.as_ref());
+        v.extend_from_slice(&self.order_id.to_be_bytes());
+        v.extend_from_slice(&to_merkle_represent(self.price).to_be_bytes());
+        v.extend_from_slice(&to_merkle_represent(self.amount).to_be_bytes());
+        v.push(self.ask_or_bid.into());
+        v
+    }
+}
+
+impl Into<Vec<u8>> for CancelCmd {
+    fn into(self) -> Vec<u8> {
+        let mut v = vec![];
+        v.extend_from_slice(&self.symbol.0.to_be_bytes());
+        v.extend_from_slice(&self.symbol.1.to_be_bytes());
+        v.extend_from_slice(self.user_id.as_ref());
+        v.extend_from_slice(&self.order_id.to_be_bytes());
+        v
+    }
+}
+
+impl Into<Vec<u8>> for AssetsCmd {
+    fn into(self) -> Vec<u8> {
+        let mut v = vec![];
+        v.extend_from_slice(&self.currency.to_be_bytes());
+        v.extend_from_slice(self.user_id.as_ref());
+        v.extend_from_slice(&to_merkle_represent(self.amount).to_be_bytes());
+        v
+    }
+}
+
+fn d18() -> Amount {
+    ONE_ONCHAIN.into()
+}
+
+fn to_merkle_represent(v: Decimal) -> u128 {
+    let mut fraction = v.fract();
+    fraction.set_scale(18).unwrap();
+    (fraction * d18()).to_u128().unwrap() + (v.floor().to_u128().unwrap() * ONE_ONCHAIN)
+}
+
+fn beu128_to_h256(a0: u128, a1: u128) -> H256 {
+    let mut v: [u8; 32] = Default::default();
+    v[..16].copy_from_slice(&a0.to_be_bytes());
+    v[16..].copy_from_slice(&a1.to_be_bytes());
+    H256::from(v)
 }

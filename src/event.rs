@@ -47,13 +47,6 @@ pub struct LimitCmd {
     pub signature: Vec<u8>,
 }
 
-// TODO
-impl Into<Vec<u8>> for LimitCmd {
-    fn into(self) -> Vec<u8> {
-        vec![]
-    }
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CancelCmd {
     pub symbol: Symbol,
@@ -65,12 +58,6 @@ pub struct CancelCmd {
     pub signature: Vec<u8>,
 }
 
-impl Into<Vec<u8>> for CancelCmd {
-    fn into(self) -> Vec<u8> {
-        vec![]
-    }
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AssetsCmd {
     pub user_id: UserId,
@@ -80,12 +67,6 @@ pub struct AssetsCmd {
     pub nonce_or_block_number: u32,
     #[cfg(feature = "fusotao")]
     pub signature_or_hash: Vec<u8>,
-}
-
-impl Into<Vec<u8>> for AssetsCmd {
-    fn into(self) -> Vec<u8> {
-        vec![]
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -336,6 +317,11 @@ fn handle_event(
             Ok(())
         }
         Event::TransferOut(id, cmd, _) => {
+            cfg_if! {
+                if #[cfg(feature = "fusotao")] {
+                    let before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.currency);
+                }
+            }
             let after = assets::deduct_available(
                 &mut data.accounts,
                 &cmd.user_id,
@@ -345,12 +331,17 @@ fn handle_event(
             .map_err(|e| EventsError::EventRejected(id, e))?;
             cfg_if! {
                 if #[cfg(feature = "fusotao")] {
-                    // prover.prove_assets_cmd();
+                    prover.prove_assets_cmd(&mut data.merkle_tree, id, cmd, &before, &after);
                 }
             }
             Ok(())
         }
         Event::TransferIn(id, cmd, _) => {
+            cfg_if! {
+                if #[cfg(feature = "fusotao")] {
+                    let before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.currency);
+                }
+            }
             let after = assets::add_to_available(
                 &mut data.accounts,
                 &cmd.user_id,
@@ -360,6 +351,7 @@ fn handle_event(
             .map_err(|e| EventsError::EventRejected(id, e))?;
             cfg_if! {
                 if #[cfg(feature = "fusotao")] {
+                    prover.prove_assets_cmd(&mut data.merkle_tree, id, cmd, &before, &after);
                 }
             }
             Ok(())
