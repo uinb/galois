@@ -14,7 +14,6 @@
 
 use super::*;
 use crate::{assets::Balance, core::*, event::*, matcher::*, orderbook::AskOrBid, output::Output};
-use anyhow::anyhow;
 use rust_decimal::{prelude::*, Decimal};
 use sha2::{Digest, Sha256};
 use std::sync::mpsc::Sender;
@@ -132,7 +131,7 @@ impl Prover {
             new_taker_qa,
             new_taker_qf,
         ));
-        let (keys, pr0, pr1) = gen_proofs(&mut data.merkle_tree, leaves);
+        let (pr0, pr1) = gen_proofs(&mut data.merkle_tree, &leaves);
         self.0
             .send(Proof {
                 event_id: event_id,
@@ -140,7 +139,7 @@ impl Prover {
                 nonce: nonce,
                 signature: signature,
                 cmd: encoded_cmd,
-                keys: keys,
+                leaves: leaves,
                 proof_of_exists: pr0,
                 proof_of_cmd: pr1,
                 root: data.merkle_tree.root().clone(),
@@ -152,17 +151,42 @@ impl Prover {
         &self,
         data: &mut Data,
         event_id: u64,
-        cmd: &AssetsCmd,
+        cmd: AssetsCmd,
         account_before: &Balance,
         account_after: &Balance,
     ) {
+        let (new_available, new_frozen, old_available, old_frozen) = (
+            to_merkle_represent(account_after.available).unwrap(),
+            to_merkle_represent(account_after.frozen).unwrap(),
+            to_merkle_represent(account_before.available).unwrap(),
+            to_merkle_represent(account_before.frozen).unwrap(),
+        );
+        let leaves = vec![new_account_merkle_leaf(
+            &cmd.user_id,
+            cmd.currency,
+            old_available,
+            old_frozen,
+            new_available,
+            new_frozen,
+        )];
+        let (pr0, pr1) = gen_proofs(&mut data.merkle_tree, &leaves);
+        self.0
+            .send(Proof {
+                event_id: event_id,
+                user_id: cmd.user_id,
+                nonce: cmd.nonce_or_block_number,
+                signature: cmd.signature_or_hash.clone(),
+                cmd: cmd.into(),
+                leaves: leaves,
+                proof_of_exists: pr0,
+                proof_of_cmd: pr1,
+                root: data.merkle_tree.root().clone(),
+            })
+            .unwrap();
     }
 }
 
-fn gen_proofs(
-    merkle_tree: &mut GlobalStates,
-    leaves: Vec<MerkleLeaf>,
-) -> (Vec<H256>, Vec<u8>, Vec<u8>) {
+fn gen_proofs(merkle_tree: &mut GlobalStates, leaves: &Vec<MerkleLeaf>) -> (Vec<u8>, Vec<u8>) {
     let keys = leaves.iter().map(|leaf| leaf.key).collect::<Vec<_>>();
     let poe = merkle_tree.merkle_proof(keys.clone()).unwrap();
     let pr0 = poe
@@ -185,7 +209,7 @@ fn gen_proofs(
                 .collect::<Vec<_>>(),
         )
         .unwrap();
-    (keys, pr0.into(), pr1.into())
+    (pr0.into(), pr1.into())
 }
 
 fn d18() -> Amount {
