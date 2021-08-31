@@ -232,7 +232,6 @@ fn take(page: &mut OrderPage, taker: &mut Order) -> Vec<Maker> {
     matches
 }
 
-// FIXME move indices
 pub fn cancel(orderbook: &mut OrderBook, order_id: u64) -> Option<Match> {
     orderbook.remove(order_id).map(|(order, from)| Match {
         maker: vec![],

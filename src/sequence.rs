@@ -73,7 +73,7 @@ impl TryInto<Event> for Sequence {
                     #[cfg(feature = "fusotao")]
                     nonce: self.cmd.nonce.ok_or(anyhow!(""))?,
                     #[cfg(feature = "fusotao")]
-                    signature: self.cmd.signature.ok_or(anyhow!(""))?,
+                    signature: hex::decode(self.cmd.signature.ok_or(anyhow!(""))?)?,
                 };
                 Ok(Event::Limit(self.id, cmd, self.timestamp))
             }
@@ -86,7 +86,7 @@ impl TryInto<Event> for Sequence {
                     #[cfg(feature = "fusotao")]
                     nonce: self.cmd.nonce.ok_or(anyhow!(""))?,
                     #[cfg(feature = "fusotao")]
-                    signature: self.cmd.signature.ok_or(anyhow!(""))?,
+                    signature: hex::decode(self.cmd.signature.ok_or(anyhow!(""))?)?,
                 },
                 self.timestamp,
             )),
@@ -103,7 +103,7 @@ impl TryInto<Event> for Sequence {
                     #[cfg(feature = "fusotao")]
                     nonce_or_block_number: self.cmd.nonce.ok_or(anyhow!(""))?,
                     #[cfg(feature = "fusotao")]
-                    signature_or_hash: self.cmd.signature.ok_or(anyhow!(""))?,
+                    signature_or_hash: hex::decode(self.cmd.signature.ok_or(anyhow!(""))?)?,
                 },
                 self.timestamp,
             )),
@@ -120,7 +120,7 @@ impl TryInto<Event> for Sequence {
                     #[cfg(feature = "fusotao")]
                     nonce_or_block_number: self.cmd.nonce.ok_or(anyhow!(""))?,
                     #[cfg(feature = "fusotao")]
-                    signature_or_hash: self.cmd.signature.ok_or(anyhow!(""))?,
+                    signature_or_hash: hex::decode(self.cmd.signature.ok_or(anyhow!(""))?)?,
                 },
                 self.timestamp,
             )),

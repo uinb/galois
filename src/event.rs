@@ -44,7 +44,7 @@ pub struct LimitCmd {
     #[cfg(feature = "fusotao")]
     pub nonce: u32,
     #[cfg(feature = "fusotao")]
-    pub signature: String,
+    pub signature: Vec<u8>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -55,7 +55,7 @@ pub struct CancelCmd {
     #[cfg(feature = "fusotao")]
     pub nonce: u32,
     #[cfg(feature = "fusotao")]
-    pub signature: String,
+    pub signature: Vec<u8>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -66,7 +66,7 @@ pub struct AssetsCmd {
     #[cfg(feature = "fusotao")]
     pub nonce_or_block_number: u32,
     #[cfg(feature = "fusotao")]
-    pub signature_or_hash: String,
+    pub signature_or_hash: Vec<u8>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -224,8 +224,8 @@ fn handle_event(
                     prover.prove_trade_cmd(
                         data,
                         cmd.nonce,
-                        vec![],
-                        vec![],
+                        cmd.signature.clone(),
+                        cmd.into(),
                         size.0,
                         size.1,
                         &taker_base_before,
@@ -274,8 +274,8 @@ fn handle_event(
                     prover.prove_trade_cmd(
                         data,
                         cmd.nonce,
-                        vec![],
-                        vec![],
+                        cmd.signature.clone(),
+                        cmd.into(),
                         size.0,
                         size.1,
                         &taker_base_before,
@@ -300,7 +300,7 @@ fn handle_event(
             let matches = ids
                 .into_iter()
                 .filter_map(|id| matcher::cancel(orderbook, id))
-                .collect::<Vec<crate::matcher::Match>>();
+                .collect::<Vec<_>>();
             let (taker_fee, maker_fee) = (orderbook.taker_fee, orderbook.maker_fee);
             matches.iter().for_each(|mr| {
                 let out = clearing::clear(
@@ -317,18 +317,41 @@ fn handle_event(
             Ok(())
         }
         Event::TransferOut(id, cmd, _) => {
-            assets::deduct_available(&mut data.accounts, &cmd.user_id, cmd.currency, cmd.amount)
-                .map_err(|e| EventsError::EventRejected(id, e))?;
             cfg_if! {
                 if #[cfg(feature = "fusotao")] {
+                    let before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.currency);
+                }
+            }
+            let after = assets::deduct_available(
+                &mut data.accounts,
+                &cmd.user_id,
+                cmd.currency,
+                cmd.amount,
+            )
+            .map_err(|e| EventsError::EventRejected(id, e))?;
+            cfg_if! {
+                if #[cfg(feature = "fusotao")] {
+                    prover.prove_assets_cmd(&mut data.merkle_tree, id, cmd, &before, &after);
                 }
             }
             Ok(())
         }
-        Event::TransferIn(_, cmd, _) => {
-            assets::add_to_available(&mut data.accounts, &cmd.user_id, cmd.currency, cmd.amount);
+        Event::TransferIn(id, cmd, _) => {
             cfg_if! {
                 if #[cfg(feature = "fusotao")] {
+                    let before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.currency);
+                }
+            }
+            let after = assets::add_to_available(
+                &mut data.accounts,
+                &cmd.user_id,
+                cmd.currency,
+                cmd.amount,
+            )
+            .map_err(|e| EventsError::EventRejected(id, e))?;
+            cfg_if! {
+                if #[cfg(feature = "fusotao")] {
+                    prover.prove_assets_cmd(&mut data.merkle_tree, id, cmd, &before, &after);
                 }
             }
             Ok(())

@@ -48,7 +48,7 @@ pub fn add_to_available(
     user: &UserId,
     currency: Currency,
     amount: Amount,
-) {
+) -> anyhow::Result<Balance> {
     accounts
         .entry(*user)
         .and_modify(|account| {
@@ -63,7 +63,10 @@ pub fn add_to_available(
             let mut account = Account::default();
             account.insert(currency, init_balance(amount));
             account
-        });
+        })
+        .get(&currency)
+        .map(|b| b.clone())
+        .ok_or(anyhow!(""))
 }
 
 pub fn deduct_available(
@@ -71,7 +74,7 @@ pub fn deduct_available(
     user: &UserId,
     currency: Currency,
     amount: Amount,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Balance> {
     let account = accounts.get_mut(user).ok_or(anyhow!(""))?;
     let balance = account.get_mut(&currency).ok_or(anyhow!(""))?;
     ensure!(
@@ -79,7 +82,7 @@ pub fn deduct_available(
         "Insufficient available balance"
     );
     balance.available -= amount;
-    Ok(())
+    Ok(balance.clone())
 }
 
 pub fn deduct_frozen(
@@ -87,12 +90,12 @@ pub fn deduct_frozen(
     user: &UserId,
     currency: Currency,
     amount: Amount,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Balance> {
     let account = accounts.get_mut(user).ok_or(anyhow!(""))?;
     let balance = account.get_mut(&currency).ok_or(anyhow!(""))?;
     ensure!(balance.frozen >= amount, "Insufficient frozen balance");
     balance.frozen -= amount;
-    Ok(())
+    Ok(balance.clone())
 }
 
 pub fn freeze_if(
