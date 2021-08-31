@@ -141,7 +141,7 @@ fn to_merkle_represent(v: Decimal) -> u128 {
     (fraction * d18()).to_u128().unwrap() + (v.floor().to_u128().unwrap() * ONE_ONCHAIN)
 }
 
-fn beu128_to_h256(a0: u128, a1: u128) -> H256 {
+fn u128be_to_h256(a0: u128, a1: u128) -> H256 {
     let mut v: [u8; 32] = Default::default();
     v[..16].copy_from_slice(&a0.to_be_bytes());
     v[16..].copy_from_slice(&a1.to_be_bytes());

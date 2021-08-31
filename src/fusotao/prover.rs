@@ -224,8 +224,8 @@ fn new_account_merkle_leaf(
     hasher.update(&currency.to_be_bytes()[..]);
     MerkleLeaf {
         key: hasher.finalize().into(),
-        old_v: beu128_to_h256(old_available, old_frozen),
-        new_v: beu128_to_h256(new_available, new_frozen),
+        old_v: u128be_to_h256(old_available, old_frozen),
+        new_v: u128be_to_h256(new_available, new_frozen),
     }
 }
 
@@ -244,7 +244,7 @@ fn new_orderbook_merkle_leaf(
     hasher.update(&symbol_bits[..]);
     MerkleLeaf {
         key: hasher.finalize().into(),
-        old_v: beu128_to_h256(old_ask_size, old_bid_size),
-        new_v: beu128_to_h256(new_ask_size, new_bid_size),
+        old_v: u128be_to_h256(old_ask_size, old_bid_size),
+        new_v: u128be_to_h256(new_ask_size, new_bid_size),
     }
 }
