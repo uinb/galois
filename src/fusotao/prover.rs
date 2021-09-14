@@ -140,7 +140,8 @@ impl Prover {
                 leaves: leaves,
                 proof_of_exists: pr0,
                 proof_of_cmd: pr1,
-                root: data.merkle_tree.root().clone(),
+                // TODO redundant clone because &H256 doesn't implement Into<[u8; 32]>
+                root: data.merkle_tree.root().clone().into(),
             })
             .unwrap();
     }
@@ -178,32 +179,37 @@ impl Prover {
                 leaves: leaves,
                 proof_of_exists: pr0,
                 proof_of_cmd: pr1,
-                root: merkle_tree.root().clone(),
+                root: merkle_tree.root().clone().into(),
             })
             .unwrap();
     }
 }
 
 fn gen_proofs(merkle_tree: &mut GlobalStates, leaves: &Vec<MerkleLeaf>) -> (Vec<u8>, Vec<u8>) {
-    let keys = leaves.iter().map(|leaf| leaf.key).collect::<Vec<_>>();
+    let keys = leaves
+        .iter()
+        .map(|leaf| leaf.key.into())
+        .collect::<Vec<_>>();
     let poe = merkle_tree.merkle_proof(keys.clone()).unwrap();
     let pr0 = poe
         .compile(
             leaves
                 .iter()
-                .map(|leaf| (leaf.key, leaf.old_v))
+                .map(|leaf| (leaf.key.into(), leaf.old_v.into()))
                 .collect::<Vec<_>>(),
         )
         .unwrap();
     leaves.iter().for_each(|leaf| {
-        merkle_tree.update(leaf.key, leaf.new_v).unwrap();
+        merkle_tree
+            .update(leaf.key.into(), leaf.new_v.into())
+            .unwrap();
     });
     let poc = merkle_tree.merkle_proof(keys.clone()).unwrap();
     let pr1 = poc
         .compile(
             leaves
                 .iter()
-                .map(|leaf| (leaf.key, leaf.new_v))
+                .map(|leaf| (leaf.key.into(), leaf.new_v.into()))
                 .collect::<Vec<_>>(),
         )
         .unwrap();

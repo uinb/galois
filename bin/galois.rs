@@ -31,7 +31,6 @@ fn main() {
 
 fn print_banner() {
     const BANNER: &str = r#"
-
                  **       **
    *******     ******     **               **
   ***               **    **     *****     **    ******

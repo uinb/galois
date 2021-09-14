@@ -72,6 +72,14 @@ impl B256 {
     }
 }
 
+impl std::ops::Deref for B256 {
+    type Target = [u8; 32];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 impl std::str::FromStr for B256 {
     type Err = anyhow::Error;
 
