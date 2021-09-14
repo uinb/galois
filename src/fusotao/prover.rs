@@ -227,7 +227,7 @@ fn new_account_merkle_leaf(
     let mut hasher = Sha256::new();
     hasher.update(&[ACCOUNT_KEY][..]);
     hasher.update(<B256 as AsRef<[u8]>>::as_ref(user_id));
-    hasher.update(&currency.to_be_bytes()[..]);
+    hasher.update(&currency.encode()[..]);
     MerkleLeaf {
         key: hasher.finalize().into(),
         old_v: u128be_to_h256(old_available, old_frozen),
@@ -243,9 +243,9 @@ fn new_orderbook_merkle_leaf(
     new_bid_size: u128,
 ) -> MerkleLeaf {
     let mut hasher = Sha256::new();
-    let mut symbol_bits: [u8; 8] = Default::default();
-    symbol_bits[..4].copy_from_slice(&symbol.0.to_be_bytes()[..]);
-    symbol_bits[4..].copy_from_slice(&symbol.1.to_be_bytes()[..]);
+    let mut symbol_bits = vec![0u8; 8];
+    symbol_bits[..4].copy_from_slice(&symbol.0.encode()[..]);
+    symbol_bits[4..].copy_from_slice(&symbol.1.encode()[..]);
     hasher.update(&[ORDERBOOK_KEY][..]);
     hasher.update(&symbol_bits[..]);
     MerkleLeaf {

@@ -56,7 +56,6 @@ pub struct Proof {
 
 impl WrapperTypeEncode for UserId {}
 
-// TODO get last seq id after launched
 /// AccountId of chain = MultiAddress<sp_runtime::AccountId32, ()>::Id = GenericAddress::Id
 /// 1. from_ss58check() or from_ss58check_with_version()
 /// 2. new or from public
@@ -78,7 +77,7 @@ pub fn init(rx: Receiver<Proof>) -> anyhow::Result<()> {
     let api = Api::new(client)
         .map(|api| api.set_signer(signer))
         .map_err(|_| anyhow!("Fusotao node not available"))?;
-    let path: PathBuf = [&C.sequence.coredump_dir, "onchain"].iter().collect();
+    let path: PathBuf = [&C.sequence.coredump_dir, "onchain.seq"].iter().collect();
     let finalized_file = OpenOptions::new()
         .read(true)
         .write(true)
