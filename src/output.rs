@@ -84,6 +84,7 @@ pub fn init(sender: Sender<Vec<Output>>, recv: Receiver<Vec<Output>>) {
         thread::sleep(Duration::from_millis(1000));
         sender.send(vec![]).unwrap();
     });
+    log::info!("Output initialized");
 }
 
 fn get_max_record(symbol: Symbol) -> u64 {

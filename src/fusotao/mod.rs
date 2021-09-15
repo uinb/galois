@@ -18,6 +18,7 @@ pub use prover::Prover;
 
 use crate::{config::C, core::*, event::*};
 use anyhow::anyhow;
+use fuso_runtime::{Call, Signature, SignedExtra};
 use memmap::MmapMut;
 use parity_scale_codec::{Encode, WrapperTypeEncode};
 use rust_decimal::{prelude::*, Decimal};
@@ -27,10 +28,24 @@ use sp_core::{
     crypto::{Pair, Ss58Codec},
     sr25519::Pair as Sr25519,
 };
+use sp_runtime::{
+    generic::{Block, CheckedExtrinsic, Header, UncheckedExtrinsic},
+    traits::BlakeTwo256,
+    OpaqueExtrinsic,
+};
 use std::{convert::TryInto, fs::OpenOptions, path::PathBuf, sync::mpsc::Receiver};
-use sub_api::{compose_extrinsic, rpc::WsRpcClient, Api, UncheckedExtrinsicV4, XtStatus};
+use sub_api::{
+    compose_extrinsic, rpc::WsRpcClient, Api, FromHexString, Hash, SignedBlock,
+    UncheckedExtrinsicV4, XtStatus,
+};
 
 pub type GlobalStates = SparseMerkleTree<Sha256Hasher, H256, DefaultStore<H256>>;
+pub type FusoAccountId = sp_core::sr25519::Public;
+pub type FusoAddress = sp_runtime::MultiAddress<FusoAccountId, ()>;
+// pub type FusoCheckedExtrinsic = CheckedExtrinsic<FusoAccountId, Call, SignedExtra>;
+// pub type FusoUncheckedExtrinsic = UncheckedExtrinsic<FusoAddress, Call, Signature, SignedExtra>;
+pub type FusoHeader = Header<u32, BlakeTwo256>;
+pub type FusoBlock = Block<FusoHeader, OpaqueExtrinsic>;
 
 const ONE_ONCHAIN: u128 = 1_000_000_000_000_000_000;
 
@@ -77,31 +92,79 @@ pub fn init(rx: Receiver<Proof>) -> anyhow::Result<()> {
     let api = Api::new(client)
         .map(|api| api.set_signer(signer))
         .map_err(|_| anyhow!("Fusotao node not available"))?;
-    let path: PathBuf = [&C.sequence.coredump_dir, "onchain.seq"].iter().collect();
+    let path: PathBuf = [&C.sequence.coredump_dir, "fusotao.seq"].iter().collect();
     let finalized_file = OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .open(&path)?;
     finalized_file.set_len(8)?;
-    let mut mmap = unsafe { MmapMut::map_mut(&finalized_file)? };
-    let mut cur = u64::from_be_bytes(mmap.as_ref().try_into()?);
+    let mut seq = unsafe { MmapMut::map_mut(&finalized_file)? };
+    let mut cur = u64::from_be_bytes(seq.as_ref().try_into()?);
+    let wapi = api.clone();
     std::thread::spawn(move || loop {
         let proof = rx.recv().unwrap();
         if cur >= proof.event_id {
             continue;
         }
         cur = proof.event_id;
-        let xt: UncheckedExtrinsicV4<_> =
-            compose_extrinsic!(api.clone(), "Receipts", "verify", proof);
-        // FIXME handle network error?
-        api.send_extrinsic(xt.hex_encode(), XtStatus::InBlock)
-            .unwrap();
+        // let xt: UncheckedExtrinsicV4<_> =
+        //     compose_extrinsic!(wapi.clone(), "Receipts", "verify", proof);
+        // // FIXME handle network error?
+        // wapi.send_extrinsic(xt.hex_encode(), XtStatus::InBlock)
+        //     .unwrap();
         // FIXME only update when finalized
-        mmap.copy_from_slice(&cur.to_be_bytes()[..]);
+        seq.copy_from_slice(&cur.to_be_bytes()[..]);
     });
-    // TODO read last finalized block
-    std::thread::spawn(move || {});
+    let path: PathBuf = [&C.sequence.coredump_dir, "fusotao.blk"].iter().collect();
+    let finalized_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(&path)?;
+    finalized_file.set_len(32)?;
+    let mut blk = unsafe { MmapMut::map_mut(&finalized_file)? };
+    if blk.iter().fold(0u8, |x, a| x & a) == 0 {
+        let from = Hash::from_hex(C.fusotao.as_ref().unwrap().claim_block.clone()).unwrap();
+        blk.copy_from_slice(&from[..]);
+        blk.flush().unwrap();
+    }
+    use std::convert::TryFrom;
+    std::thread::spawn(move || loop {
+        // TODO retry
+        let current = Hash::from_slice(blk.as_ref());
+        // ApiResponse<Option<Hash>>
+        let mut finalized = api.get_finalized_head().unwrap().unwrap();
+        let recent_hash = finalized;
+        while finalized != current {
+            let latest: SignedBlock<FusoBlock> =
+                api.get_signed_block(Some(finalized)).unwrap().unwrap();
+            let mut e = api
+                .get_opaque_storage_by_key_hash(
+                    sub_api::utils::storage_key("System", "Events"),
+                    Some(finalized),
+                )
+                // .get_storage_value("System", "Events", Some(finalized))
+                .unwrap()
+                .unwrap();
+            log::info!("raw: >>>> {:?}", e);
+            let decoder =
+                sub_api::rpc::ws_client::EventsDecoder::try_from(api.metadata.clone()).unwrap();
+            let raw_events = decoder
+                // .decode_events(&mut Vec::from_hex(e).unwrap().as_slice())
+                .decode_events(&mut e.as_slice())
+                .unwrap();
+            for (phase, event) in raw_events.into_iter() {
+                log::info!("Decoded Event: {:?}, {:?}", phase, event);
+            }
+            finalized = latest.block.header.parent_hash;
+        }
+        // TODO insert into sequence
+        blk.copy_from_slice(&recent_hash[..]);
+        blk.flush().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+    });
+    log::info!("fusotao prover initialized");
     Ok(())
 }
 

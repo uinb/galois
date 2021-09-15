@@ -23,8 +23,8 @@ const ORDERBOOK_KEY: u8 = 0x01;
 pub struct Prover(Sender<Proof>);
 
 impl Prover {
-    pub fn new(tx: Sender<Proof>) -> anyhow::Result<Self> {
-        Ok(Self(tx))
+    pub fn new(tx: Sender<Proof>) -> Self {
+        Self(tx)
     }
 
     pub fn prove_trade_cmd(

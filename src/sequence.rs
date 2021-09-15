@@ -304,6 +304,7 @@ pub fn init(sender: Sender<Fusion>, id: u64, startup: Arc<AtomicBool>) {
     let mut id = id;
     let mut counter = 0_usize;
     let event_sender = sender.clone();
+    log::info!("sequencer initialized");
     std::thread::spawn(move || loop {
         let seq = fetch_sequence_from(id);
         if seq.is_empty() {

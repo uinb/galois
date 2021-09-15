@@ -17,7 +17,11 @@ use anyhow::anyhow;
 use cfg_if::cfg_if;
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc::{Receiver, Sender},
+    Arc,
+};
 use thiserror::Error;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -119,23 +123,25 @@ type EventExecutionResult = Result<(), EventsError>;
 type OutputChannel = Sender<Vec<output::Output>>;
 type DriverChannel = Receiver<sequence::Fusion>;
 
-pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data) {
-    std::thread::spawn(move || -> EventExecutionResult {
+pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data, ready: Arc<AtomicBool>) {
+    std::thread::spawn(move || {
         cfg_if! {
             if #[cfg(feature = "fusotao")] {
                 use crate::fusotao;
                 let (tx, rx) = std::sync::mpsc::channel();
-                fusotao::init(rx).map_err(|_| EventsError::Interrupted)?;
-                let prover = fusotao::Prover::new(tx).map_err(|_| EventsError::Interrupted)?;
+                fusotao::init(rx).unwrap();
+                let prover = fusotao::Prover::new(tx);
             }
         }
+        ready.store(true, Ordering::Relaxed);
+        log::info!("event handler initialized");
         loop {
             let fusion = recv.recv().unwrap();
             match fusion {
                 sequence::Fusion::R(watch) => {
                     let (s, r) = (watch.session, watch.req_id);
                     if let Ok(inspection) = watch.try_into() {
-                        do_inspect(inspection, &data)?;
+                        do_inspect(inspection, &data).unwrap();
                     } else {
                         server::publish(server::Message::with_payload(s, r, vec![]));
                     }
@@ -154,8 +160,7 @@ pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data) {
                             match result {
                                 Err(EventsError::EventRejected(id, msg)) => {
                                     log::info!("Error occur in sequence {}: {:?}", id, msg);
-                                    sequence::update_sequence_status(id, sequence::ERROR)
-                                        .map_err(|_| EventsError::Interrupted)?;
+                                    sequence::update_sequence_status(id, sequence::ERROR).unwrap();
                                 }
                                 Err(EventsError::Interrupted) => {
                                     panic!("sequence thread panic");
@@ -165,8 +170,7 @@ pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data) {
                         }
                         Err(e) => {
                             log::info!("Error occur in sequence {}: {:?}", id, e);
-                            sequence::update_sequence_status(id, sequence::ERROR)
-                                .map_err(|_| EventsError::Interrupted)?;
+                            sequence::update_sequence_status(id, sequence::ERROR).unwrap();
                         }
                     }
                 }
