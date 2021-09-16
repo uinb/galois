@@ -16,11 +16,11 @@ mod prover;
 
 pub use prover::Prover;
 
-use crate::{config::C, core::*, event::*};
+use crate::{config::C, core::*, event::*, sequence};
 use anyhow::anyhow;
 use fuso_runtime::{Call, Signature, SignedExtra};
 use memmap::MmapMut;
-use parity_scale_codec::{Encode, WrapperTypeEncode};
+use parity_scale_codec::{Decode, Encode, WrapperTypeEncode};
 use rust_decimal::{prelude::*, Decimal};
 use serde::{Deserialize, Serialize};
 use smt::{default_store::DefaultStore, sha256::Sha256Hasher, SparseMerkleTree, H256};
@@ -33,10 +33,19 @@ use sp_runtime::{
     traits::BlakeTwo256,
     OpaqueExtrinsic,
 };
-use std::{convert::TryInto, fs::OpenOptions, path::PathBuf, sync::mpsc::Receiver};
+use std::{
+    convert::{TryFrom, TryInto},
+    fs::OpenOptions,
+    path::PathBuf,
+    sync::mpsc::Receiver,
+};
 use sub_api::{
-    compose_extrinsic, rpc::WsRpcClient, Api, FromHexString, Hash, SignedBlock,
-    UncheckedExtrinsicV4, XtStatus,
+    compose_extrinsic,
+    rpc::{
+        ws_client::{EventsDecoder, RuntimeEvent},
+        WsRpcClient,
+    },
+    Api, FromHexString, Hash, SignedBlock, UncheckedExtrinsicV4, XtStatus,
 };
 
 pub type GlobalStates = SparseMerkleTree<Sha256Hasher, H256, DefaultStore<H256>>;
@@ -69,6 +78,27 @@ pub struct Proof {
     pub root: [u8; 32],
 }
 
+#[derive(Encode, Decode, Clone, Debug)]
+pub struct DominatorClaimedEvent {
+    dominator: FusoAccountId,
+    pledge: u128,
+}
+
+#[derive(Encode, Decode, Clone, Debug)]
+pub struct CoinHostedEvent {
+    fund_owner: FusoAccountId,
+    dominator: FusoAccountId,
+    amount: u128,
+}
+
+#[derive(Encode, Decode, Clone, Debug)]
+pub struct TokenHostedEvent {
+    fund_owner: FusoAccountId,
+    dominator: FusoAccountId,
+    token_id: u32,
+    amount: u128,
+}
+
 impl WrapperTypeEncode for UserId {}
 
 /// AccountId of chain = MultiAddress<sp_runtime::AccountId32, ()>::Id = GenericAddress::Id
@@ -89,6 +119,7 @@ pub fn init(rx: Receiver<Proof>) -> anyhow::Result<()> {
             .ok_or(anyhow!("Invalid fusotao config"))?
             .node_url,
     );
+    let dominator = signer.public();
     let api = Api::new(client)
         .map(|api| api.set_signer(signer))
         .map_err(|_| anyhow!("Fusotao node not available"))?;
@@ -124,45 +155,79 @@ pub fn init(rx: Receiver<Proof>) -> anyhow::Result<()> {
         .open(&path)?;
     finalized_file.set_len(32)?;
     let mut blk = unsafe { MmapMut::map_mut(&finalized_file)? };
-    if blk.iter().fold(0u8, |x, a| x & a) == 0 {
+    if blk.iter().fold(0u8, |x, a| x | a) == 0 {
         let from = Hash::from_hex(C.fusotao.as_ref().unwrap().claim_block.clone()).unwrap();
         blk.copy_from_slice(&from[..]);
         blk.flush().unwrap();
     }
-    use std::convert::TryFrom;
+    let decoder = EventsDecoder::try_from(api.metadata.clone()).unwrap();
     std::thread::spawn(move || loop {
         // TODO retry
         let current = Hash::from_slice(blk.as_ref());
         // ApiResponse<Option<Hash>>
         let mut finalized = api.get_finalized_head().unwrap().unwrap();
         let recent_hash = finalized;
+        let mut cmds = vec![];
         while finalized != current {
             let latest: SignedBlock<FusoBlock> =
                 api.get_signed_block(Some(finalized)).unwrap().unwrap();
-            let mut e = api
+            let e = api
                 .get_opaque_storage_by_key_hash(
                     sub_api::utils::storage_key("System", "Events"),
                     Some(finalized),
                 )
-                // .get_storage_value("System", "Events", Some(finalized))
                 .unwrap()
                 .unwrap();
-            log::info!("raw: >>>> {:?}", e);
-            let decoder =
-                sub_api::rpc::ws_client::EventsDecoder::try_from(api.metadata.clone()).unwrap();
-            let raw_events = decoder
-                // .decode_events(&mut Vec::from_hex(e).unwrap().as_slice())
-                .decode_events(&mut e.as_slice())
-                .unwrap();
-            for (phase, event) in raw_events.into_iter() {
-                log::info!("Decoded Event: {:?}, {:?}", phase, event);
+            let raw_events = decoder.decode_events(&mut e.as_slice()).unwrap();
+            for (_, event) in raw_events.into_iter() {
+                match event {
+                    RuntimeEvent::Raw(raw) if raw.module == "Receipts" => {
+                        match raw.variant.as_ref() {
+                            "CoinHosted" => {
+                                let decoded = CoinHostedEvent::decode(&mut &raw.data[..]).unwrap();
+                                if decoded.dominator == dominator {
+                                    let mut cmd = sequence::Command::default();
+                                    cmd.cmd = sequence::TRANSFER_IN;
+                                    cmd.currency = Some(0);
+                                    cmd.amount = Some(to_decimal_represent(decoded.amount));
+                                    cmd.user_id = Some(format!("{}", decoded.fund_owner));
+                                    cmd.nonce = Some(0);
+                                    cmd.signature = Some(hex::encode(finalized));
+                                    cmds.push(cmd);
+                                }
+                            }
+                            "TokenHosted" => {
+                                let decoded = TokenHostedEvent::decode(&mut &raw.data[..]).unwrap();
+                                if decoded.dominator == dominator {
+                                    let mut cmd = sequence::Command::default();
+                                    cmd.cmd = sequence::TRANSFER_IN;
+                                    cmd.currency = Some(decoded.token_id);
+                                    cmd.amount = Some(to_decimal_represent(decoded.amount));
+                                    cmd.user_id = Some(format!("{}", decoded.fund_owner));
+                                    cmd.nonce = Some(0);
+                                    cmd.signature = Some(hex::encode(finalized));
+                                    cmds.push(cmd);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ => {}
+                }
             }
             finalized = latest.block.header.parent_hash;
         }
-        // TODO insert into sequence
+        cmds.reverse();
+        match sequence::insert_sequences(cmds) {
+            Ok(()) => {}
+            Err(_) => {
+                log::warn!("write sequences from fusotao failed, retry");
+                continue;
+            }
+        }
         blk.copy_from_slice(&recent_hash[..]);
         blk.flush().unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(1000));
+        std::thread::sleep(std::time::Duration::from_millis(3000));
     });
     log::info!("fusotao prover initialized");
     Ok(())
@@ -205,6 +270,16 @@ impl Into<Vec<u8>> for AssetsCmd {
 
 fn d18() -> Amount {
     ONE_ONCHAIN.into()
+}
+
+// FIXME
+fn to_decimal_represent(v: u128) -> Decimal {
+    if v.trailing_zeros() >= 18 {
+        Decimal::new((v / ONE_ONCHAIN).try_into().unwrap(), 0)
+    } else {
+        let d: Amount = v.try_into().unwrap();
+        d / d18()
+    }
 }
 
 fn to_merkle_represent(v: Decimal) -> u128 {

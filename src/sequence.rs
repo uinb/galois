@@ -410,6 +410,24 @@ pub fn update_sequence_status(id: u64, status: u32) -> anyhow::Result<()> {
         .map_err(|_| anyhow!("retrieve mysql connection failed while update_sequence_status"))
 }
 
+#[cfg(feature = "fusotao")]
+pub fn insert_sequences(seq: Vec<Command>) -> anyhow::Result<()> {
+    if seq.is_empty() {
+        return Ok(());
+    }
+    let sql = r#"INSERT INTO t_sequence(f_cmd) VALUES (:cmd)"#;
+    let mut conn = DB.get_conn()?;
+    conn.exec_batch(
+        sql,
+        seq.iter().map(|s| {
+            params! {
+                "cmd" => serde_json::to_string(s).unwrap(),
+            }
+        }),
+    )
+    .map_err(|_| anyhow!("Error: writing sequence to mysql failed, {:?}"))
+}
+
 pub fn confirm(from: u64, exclude: u64) -> anyhow::Result<()> {
     let sql = "UPDATE t_sequence SET f_status=? WHERE f_status=? AND f_id>=? AND f_id<?";
     let mut conn = DB.get_conn()?;

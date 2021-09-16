@@ -110,8 +110,8 @@ features = ["serde-rs", "sha256"]
 optional = true
 
 [dependencies.sub-api]
-path = "../substrate-api-client"
-# git = "https://github.com/uinb/substrate-api-client"
+# path = "../substrate-api-client"
+git = "https://github.com/uinb/substrate-api-client"
 package = "substrate-api-client"
 optional = true
 
