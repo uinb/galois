@@ -26,12 +26,12 @@ use serde::{Deserialize, Serialize};
 use smt::{default_store::DefaultStore, sha256::Sha256Hasher, SparseMerkleTree, H256};
 use sp_core::{
     crypto::{Pair, Ss58Codec},
-    sr25519::Pair as Sr25519,
+    sr25519::{Pair as Sr25519, Public},
 };
 use sp_runtime::{
     generic::{Block, CheckedExtrinsic, Header, UncheckedExtrinsic},
     traits::BlakeTwo256,
-    OpaqueExtrinsic,
+    MultiAddress, OpaqueExtrinsic,
 };
 use std::{
     convert::{TryFrom, TryInto},
@@ -40,7 +40,6 @@ use std::{
     sync::mpsc::Receiver,
 };
 use sub_api::{
-    compose_extrinsic,
     rpc::{
         ws_client::{EventsDecoder, RuntimeEvent},
         WsRpcClient,
@@ -49,8 +48,8 @@ use sub_api::{
 };
 
 pub type GlobalStates = SparseMerkleTree<Sha256Hasher, H256, DefaultStore<H256>>;
-pub type FusoAccountId = sp_core::sr25519::Public;
-pub type FusoAddress = sp_runtime::MultiAddress<FusoAccountId, ()>;
+pub type FusoAccountId = Public;
+pub type FusoAddress = MultiAddress<FusoAccountId, ()>;
 // pub type FusoCheckedExtrinsic = CheckedExtrinsic<FusoAccountId, Call, SignedExtra>;
 // pub type FusoUncheckedExtrinsic = UncheckedExtrinsic<FusoAddress, Call, Signature, SignedExtra>;
 pub type FusoHeader = Header<u32, BlakeTwo256>;
@@ -162,75 +161,84 @@ pub fn init(rx: Receiver<Proof>) -> anyhow::Result<()> {
     }
     let decoder = EventsDecoder::try_from(api.metadata.clone()).unwrap();
     std::thread::spawn(move || loop {
-        // TODO retry
         let current = Hash::from_slice(blk.as_ref());
-        // ApiResponse<Option<Hash>>
-        let mut finalized = api.get_finalized_head().unwrap().unwrap();
-        let recent_hash = finalized;
-        let mut cmds = vec![];
-        while finalized != current {
-            let latest: SignedBlock<FusoBlock> =
-                api.get_signed_block(Some(finalized)).unwrap().unwrap();
-            let e = api
-                .get_opaque_storage_by_key_hash(
-                    sub_api::utils::storage_key("System", "Events"),
-                    Some(finalized),
-                )
-                .unwrap()
-                .unwrap();
-            let raw_events = decoder.decode_events(&mut e.as_slice()).unwrap();
-            for (_, event) in raw_events.into_iter() {
-                match event {
-                    RuntimeEvent::Raw(raw) if raw.module == "Receipts" => {
-                        match raw.variant.as_ref() {
-                            "CoinHosted" => {
-                                let decoded = CoinHostedEvent::decode(&mut &raw.data[..]).unwrap();
-                                if decoded.dominator == dominator {
-                                    let mut cmd = sequence::Command::default();
-                                    cmd.cmd = sequence::TRANSFER_IN;
-                                    cmd.currency = Some(0);
-                                    cmd.amount = Some(to_decimal_represent(decoded.amount));
-                                    cmd.user_id = Some(format!("{}", decoded.fund_owner));
-                                    cmd.nonce = Some(0);
-                                    cmd.signature = Some(hex::encode(finalized));
-                                    cmds.push(cmd);
-                                }
-                            }
-                            "TokenHosted" => {
-                                let decoded = TokenHostedEvent::decode(&mut &raw.data[..]).unwrap();
-                                if decoded.dominator == dominator {
-                                    let mut cmd = sequence::Command::default();
-                                    cmd.cmd = sequence::TRANSFER_IN;
-                                    cmd.currency = Some(decoded.token_id);
-                                    cmd.amount = Some(to_decimal_represent(decoded.amount));
-                                    cmd.user_id = Some(format!("{}", decoded.fund_owner));
-                                    cmd.nonce = Some(0);
-                                    cmd.signature = Some(hex::encode(finalized));
-                                    cmds.push(cmd);
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                    _ => {}
+        if let Ok((cmds, hash)) = sync_finalized_blocks(current, &api, &dominator, &decoder) {
+            match sequence::insert_sequences(cmds) {
+                Ok(()) => {
+                    blk.copy_from_slice(&hash[..]);
+                    // FIXME commit manually after memmap flush ok
+                    blk.flush().unwrap();
+                }
+                Err(_) => {
+                    log::warn!("write sequences from fusotao failed, retry");
                 }
             }
-            finalized = latest.block.header.parent_hash;
         }
-        cmds.reverse();
-        match sequence::insert_sequences(cmds) {
-            Ok(()) => {}
-            Err(_) => {
-                log::warn!("write sequences from fusotao failed, retry");
-                continue;
-            }
-        }
-        blk.copy_from_slice(&recent_hash[..]);
-        blk.flush().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(3000));
     });
     log::info!("fusotao prover initialized");
     Ok(())
+}
+
+fn sync_finalized_blocks(
+    current: Hash,
+    api: &Api<Sr25519, WsRpcClient>,
+    signer: &Public,
+    decoder: &EventsDecoder,
+) -> anyhow::Result<(Vec<sequence::Command>, Hash)> {
+    let mut finalized = api.get_finalized_head()?.unwrap();
+    let recent = finalized;
+    let mut cmds = vec![];
+    while finalized != current {
+        let latest: SignedBlock<FusoBlock> =
+            api.get_signed_block(Some(finalized)).unwrap().unwrap();
+        let e = api
+            .get_opaque_storage_by_key_hash(
+                sub_api::utils::storage_key("System", "Events"),
+                Some(finalized),
+            )?
+            .unwrap();
+        let raw_events = decoder
+            .decode_events(&mut e.as_slice())
+            .map_err(|_| anyhow::anyhow!("decode events error"))?;
+        for (_, event) in raw_events.into_iter() {
+            match event {
+                RuntimeEvent::Raw(raw) if raw.module == "Receipts" => match raw.variant.as_ref() {
+                    "CoinHosted" => {
+                        let decoded = CoinHostedEvent::decode(&mut &raw.data[..]).unwrap();
+                        if &decoded.dominator == signer {
+                            let mut cmd = sequence::Command::default();
+                            cmd.cmd = sequence::TRANSFER_IN;
+                            cmd.currency = Some(0);
+                            cmd.amount = Some(to_decimal_represent(decoded.amount));
+                            cmd.user_id = Some(format!("{}", decoded.fund_owner));
+                            cmd.nonce = Some(0);
+                            cmd.signature = Some(hex::encode(finalized));
+                            cmds.push(cmd);
+                        }
+                    }
+                    "TokenHosted" => {
+                        let decoded = TokenHostedEvent::decode(&mut &raw.data[..]).unwrap();
+                        if &decoded.dominator == signer {
+                            let mut cmd = sequence::Command::default();
+                            cmd.cmd = sequence::TRANSFER_IN;
+                            cmd.currency = Some(decoded.token_id);
+                            cmd.amount = Some(to_decimal_represent(decoded.amount));
+                            cmd.user_id = Some(format!("{}", decoded.fund_owner));
+                            cmd.nonce = Some(0);
+                            cmd.signature = Some(hex::encode(finalized));
+                            cmds.push(cmd);
+                        }
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+        finalized = latest.block.header.parent_hash;
+    }
+    cmds.reverse();
+    Ok((cmds, recent))
 }
 
 impl Into<Vec<u8>> for LimitCmd {

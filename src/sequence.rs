@@ -255,25 +255,45 @@ impl Watch {
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone, Default)]
 pub struct Command {
     pub cmd: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub order_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub user_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub base: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub quote: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub currency: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub vol: Option<Decimal>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub amount: Option<Amount>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub price: Option<Price>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub nonce: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub base_scale: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub quote_scale: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub taker_fee: Option<Fee>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub maker_fee: Option<Fee>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub min_amount: Option<Amount>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub min_vol: Option<Amount>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub open: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub enable_market_order: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub from: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub exclude: Option<u64>,
 }
 
