@@ -32,7 +32,7 @@ impl Prover {
         data: &mut Data,
         nonce: u32,
         signature: Vec<u8>,
-        encoded_cmd: Vec<u8>,
+        encoded_cmd: FusoCommand,
         ask_size_before: Amount,
         bid_size_before: Amount,
         taker_base_before: &Balance,
@@ -188,20 +188,20 @@ impl Prover {
 fn gen_proofs(merkle_tree: &mut GlobalStates, leaves: &Vec<MerkleLeaf>) -> (Vec<u8>, Vec<u8>) {
     let keys = leaves
         .iter()
-        .map(|leaf| leaf.key.into())
+        .map(|leaf| Sha256::digest(&leaf.key).into())
         .collect::<Vec<_>>();
     let poe = merkle_tree.merkle_proof(keys.clone()).unwrap();
     let pr0 = poe
         .compile(
             leaves
                 .iter()
-                .map(|leaf| (leaf.key.into(), leaf.old_v.into()))
+                .map(|leaf| (Sha256::digest(&leaf.key).into(), leaf.old_v.into()))
                 .collect::<Vec<_>>(),
         )
         .unwrap();
     leaves.iter().for_each(|leaf| {
         merkle_tree
-            .update(leaf.key.into(), leaf.new_v.into())
+            .update(Sha256::digest(&leaf.key).into(), leaf.new_v.into())
             .unwrap();
     });
     let poc = merkle_tree.merkle_proof(keys.clone()).unwrap();
@@ -209,7 +209,7 @@ fn gen_proofs(merkle_tree: &mut GlobalStates, leaves: &Vec<MerkleLeaf>) -> (Vec<
         .compile(
             leaves
                 .iter()
-                .map(|leaf| (leaf.key.into(), leaf.new_v.into()))
+                .map(|leaf| (Sha256::digest(&leaf.key).into(), leaf.new_v.into()))
                 .collect::<Vec<_>>(),
         )
         .unwrap();
@@ -224,12 +224,11 @@ fn new_account_merkle_leaf(
     new_available: u128,
     new_frozen: u128,
 ) -> MerkleLeaf {
-    let mut hasher = Sha256::new();
-    hasher.update(&[ACCOUNT_KEY][..]);
-    hasher.update(<B256 as AsRef<[u8]>>::as_ref(user_id));
-    hasher.update(&currency.encode()[..]);
+    let mut key = vec![ACCOUNT_KEY; 37];
+    key[1..33].copy_from_slice(<B256 as AsRef<[u8]>>::as_ref(user_id));
+    key[33..].copy_from_slice(&currency.to_be_bytes()[..]);
     MerkleLeaf {
-        key: hasher.finalize().into(),
+        key: key,
         old_v: u128be_to_h256(old_available, old_frozen),
         new_v: u128be_to_h256(new_available, new_frozen),
     }
@@ -242,14 +241,11 @@ fn new_orderbook_merkle_leaf(
     new_ask_size: u128,
     new_bid_size: u128,
 ) -> MerkleLeaf {
-    let mut hasher = Sha256::new();
-    let mut symbol_bits = vec![0u8; 8];
-    symbol_bits[..4].copy_from_slice(&symbol.0.encode()[..]);
-    symbol_bits[4..].copy_from_slice(&symbol.1.encode()[..]);
-    hasher.update(&[ORDERBOOK_KEY][..]);
-    hasher.update(&symbol_bits[..]);
+    let mut key = vec![ORDERBOOK_KEY; 9];
+    key[1..5].copy_from_slice(&symbol.0.to_be_bytes()[..]);
+    key[5..].copy_from_slice(&symbol.1.to_be_bytes()[..]);
     MerkleLeaf {
-        key: hasher.finalize().into(),
+        key: key,
         old_v: u128be_to_h256(old_ask_size, old_bid_size),
         new_v: u128be_to_h256(new_ask_size, new_bid_size),
     }

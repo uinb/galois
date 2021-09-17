@@ -24,6 +24,9 @@ use std::{
     io::{BufReader, BufWriter},
 };
 
+pub use crate::matcher::{Role, State as OrderState};
+pub use crate::orderbook::AskOrBid;
+
 pub type Base = u32;
 pub type Quote = u32;
 pub type Price = Decimal;

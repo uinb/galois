@@ -94,6 +94,7 @@ impl TryInto<Event> for Sequence {
                 self.id,
                 AssetsCmd {
                     user_id: UserId::from_str(self.cmd.user_id.as_ref().ok_or(anyhow!(""))?)?,
+                    in_or_out: InOrOut::Out,
                     currency: self.cmd.currency.ok_or(anyhow!(""))?,
                     amount: self
                         .cmd
@@ -111,6 +112,7 @@ impl TryInto<Event> for Sequence {
                 self.id,
                 AssetsCmd {
                     user_id: UserId::from_str(self.cmd.user_id.as_ref().ok_or(anyhow!(""))?)?,
+                    in_or_out: InOrOut::In,
                     currency: self.cmd.currency.ok_or(anyhow!(""))?,
                     amount: self
                         .cmd
