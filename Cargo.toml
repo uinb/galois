@@ -14,7 +14,7 @@ path = "bin/galois.rs"
 
 [features]
 default = []
-fusotao = ["sub-api", "sp-core", "sp-runtime", "smt", "memmap", "parity-scale-codec", "fuso-runtime"]
+fusotao = ["sub-api", "sp-core", "sp-runtime", "smt", "memmap", "parity-scale-codec"]
 enc-conf = ["magic-crypt"]
 
 [dependencies.rust_decimal]
@@ -113,10 +113,6 @@ optional = true
 # path = "../substrate-api-client"
 git = "https://github.com/uinb/substrate-api-client"
 package = "substrate-api-client"
-optional = true
-
-[dependencies.fuso-runtime]
-git = "https://github.com/uinb/fusotao"
 optional = true
 
 [dependencies.parity-scale-codec]

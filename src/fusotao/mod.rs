@@ -18,7 +18,6 @@ pub use prover::Prover;
 
 use crate::{config::C, core::*, event::*, sequence};
 use anyhow::anyhow;
-use fuso_runtime::{Call, Signature, SignedExtra};
 use memmap::MmapMut;
 use parity_scale_codec::{Decode, Encode, WrapperTypeEncode};
 use rust_decimal::{prelude::*, Decimal};
