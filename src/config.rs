@@ -79,6 +79,7 @@ impl EncryptedConfig for MysqlConfig {
 pub struct FusotaoConfig {
     pub node_url: String,
     pub key_seed: String,
+    pub claim_block: String,
 }
 
 #[cfg(feature = "enc-conf")]

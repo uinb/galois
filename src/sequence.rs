@@ -255,25 +255,45 @@ impl Watch {
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone, Default)]
 pub struct Command {
     pub cmd: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub order_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub user_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub base: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub quote: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub currency: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub vol: Option<Decimal>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub amount: Option<Amount>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub price: Option<Price>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub nonce: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub base_scale: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub quote_scale: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub taker_fee: Option<Fee>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub maker_fee: Option<Fee>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub min_amount: Option<Amount>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub min_vol: Option<Amount>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub open: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub enable_market_order: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub from: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub exclude: Option<u64>,
 }
 
@@ -304,6 +324,7 @@ pub fn init(sender: Sender<Fusion>, id: u64, startup: Arc<AtomicBool>) {
     let mut id = id;
     let mut counter = 0_usize;
     let event_sender = sender.clone();
+    log::info!("sequencer initialized");
     std::thread::spawn(move || loop {
         let seq = fetch_sequence_from(id);
         if seq.is_empty() {
@@ -407,6 +428,24 @@ pub fn update_sequence_status(id: u64, status: u32) -> anyhow::Result<()> {
     let mut conn = DB.get_conn()?;
     conn.exec_drop(sql, (status, id))
         .map_err(|_| anyhow!("retrieve mysql connection failed while update_sequence_status"))
+}
+
+#[cfg(feature = "fusotao")]
+pub fn insert_sequences(seq: Vec<Command>) -> anyhow::Result<()> {
+    if seq.is_empty() {
+        return Ok(());
+    }
+    let sql = r#"INSERT INTO t_sequence(f_cmd) VALUES (:cmd)"#;
+    let mut conn = DB.get_conn()?;
+    conn.exec_batch(
+        sql,
+        seq.iter().map(|s| {
+            params! {
+                "cmd" => serde_json::to_string(s).unwrap(),
+            }
+        }),
+    )
+    .map_err(|_| anyhow!("Error: writing sequence to mysql failed, {:?}"))
 }
 
 pub fn confirm(from: u64, exclude: u64) -> anyhow::Result<()> {
