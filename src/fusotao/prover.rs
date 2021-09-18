@@ -51,6 +51,13 @@ impl Prover {
             to_merkle_represent(orderbook.ask_size),
             to_merkle_represent(orderbook.bid_size),
         );
+        log::debug!(
+            "generating merkle leaf: orderbook = ({:?}, {:?}) -> ({:?}, {:?})",
+            old_ask_size,
+            old_bid_size,
+            new_ask_size,
+            new_bid_size,
+        );
         leaves.push(new_orderbook_merkle_leaf(
             symbol,
             old_ask_size,
@@ -107,6 +114,17 @@ impl Prover {
             to_merkle_represent(taker_base_before.available),
             to_merkle_represent(taker_base_before.frozen),
         );
+        log::debug!(
+            "generating merkle leaf: taker base = [{:?}({:?}), {:?}({:?})] -> [{:?}({:?}), {:?}({:?})]",
+            old_taker_ba,
+            taker_base_before.available,
+            old_taker_bf,
+            taker_base_before.frozen,
+            new_taker_ba,
+            taker.base_available,
+            new_taker_bf,
+            taker.base_frozen,
+        );
         leaves.push(new_account_merkle_leaf(
             &user_id,
             symbol.0,
@@ -120,6 +138,17 @@ impl Prover {
             to_merkle_represent(taker.quote_frozen),
             to_merkle_represent(taker_quote_before.available),
             to_merkle_represent(taker_quote_before.frozen),
+        );
+        log::debug!(
+            "generating merkle leaf: taker quote = [{:?}({:?}), {:?}({:?})] -> [{:?}({:?}), {:?}({:?})]",
+            old_taker_qa,
+            taker_quote_before.available,
+            old_taker_qf,
+            taker_quote_before.frozen,
+            new_taker_qa,
+            taker.quote_available,
+            new_taker_qf,
+            taker.quote_frozen,
         );
         leaves.push(new_account_merkle_leaf(
             &user_id,
@@ -226,11 +255,11 @@ fn new_account_merkle_leaf(
 ) -> MerkleLeaf {
     let mut key = vec![ACCOUNT_KEY; 37];
     key[1..33].copy_from_slice(<B256 as AsRef<[u8]>>::as_ref(user_id));
-    key[33..].copy_from_slice(&currency.to_be_bytes()[..]);
+    key[33..].copy_from_slice(&currency.to_le_bytes()[..]);
     MerkleLeaf {
         key: key,
-        old_v: u128be_to_h256(old_available, old_frozen),
-        new_v: u128be_to_h256(new_available, new_frozen),
+        old_v: u128le_to_h256(old_available, old_frozen),
+        new_v: u128le_to_h256(new_available, new_frozen),
     }
 }
 
@@ -242,11 +271,11 @@ fn new_orderbook_merkle_leaf(
     new_bid_size: u128,
 ) -> MerkleLeaf {
     let mut key = vec![ORDERBOOK_KEY; 9];
-    key[1..5].copy_from_slice(&symbol.0.to_be_bytes()[..]);
-    key[5..].copy_from_slice(&symbol.1.to_be_bytes()[..]);
+    key[1..5].copy_from_slice(&symbol.0.to_le_bytes()[..]);
+    key[5..].copy_from_slice(&symbol.1.to_le_bytes()[..]);
     MerkleLeaf {
         key: key,
-        old_v: u128be_to_h256(old_ask_size, old_bid_size),
-        new_v: u128be_to_h256(new_ask_size, new_bid_size),
+        old_v: u128le_to_h256(old_ask_size, old_bid_size),
+        new_v: u128le_to_h256(new_ask_size, new_bid_size),
     }
 }

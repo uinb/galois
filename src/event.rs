@@ -232,11 +232,12 @@ fn handle_event(
             );
             cfg_if! {
                 if #[cfg(feature = "fusotao")] {
+                    let (maker_fee, taker_fee) = (orderbook.maker_fee, orderbook.taker_fee);
                     prover.prove_trade_cmd(
                         data,
                         cmd.nonce,
                         cmd.signature.clone(),
-                        cmd.into(),
+                        (cmd, maker_fee, taker_fee).into(),
                         size.0,
                         size.1,
                         &taker_base_before,

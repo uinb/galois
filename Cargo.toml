@@ -14,7 +14,7 @@ path = "bin/galois.rs"
 
 [features]
 default = []
-fusotao = ["sub-api", "sp-core", "sp-runtime", "smt", "memmap", "parity-scale-codec"]
+fusotao = ["sub-api", "sp-core", "sp-runtime", "smt", "memmap", "parity-scale-codec", "fixed"]
 enc-conf = ["magic-crypt"]
 
 [dependencies.rust_decimal]
@@ -118,6 +118,10 @@ optional = true
 [dependencies.parity-scale-codec]
 version = '2.0.0'
 features = ['derive']
+optional = true
+
+[dependencies.fixed]
+version = "1.10"
 optional = true
 
 [dependencies.sp-core]

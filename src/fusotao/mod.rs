@@ -18,8 +18,9 @@ pub use prover::Prover;
 
 use crate::{config::C, core::*, event::*, sequence};
 use anyhow::anyhow;
+use fixed::{types::extra::U64, FixedU128};
 use memmap::MmapMut;
-use parity_scale_codec::{Decode, Encode, WrapperTypeEncode};
+use parity_scale_codec::{Compact, Decode, Encode, WrapperTypeEncode};
 use rust_decimal::{prelude::*, Decimal};
 use serde::{Deserialize, Serialize};
 use smt::{default_store::DefaultStore, sha256::Sha256Hasher, SparseMerkleTree, H256};
@@ -126,7 +127,7 @@ pub fn init(rx: Receiver<Proof>) -> anyhow::Result<()> {
         .open(&path)?;
     finalized_file.set_len(8)?;
     let mut seq = unsafe { MmapMut::map_mut(&finalized_file)? };
-    let mut cur = u64::from_be_bytes(seq.as_ref().try_into()?);
+    let mut cur = u64::from_le_bytes(seq.as_ref().try_into()?);
     log::info!("initiate proving at sequence {:?}", cur);
     let wapi = api.clone();
     std::thread::spawn(move || loop {
@@ -142,7 +143,7 @@ pub fn init(rx: Receiver<Proof>) -> anyhow::Result<()> {
         wapi.send_extrinsic(xt.hex_encode(), XtStatus::InBlock)
             .unwrap();
         // FIXME only update when finalized
-        seq.copy_from_slice(&cur.to_be_bytes()[..]);
+        seq.copy_from_slice(&cur.to_le_bytes()[..]);
         log::info!("proofs of sequence {:?} has been uploaded", cur);
     });
     let path: PathBuf = [&C.sequence.coredump_dir, "fusotao.blk"].iter().collect();
@@ -248,31 +249,37 @@ fn sync_finalized_blocks(
     Ok((cmds, recent))
 }
 
+type CU128 = Compact<u128>;
+type CU32 = Compact<u32>;
+
 #[derive(Clone, Encode, Decode, Eq, PartialEq, Debug)]
 pub enum FusoCommand {
-    AskLimit(u128, u128, u32, u32, FusoAccountId),
-    BidLimit(u128, u128, u32, u32, FusoAccountId),
-    Cancel(u32, u32, FusoAccountId),
-    TransferOut(u32, u128, FusoAccountId),
-    TransferIn(u32, u128, FusoAccountId),
+    // price, amount, maker_fee, taker_fee, base, quote
+    AskLimit(CU128, CU128, CU128, CU128, CU32, CU32),
+    BidLimit(CU128, CU128, CU128, CU128, CU32, CU32),
+    Cancel(CU32, CU32),
+    TransferOut(CU32, CU128),
+    TransferIn(CU32, CU128),
 }
 
-impl Into<FusoCommand> for LimitCmd {
+impl Into<FusoCommand> for (LimitCmd, Fee, Fee) {
     fn into(self) -> FusoCommand {
-        match self.ask_or_bid {
+        match self.0.ask_or_bid {
             AskOrBid::Ask => FusoCommand::AskLimit(
-                to_merkle_represent(self.price),
-                to_merkle_represent(self.amount),
-                self.symbol.0,
-                self.symbol.1,
-                Public(self.user_id.0),
+                to_merkle_represent(self.0.price).into(),
+                to_merkle_represent(self.0.amount).into(),
+                to_merkle_represent(self.1).into(),
+                to_merkle_represent(self.2).into(),
+                self.0.symbol.0.into(),
+                self.0.symbol.1.into(),
             ),
             AskOrBid::Bid => FusoCommand::BidLimit(
-                to_merkle_represent(self.price),
-                to_merkle_represent(self.amount),
-                self.symbol.0,
-                self.symbol.1,
-                Public(self.user_id.0),
+                to_merkle_represent(self.0.price).into(),
+                to_merkle_represent(self.0.amount).into(),
+                to_merkle_represent(self.1).into(),
+                to_merkle_represent(self.2).into(),
+                self.0.symbol.0.into(),
+                self.0.symbol.1.into(),
             ),
         }
     }
@@ -280,7 +287,7 @@ impl Into<FusoCommand> for LimitCmd {
 
 impl Into<FusoCommand> for CancelCmd {
     fn into(self) -> FusoCommand {
-        FusoCommand::Cancel(self.symbol.0, self.symbol.1, Public(self.user_id.0))
+        FusoCommand::Cancel(self.symbol.0.into(), self.symbol.1.into())
     }
 }
 
@@ -288,14 +295,12 @@ impl Into<FusoCommand> for AssetsCmd {
     fn into(self) -> FusoCommand {
         match self.in_or_out {
             InOrOut::In => FusoCommand::TransferIn(
-                self.currency,
-                to_merkle_represent(self.amount),
-                Public(self.user_id.0),
+                self.currency.into(),
+                to_merkle_represent(self.amount).into(),
             ),
             InOrOut::Out => FusoCommand::TransferOut(
-                self.currency,
-                to_merkle_represent(self.amount),
-                Public(self.user_id.0),
+                self.currency.into(),
+                to_merkle_represent(self.amount).into(),
             ),
         }
     }
@@ -315,15 +320,33 @@ fn to_decimal_represent(v: u128) -> Decimal {
     }
 }
 
+// FIXME using FIXED
 fn to_merkle_represent(v: Decimal) -> u128 {
-    let mut fraction = v.fract();
-    fraction.set_scale(18).unwrap();
-    (fraction * d18()).to_u128().unwrap() + (v.floor().to_u128().unwrap() * ONE_ONCHAIN)
+    println!("{:?}", v.trunc());
+    let r = v.trunc().to_u128().unwrap();
+    let mut f = v.fract() * d18();
+    f.rescale(18);
+    r * ONE_ONCHAIN + f.to_u128().unwrap()
 }
 
-fn u128be_to_h256(a0: u128, a1: u128) -> [u8; 32] {
+fn u128le_to_h256(a0: u128, a1: u128) -> [u8; 32] {
     let mut v: [u8; 32] = Default::default();
-    v[..16].copy_from_slice(&a0.to_be_bytes());
-    v[16..].copy_from_slice(&a1.to_be_bytes());
+    v[..16].copy_from_slice(&a0.to_le_bytes());
+    v[16..].copy_from_slice(&a1.to_le_bytes());
     v
+}
+
+#[cfg(test)]
+pub mod test {
+    use super::*;
+
+    #[test]
+    pub fn test_decimal() {
+        let v = Decimal::new(10000, 2);
+        assert_eq!(to_merkle_represent(v), ONE_ONCHAIN * 100);
+        let v = Decimal::new(995, 1);
+        assert_eq!(to_merkle_represent(v), ONE_ONCHAIN * 995 / 10);
+        assert!(Decimal::MAX.to_u128().is_some());
+        assert!(Decimal::new(1, 10).to_u128().is_some());
+    }
 }

@@ -66,13 +66,6 @@ impl B256 {
             Err(anyhow::anyhow!("invalid hex string"))
         }
     }
-
-    // dummy
-    pub fn from_low_u64_be(x: u64) -> Self {
-        let mut s = [0u8; 32];
-        s[24..].copy_from_slice(&x.to_be_bytes());
-        Self::new(s)
-    }
 }
 
 impl std::ops::Deref for B256 {
