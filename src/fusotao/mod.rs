@@ -127,6 +127,7 @@ pub fn init(rx: Receiver<Proof>) -> anyhow::Result<()> {
     finalized_file.set_len(8)?;
     let mut seq = unsafe { MmapMut::map_mut(&finalized_file)? };
     let mut cur = u64::from_be_bytes(seq.as_ref().try_into()?);
+    log::info!("initiate proving at sequence {:?}", cur);
     let wapi = api.clone();
     std::thread::spawn(move || loop {
         let proof = rx.recv().unwrap();
@@ -134,6 +135,7 @@ pub fn init(rx: Receiver<Proof>) -> anyhow::Result<()> {
             continue;
         }
         cur = proof.event_id;
+        log::debug!("proofs of sequence {:?}: {:?}", cur, proof);
         let xt: UncheckedExtrinsicV4<_> =
             sub_api::compose_extrinsic!(wapi.clone(), "Receipts", "verify", proof);
         // FIXME handle network error?
@@ -141,6 +143,7 @@ pub fn init(rx: Receiver<Proof>) -> anyhow::Result<()> {
             .unwrap();
         // FIXME only update when finalized
         seq.copy_from_slice(&cur.to_be_bytes()[..]);
+        log::info!("proofs of sequence {:?} has been uploaded", cur);
     });
     let path: PathBuf = [&C.sequence.coredump_dir, "fusotao.blk"].iter().collect();
     let finalized_file = OpenOptions::new()
@@ -158,16 +161,23 @@ pub fn init(rx: Receiver<Proof>) -> anyhow::Result<()> {
     let decoder = EventsDecoder::try_from(api.metadata.clone()).unwrap();
     std::thread::spawn(move || loop {
         let current = Hash::from_slice(blk.as_ref());
-        log::info!("latest synchronized block: {:?}", current);
+        log::debug!("latest synchronized block: {:?}", current);
         if let Ok((cmds, hash)) = sync_finalized_blocks(current, &api, &dominator, &decoder) {
-            log::info!("prepare handle {:?} until {:?}", cmds, hash);
-            match sequence::insert_sequences(cmds) {
+            log::debug!("prepare handle events {:?} before block {:?}", cmds, hash);
+            match sequence::insert_sequences(&cmds) {
                 Ok(()) => {
                     blk[..].copy_from_slice(&hash[..]);
                     // FIXME commit manually after memmap flush ok
                     blk.flush().unwrap();
+                    if !cmds.is_empty() {
+                        log::info!("all events before finalized block {:?} handled", hash);
+                    }
                 }
-                Err(_) => log::warn!("write sequences from fusotao failed, retry"),
+                Err(_) => log::warn!(
+                    "write sequences from fusotao failed({:?} ~ {:?}), retry",
+                    current,
+                    hash
+                ),
             }
         }
         std::thread::sleep(Duration::from_millis(3000));

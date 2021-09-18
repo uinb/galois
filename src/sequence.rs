@@ -433,7 +433,7 @@ pub fn update_sequence_status(id: u64, status: u32) -> anyhow::Result<()> {
 }
 
 #[cfg(feature = "fusotao")]
-pub fn insert_sequences(seq: Vec<Command>) -> anyhow::Result<()> {
+pub fn insert_sequences(seq: &Vec<Command>) -> anyhow::Result<()> {
     if seq.is_empty() {
         return Ok(());
     }

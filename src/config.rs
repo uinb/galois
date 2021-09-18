@@ -15,7 +15,7 @@
 use argparse::{ArgumentParser, Store, StoreTrue};
 use cfg_if::cfg_if;
 use lazy_static::lazy_static;
-use log4rs::file::RawConfig as LogConfig;
+use log4rs::config::{Logger, RawConfig as LogConfig};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -132,10 +132,25 @@ fn init_config(toml: &str) -> anyhow::Result<Config> {
             let cfg: Config = toml::from_str(toml)?;
         }
     }
-    let log_conf = log4rs::config::Config::builder()
+    let mut loggers = cfg
+        .log
+        .loggers()
+        .iter()
+        .map(|l| (l.name().to_string(), l.clone()))
+        .collect::<std::collections::HashMap<String, _>>();
+    loggers
+        .entry("ws".to_string())
+        .or_insert_with(|| Logger::builder().build("ws".to_string(), log::LevelFilter::Error));
+    loggers
+        .entry("substrate_api_client".to_string())
+        .or_insert_with(|| {
+            Logger::builder().build("substrate_api_client".to_string(), log::LevelFilter::Error)
+        });
+    let log = log4rs::Config::builder()
+        .loggers::<Vec<_>>(loggers.into_values().collect())
         .appenders(cfg.log.appenders_lossy(&Default::default()).0)
         .build(cfg.log.root())?;
-    log4rs::init_config(log_conf)?;
+    log4rs::init_config(log)?;
     Ok(cfg)
 }
 
