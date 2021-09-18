@@ -23,12 +23,9 @@ use parity_scale_codec::{Decode, Encode, WrapperTypeEncode};
 use rust_decimal::{prelude::*, Decimal};
 use serde::{Deserialize, Serialize};
 use smt::{default_store::DefaultStore, sha256::Sha256Hasher, SparseMerkleTree, H256};
-use sp_core::{
-    crypto::{Pair, Ss58Codec},
-    sr25519::{Pair as Sr25519, Public},
-};
+use sp_core::sr25519::{Pair as Sr25519, Public};
 use sp_runtime::{
-    generic::{Block, CheckedExtrinsic, Header, UncheckedExtrinsic},
+    generic::{Block, Header},
     traits::BlakeTwo256,
     MultiAddress, OpaqueExtrinsic,
 };
@@ -37,6 +34,7 @@ use std::{
     fs::OpenOptions,
     path::PathBuf,
     sync::mpsc::Receiver,
+    time::Duration,
 };
 use sub_api::{
     rpc::{
@@ -49,8 +47,6 @@ use sub_api::{
 pub type GlobalStates = SparseMerkleTree<Sha256Hasher, H256, DefaultStore<H256>>;
 pub type FusoAccountId = Public;
 pub type FusoAddress = MultiAddress<FusoAccountId, ()>;
-// pub type FusoCheckedExtrinsic = CheckedExtrinsic<FusoAccountId, Call, SignedExtra>;
-// pub type FusoUncheckedExtrinsic = UncheckedExtrinsic<FusoAddress, Call, Signature, SignedExtra>;
 pub type FusoHeader = Header<u32, BlakeTwo256>;
 pub type FusoBlock = Block<FusoHeader, OpaqueExtrinsic>;
 
@@ -58,7 +54,7 @@ const ONE_ONCHAIN: u128 = 1_000_000_000_000_000_000;
 
 #[derive(Clone, Debug, Serialize, Deserialize, Encode)]
 pub struct MerkleLeaf {
-    pub key: [u8; 32],
+    pub key: Vec<u8>,
     pub old_v: [u8; 32],
     pub new_v: [u8; 32],
 }
@@ -69,7 +65,7 @@ pub struct Proof {
     pub user_id: UserId,
     pub nonce: u32,
     pub signature: Vec<u8>,
-    pub cmd: Vec<u8>,
+    pub cmd: FusoCommand,
     pub leaves: Vec<MerkleLeaf>,
     pub proof_of_exists: Vec<u8>,
     pub proof_of_cmd: Vec<u8>,
@@ -103,6 +99,7 @@ impl WrapperTypeEncode for UserId {}
 /// 1. from_ss58check() or from_ss58check_with_version()
 /// 2. new or from public
 pub fn init(rx: Receiver<Proof>) -> anyhow::Result<()> {
+    use sp_core::Pair;
     let signer = Sr25519::from_string(
         &C.fusotao
             .as_ref()
@@ -130,6 +127,7 @@ pub fn init(rx: Receiver<Proof>) -> anyhow::Result<()> {
     finalized_file.set_len(8)?;
     let mut seq = unsafe { MmapMut::map_mut(&finalized_file)? };
     let mut cur = u64::from_be_bytes(seq.as_ref().try_into()?);
+    log::info!("initiate proving at sequence {:?}", cur);
     let wapi = api.clone();
     std::thread::spawn(move || loop {
         let proof = rx.recv().unwrap();
@@ -137,13 +135,15 @@ pub fn init(rx: Receiver<Proof>) -> anyhow::Result<()> {
             continue;
         }
         cur = proof.event_id;
-        // let xt: UncheckedExtrinsicV4<_> =
-        //     compose_extrinsic!(wapi.clone(), "Receipts", "verify", proof);
-        // // FIXME handle network error?
-        // wapi.send_extrinsic(xt.hex_encode(), XtStatus::InBlock)
-        //     .unwrap();
+        log::debug!("proofs of sequence {:?}: {:?}", cur, proof);
+        let xt: UncheckedExtrinsicV4<_> =
+            sub_api::compose_extrinsic!(wapi.clone(), "Receipts", "verify", proof);
+        // FIXME handle network error?
+        wapi.send_extrinsic(xt.hex_encode(), XtStatus::InBlock)
+            .unwrap();
         // FIXME only update when finalized
         seq.copy_from_slice(&cur.to_be_bytes()[..]);
+        log::info!("proofs of sequence {:?} has been uploaded", cur);
     });
     let path: PathBuf = [&C.sequence.coredump_dir, "fusotao.blk"].iter().collect();
     let finalized_file = OpenOptions::new()
@@ -161,19 +161,26 @@ pub fn init(rx: Receiver<Proof>) -> anyhow::Result<()> {
     let decoder = EventsDecoder::try_from(api.metadata.clone()).unwrap();
     std::thread::spawn(move || loop {
         let current = Hash::from_slice(blk.as_ref());
+        log::debug!("latest synchronized block: {:?}", current);
         if let Ok((cmds, hash)) = sync_finalized_blocks(current, &api, &dominator, &decoder) {
-            match sequence::insert_sequences(cmds) {
+            log::debug!("prepare handle events {:?} before block {:?}", cmds, hash);
+            match sequence::insert_sequences(&cmds) {
                 Ok(()) => {
-                    blk.copy_from_slice(&hash[..]);
+                    blk[..].copy_from_slice(&hash[..]);
                     // FIXME commit manually after memmap flush ok
                     blk.flush().unwrap();
+                    if !cmds.is_empty() {
+                        log::info!("all events before finalized block {:?} handled", hash);
+                    }
                 }
-                Err(_) => {
-                    log::warn!("write sequences from fusotao failed, retry");
-                }
+                Err(_) => log::warn!(
+                    "write sequences from fusotao failed({:?} ~ {:?}), retry",
+                    current,
+                    hash
+                ),
             }
         }
-        std::thread::sleep(std::time::Duration::from_millis(3000));
+        std::thread::sleep(Duration::from_millis(3000));
     });
     log::info!("fusotao prover initialized");
     Ok(())
@@ -197,9 +204,10 @@ fn sync_finalized_blocks(
                 Some(finalized),
             )?
             .unwrap();
-        let raw_events = decoder
-            .decode_events(&mut e.as_slice())
-            .map_err(|_| anyhow::anyhow!("decode events error"))?;
+        let raw_events = decoder.decode_events(&mut e.as_slice()).map_err(|e| {
+            log::error!("{:?}", e);
+            anyhow::anyhow!("decode events error")
+        })?;
         for (_, event) in raw_events.into_iter() {
             match event {
                 RuntimeEvent::Raw(raw) if raw.module == "Receipts" => match raw.variant.as_ref() {
@@ -240,38 +248,56 @@ fn sync_finalized_blocks(
     Ok((cmds, recent))
 }
 
-impl Into<Vec<u8>> for LimitCmd {
-    fn into(self) -> Vec<u8> {
-        let mut v = vec![];
-        v.extend_from_slice(&self.symbol.0.to_be_bytes());
-        v.extend_from_slice(&self.symbol.1.to_be_bytes());
-        v.extend_from_slice(self.user_id.as_ref());
-        v.extend_from_slice(&self.order_id.to_be_bytes());
-        v.extend_from_slice(&to_merkle_represent(self.price).to_be_bytes());
-        v.extend_from_slice(&to_merkle_represent(self.amount).to_be_bytes());
-        v.push(self.ask_or_bid.into());
-        v
+#[derive(Clone, Encode, Decode, Eq, PartialEq, Debug)]
+pub enum FusoCommand {
+    AskLimit(u128, u128, u32, u32, FusoAccountId),
+    BidLimit(u128, u128, u32, u32, FusoAccountId),
+    Cancel(u32, u32, FusoAccountId),
+    TransferOut(u32, u128, FusoAccountId),
+    TransferIn(u32, u128, FusoAccountId),
+}
+
+impl Into<FusoCommand> for LimitCmd {
+    fn into(self) -> FusoCommand {
+        match self.ask_or_bid {
+            AskOrBid::Ask => FusoCommand::AskLimit(
+                to_merkle_represent(self.price),
+                to_merkle_represent(self.amount),
+                self.symbol.0,
+                self.symbol.1,
+                Public(self.user_id.0),
+            ),
+            AskOrBid::Bid => FusoCommand::BidLimit(
+                to_merkle_represent(self.price),
+                to_merkle_represent(self.amount),
+                self.symbol.0,
+                self.symbol.1,
+                Public(self.user_id.0),
+            ),
+        }
     }
 }
 
-impl Into<Vec<u8>> for CancelCmd {
-    fn into(self) -> Vec<u8> {
-        let mut v = vec![];
-        v.extend_from_slice(&self.symbol.0.to_be_bytes());
-        v.extend_from_slice(&self.symbol.1.to_be_bytes());
-        v.extend_from_slice(self.user_id.as_ref());
-        v.extend_from_slice(&self.order_id.to_be_bytes());
-        v
+impl Into<FusoCommand> for CancelCmd {
+    fn into(self) -> FusoCommand {
+        FusoCommand::Cancel(self.symbol.0, self.symbol.1, Public(self.user_id.0))
     }
 }
 
-impl Into<Vec<u8>> for AssetsCmd {
-    fn into(self) -> Vec<u8> {
-        let mut v = vec![];
-        v.extend_from_slice(&self.currency.to_be_bytes());
-        v.extend_from_slice(self.user_id.as_ref());
-        v.extend_from_slice(&to_merkle_represent(self.amount).to_be_bytes());
-        v
+impl Into<FusoCommand> for AssetsCmd {
+    fn into(self) -> FusoCommand {
+        match self.in_or_out {
+            InOrOut::In => FusoCommand::TransferIn(
+                self.currency,
+                to_merkle_represent(self.amount),
+                Public(self.user_id.0),
+            ),
+            InOrOut::Out => FusoCommand::TransferOut(
+                self.currency,
+                to_merkle_represent(self.amount),
+                Public(self.user_id.0),
+            ),
+        }
     }
 }
 

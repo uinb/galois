@@ -94,6 +94,7 @@ impl TryInto<Event> for Sequence {
                 self.id,
                 AssetsCmd {
                     user_id: UserId::from_str(self.cmd.user_id.as_ref().ok_or(anyhow!(""))?)?,
+                    in_or_out: InOrOut::Out,
                     currency: self.cmd.currency.ok_or(anyhow!(""))?,
                     amount: self
                         .cmd
@@ -111,6 +112,7 @@ impl TryInto<Event> for Sequence {
                 self.id,
                 AssetsCmd {
                     user_id: UserId::from_str(self.cmd.user_id.as_ref().ok_or(anyhow!(""))?)?,
+                    in_or_out: InOrOut::In,
                     currency: self.cmd.currency.ok_or(anyhow!(""))?,
                     amount: self
                         .cmd
@@ -431,7 +433,7 @@ pub fn update_sequence_status(id: u64, status: u32) -> anyhow::Result<()> {
 }
 
 #[cfg(feature = "fusotao")]
-pub fn insert_sequences(seq: Vec<Command>) -> anyhow::Result<()> {
+pub fn insert_sequences(seq: &Vec<Command>) -> anyhow::Result<()> {
     if seq.is_empty() {
         return Ok(());
     }

@@ -63,8 +63,15 @@ pub struct CancelCmd {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum InOrOut {
+    In,
+    Out,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AssetsCmd {
     pub user_id: UserId,
+    pub in_or_out: InOrOut,
     pub currency: Currency,
     pub amount: Amount,
     #[cfg(feature = "fusotao")]
