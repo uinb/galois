@@ -45,18 +45,20 @@ impl Prover {
         let event_id = taker.event_id;
         let user_id = taker.user_id;
         let orderbook = data.orderbooks.get(&symbol).unwrap();
+        let size = orderbook.size();
+        log::debug!(
+            "generating merkle leaf of {:?}: orderbook = ({:?}, {:?}) -> ({:?}, {:?})",
+            taker.event_id,
+            ask_size_before,
+            bid_size_before,
+            size.0,
+            size.1,
+        );
         let (old_ask_size, old_bid_size, new_ask_size, new_bid_size) = (
             to_merkle_represent(ask_size_before),
             to_merkle_represent(bid_size_before),
-            to_merkle_represent(orderbook.ask_size),
-            to_merkle_represent(orderbook.bid_size),
-        );
-        log::debug!(
-            "generating merkle leaf: orderbook = ({:?}, {:?}) -> ({:?}, {:?})",
-            old_ask_size,
-            old_bid_size,
-            new_ask_size,
-            new_bid_size,
+            to_merkle_represent(size.0),
+            to_merkle_represent(size.1),
         );
         leaves.push(new_orderbook_merkle_leaf(
             symbol,
@@ -75,18 +77,18 @@ impl Prover {
                     // quote_available0 + r.quote_delta + r.quote_charge = quote_available
                     AskOrBid::Ask => (
                         r.base_available,
-                        r.base_frozen - r.base_delta,
-                        r.quote_available - r.quote_delta - r.quote_charge,
+                        r.base_frozen + r.base_delta.abs(),
+                        r.quote_available - r.quote_delta.abs() + r.quote_charge.abs(),
                         r.quote_frozen,
                     ),
                     // +base_available, -quote_frozen
                     // quote_frozen0 + r.quote_delta = quote_frozen
                     // base_available0 + r.base_delta + r.base_charge = base_available
                     AskOrBid::Bid => (
-                        r.base_available - r.base_charge - r.base_delta,
+                        r.base_available - r.base_delta.abs() + r.base_charge.abs(),
                         r.base_frozen,
                         r.quote_available,
-                        r.quote_frozen - r.quote_delta,
+                        r.quote_frozen + r.quote_delta.abs(),
                     ),
                 };
                 let (new_ba, new_bf, old_ba, old_bf) = (
@@ -115,7 +117,8 @@ impl Prover {
             to_merkle_represent(taker_base_before.frozen),
         );
         log::debug!(
-            "generating merkle leaf: taker base = [{:?}({:?}), {:?}({:?})] -> [{:?}({:?}), {:?}({:?})]",
+            "generating merkle leaf of {:?}: taker base = [{:?}({:?}), {:?}({:?})] -> [{:?}({:?}), {:?}({:?})]",
+            taker.event_id,
             old_taker_ba,
             taker_base_before.available,
             old_taker_bf,
@@ -140,7 +143,8 @@ impl Prover {
             to_merkle_represent(taker_quote_before.frozen),
         );
         log::debug!(
-            "generating merkle leaf: taker quote = [{:?}({:?}), {:?}({:?})] -> [{:?}({:?}), {:?}({:?})]",
+            "generating merkle leaf of {:?}: taker quote = [{:?}({:?}), {:?}({:?})] -> [{:?}({:?}), {:?}({:?})]",
+            taker.event_id,
             old_taker_qa,
             taker_quote_before.available,
             old_taker_qf,

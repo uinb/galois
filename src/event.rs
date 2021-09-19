@@ -205,7 +205,7 @@ fn handle_event(
                 ))?;
             cfg_if! {
                 if #[cfg(feature = "fusotao")] {
-                    let size = (orderbook.ask_size, orderbook.bid_size);
+                    let size = orderbook.size();
                     let taker_base_before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.0);
                     let taker_quote_before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.1);
                 }
@@ -265,7 +265,7 @@ fn handle_event(
                 .ok_or(EventsError::EventRejected(id, anyhow!("order not exists")))?;
             cfg_if! {
                 if #[cfg(feature = "fusotao")] {
-                    let size = (orderbook.ask_size, orderbook.bid_size);
+                    let size = orderbook.size();
                     let taker_base_before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.0);
                     let taker_quote_before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.1);
                 }

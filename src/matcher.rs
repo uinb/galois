@@ -193,7 +193,6 @@ pub fn execute_limit(
                 best.remove();
             }
             traded.iter().for_each(|m| {
-                book.decr_size_on(ask_or_bid, &m.filled);
                 if m.state == State::Filled {
                     book.indices.remove(&m.order_id);
                 }

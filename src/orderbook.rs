@@ -155,8 +155,6 @@ pub type Index = HashMap<u64, Price>;
 pub struct OrderBook {
     pub asks: Tape,
     pub bids: Tape,
-    pub ask_size: Amount,
-    pub bid_size: Amount,
     pub indices: Index,
     pub base_scale: u32,
     pub quote_scale: u32,
@@ -190,8 +188,6 @@ impl OrderBook {
         Self {
             asks: Tape::new(),
             bids: Tape::new(),
-            ask_size: Amount::ZERO,
-            bid_size: Amount::ZERO,
             indices: Index::with_capacity(DEFAULT_PAGE_SIZE),
             base_scale,
             quote_scale,
@@ -202,6 +198,13 @@ impl OrderBook {
             enable_market_order,
             open: open,
         }
+    }
+
+    pub fn size(&self) -> (Amount, Amount) {
+        (
+            self.asks.values().fold(Amount::zero(), |x, a| x + a.amount),
+            self.bids.values().fold(Amount::zero(), |x, b| x + b.amount),
+        )
     }
 
     pub fn as_depth(&self, level: usize, symbol: Symbol) -> Depth {
@@ -229,14 +232,8 @@ impl OrderBook {
 
     pub fn insert(&mut self, order: Order, ask_or_bid: AskOrBid) {
         match ask_or_bid {
-            AskOrBid::Ask => {
-                self.ask_size += order.unfilled;
-                Self::insert_into(&mut self.asks, &mut self.indices, order)
-            }
-            AskOrBid::Bid => {
-                self.bid_size += order.unfilled;
-                Self::insert_into(&mut self.bids, &mut self.indices, order)
-            }
+            AskOrBid::Ask => Self::insert_into(&mut self.asks, &mut self.indices, order),
+            AskOrBid::Bid => Self::insert_into(&mut self.bids, &mut self.indices, order),
         }
     }
 
@@ -250,13 +247,13 @@ impl OrderBook {
             .or_insert_with(|| OrderPage::with_init_order(order));
     }
 
-    // FIXME
-    pub fn decr_size_on(&mut self, ask_or_bid: AskOrBid, amount: &Amount) {
-        match ask_or_bid {
-            AskOrBid::Ask => self.ask_size -= amount,
-            AskOrBid::Bid => self.bid_size -= amount,
-        }
-    }
+    // // FIXME
+    // pub fn decr_size_on(&mut self, ask_or_bid: AskOrBid, amount: &Amount) {
+    //     match ask_or_bid {
+    //         AskOrBid::Ask => self.ask_size -= amount,
+    //         AskOrBid::Bid => self.bid_size -= amount,
+    //     }
+    // }
 
     pub fn remove(&mut self, order_id: u64) -> Option<(Order, AskOrBid)> {
         let price = self.indices.remove(&order_id)?;
@@ -366,8 +363,7 @@ pub fn test_orderbook() {
         AskOrBid::Bid,
     );
     assert!(book.indices.contains_key(&1));
-    assert_eq!(book.bid_size, dec!(1));
-    assert_eq!(book.ask_size, dec!(0));
+    assert_eq!(book.size(), (dec!(0), dec!(1)));
     assert!(!book.bids.is_empty());
     assert!(book.asks.is_empty());
     assert_eq!(book.get_best_bid().unwrap(), dec!(100));
@@ -378,7 +374,7 @@ pub fn test_orderbook() {
         AskOrBid::Ask,
     );
     assert!(book.indices.contains_key(&2));
-    assert_eq!(book.ask_size, dec!(1));
+    assert_eq!(book.size().0, dec!(1));
     assert!(book.find_order(2).is_some());
     assert!(!book.asks.is_empty());
     assert_eq!(book.get_best_ask().unwrap(), dec!(105));

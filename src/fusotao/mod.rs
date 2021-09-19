@@ -322,7 +322,6 @@ fn to_decimal_represent(v: u128) -> Decimal {
 
 // FIXME using FIXED
 fn to_merkle_represent(v: Decimal) -> u128 {
-    println!("{:?}", v.trunc());
     let r = v.trunc().to_u128().unwrap();
     let mut f = v.fract() * d18();
     f.rescale(18);
