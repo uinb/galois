@@ -59,8 +59,14 @@ impl TryInto<Event> for Sequence {
             ASK_LIMIT | BID_LIMIT => {
                 let amount = self.cmd.amount.ok_or(anyhow!(""))?;
                 let price = self.cmd.price.ok_or(anyhow!(""))?;
-                ensure!(price.is_sign_positive() && price < max_number(), "");
-                ensure!(amount.is_sign_positive() && amount < max_number(), "");
+                ensure!(
+                    price.is_sign_positive() && price < max_number() && price.scale() <= 12,
+                    "invalid price numeric"
+                );
+                ensure!(
+                    amount.is_sign_positive() && amount < max_number() && amount.scale() <= 10,
+                    "invalid amount numeric"
+                );
                 let vol = amount.checked_mul(price).ok_or(anyhow!(""))?;
                 ensure!(vol < max_number(), "");
                 let cmd = LimitCmd {
@@ -90,6 +96,7 @@ impl TryInto<Event> for Sequence {
                 },
                 self.timestamp,
             )),
+            // TODO scale and max
             TRANSFER_OUT => Ok(Event::TransferOut(
                 self.id,
                 AssetsCmd {

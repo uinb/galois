@@ -18,7 +18,6 @@ pub use prover::Prover;
 
 use crate::{config::C, core::*, event::*, sequence};
 use anyhow::anyhow;
-use fixed::{types::extra::U64, FixedU128};
 use memmap::MmapMut;
 use parity_scale_codec::{Compact, Decode, Encode, WrapperTypeEncode};
 use rust_decimal::{prelude::*, Decimal};
@@ -52,6 +51,9 @@ pub type FusoHeader = Header<u32, BlakeTwo256>;
 pub type FusoBlock = Block<FusoHeader, OpaqueExtrinsic>;
 
 const ONE_ONCHAIN: u128 = 1_000_000_000_000_000_000;
+const MILL: u32 = 1_000_000;
+const BILL: u32 = 1_000_000_000;
+const QUINTILL: u64 = 1_000_000_000_000_000_000;
 
 #[derive(Clone, Debug, Serialize, Deserialize, Encode)]
 pub struct MerkleLeaf {
@@ -249,35 +251,47 @@ fn sync_finalized_blocks(
     Ok((cmds, recent))
 }
 
-type CU128 = Compact<u128>;
-type CU32 = Compact<u32>;
-
 #[derive(Clone, Encode, Decode, Eq, PartialEq, Debug)]
 pub enum FusoCommand {
-    // price, amount, maker_fee, taker_fee, base, quote
-    AskLimit(CU128, CU128, CU128, CU128, CU32, CU32),
-    BidLimit(CU128, CU128, CU128, CU128, CU32, CU32),
-    Cancel(CU32, CU32),
-    TransferOut(CU32, CU128),
-    TransferIn(CU32, CU128),
+    // price, amounnt, maker_fee, taker_fee, base, quote
+    AskLimit(
+        (Compact<u64>, Compact<u64>),
+        Compact<u128>,
+        Compact<u32>,
+        Compact<u32>,
+        Compact<u32>,
+        Compact<u32>,
+    ),
+    BidLimit(
+        (Compact<u64>, Compact<u64>),
+        Compact<u128>,
+        Compact<u32>,
+        Compact<u32>,
+        Compact<u32>,
+        Compact<u32>,
+    ),
+    Cancel(Compact<u32>, Compact<u32>),
+    TransferOut(Compact<u32>, Compact<u128>),
+    TransferIn(Compact<u32>, Compact<u128>),
 }
 
 impl Into<FusoCommand> for (LimitCmd, Fee, Fee) {
     fn into(self) -> FusoCommand {
+        let (n, f) = self.0.price.to_price();
         match self.0.ask_or_bid {
             AskOrBid::Ask => FusoCommand::AskLimit(
-                to_merkle_represent(self.0.price).into(),
-                to_merkle_represent(self.0.amount).into(),
-                to_merkle_represent(self.1).into(),
-                to_merkle_represent(self.2).into(),
+                (n.into(), f.into()),
+                self.0.amount.to_amount().into(),
+                self.1.to_fee().into(),
+                self.2.to_fee().into(),
                 self.0.symbol.0.into(),
                 self.0.symbol.1.into(),
             ),
             AskOrBid::Bid => FusoCommand::BidLimit(
-                to_merkle_represent(self.0.price).into(),
-                to_merkle_represent(self.0.amount).into(),
-                to_merkle_represent(self.1).into(),
-                to_merkle_represent(self.2).into(),
+                (n.into(), f.into()),
+                self.0.amount.to_amount().into(),
+                self.1.to_fee().into(),
+                self.2.to_fee().into(),
                 self.0.symbol.0.into(),
                 self.0.symbol.1.into(),
             ),
@@ -294,38 +308,61 @@ impl Into<FusoCommand> for CancelCmd {
 impl Into<FusoCommand> for AssetsCmd {
     fn into(self) -> FusoCommand {
         match self.in_or_out {
-            InOrOut::In => FusoCommand::TransferIn(
-                self.currency.into(),
-                to_merkle_represent(self.amount).into(),
-            ),
-            InOrOut::Out => FusoCommand::TransferOut(
-                self.currency.into(),
-                to_merkle_represent(self.amount).into(),
-            ),
+            InOrOut::In => {
+                FusoCommand::TransferIn(self.currency.into(), self.amount.to_amount().into())
+            }
+            InOrOut::Out => {
+                FusoCommand::TransferOut(self.currency.into(), self.amount.to_amount().into())
+            }
         }
     }
 }
 
+fn d6() -> Amount {
+    MILL.into()
+}
+
+fn d9() -> Amount {
+    BILL.into()
+}
+
 fn d18() -> Amount {
-    ONE_ONCHAIN.into()
+    QUINTILL.into()
+}
+
+pub trait ToBlockChainNumeric {
+    fn to_fee(self) -> u32;
+
+    fn to_price(self) -> (u64, u64);
+
+    fn to_amount(self) -> u128;
+}
+
+impl ToBlockChainNumeric for Decimal {
+    fn to_fee(self) -> u32 {
+        (self * d6()).to_u32().unwrap()
+    }
+
+    fn to_price(self) -> (u64, u64) {
+        let f = self.fract() * d18();
+        (self.trunc().to_u64().unwrap(), f.to_u64().unwrap())
+    }
+
+    fn to_amount(self) -> u128 {
+        let n = self.trunc().to_u128().unwrap();
+        let f = self.fract() * d18();
+        n * ONE_ONCHAIN + f.to_u128().unwrap()
+    }
 }
 
 // FIXME
 fn to_decimal_represent(v: u128) -> Decimal {
-    if v.trailing_zeros() >= 18 {
-        Decimal::new((v / ONE_ONCHAIN).try_into().unwrap(), 0)
-    } else {
-        let d: Amount = v.try_into().unwrap();
-        d / d18()
-    }
-}
-
-// FIXME using FIXED
-fn to_merkle_represent(v: Decimal) -> u128 {
-    let r = v.trunc().to_u128().unwrap();
-    let mut f = v.fract() * d18();
-    f.rescale(18);
-    r * ONE_ONCHAIN + f.to_u128().unwrap()
+    let n = v / ONE_ONCHAIN;
+    let f = v % ONE_ONCHAIN;
+    let n: Amount = n.try_into().unwrap();
+    let mut f: Amount = f.try_into().unwrap();
+    f.set_scale(18).unwrap();
+    n + f
 }
 
 fn u128le_to_h256(a0: u128, a1: u128) -> [u8; 32] {
@@ -338,14 +375,15 @@ fn u128le_to_h256(a0: u128, a1: u128) -> [u8; 32] {
 #[cfg(test)]
 pub mod test {
     use super::*;
+    use rust_decimal_macros::dec;
 
     #[test]
-    pub fn test_decimal() {
-        let v = Decimal::new(10000, 2);
-        assert_eq!(to_merkle_represent(v), ONE_ONCHAIN * 100);
-        let v = Decimal::new(995, 1);
-        assert_eq!(to_merkle_represent(v), ONE_ONCHAIN * 995 / 10);
+    pub fn test_numeric() {
         assert!(Decimal::MAX.to_u128().is_some());
-        assert!(Decimal::new(1, 10).to_u128().is_some());
+        assert!(Decimal::MAX > dec!(340282366920938463463.374607431768211455));
+        let p = dec!(38463463.374607431768211455);
+        let (n, f) = p.to_price();
+        assert_eq!(n, 38463463);
+        assert_eq!(f, 374607431768211455);
     }
 }

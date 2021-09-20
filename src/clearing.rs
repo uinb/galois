@@ -295,7 +295,7 @@ pub fn clear(
     }
 }
 
-#[warn(unused_must_use)]
+#[allow(unused_must_use)]
 #[cfg(test)]
 pub mod test {
     use crate::assets;
