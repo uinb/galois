@@ -45,11 +45,20 @@ impl Prover {
         let event_id = taker.event_id;
         let user_id = taker.user_id;
         let orderbook = data.orderbooks.get(&symbol).unwrap();
+        let size = orderbook.size();
+        log::debug!(
+            "generating merkle leaf of {:?}: orderbook = ({:?}, {:?}) -> ({:?}, {:?})",
+            taker.event_id,
+            ask_size_before,
+            bid_size_before,
+            size.0,
+            size.1,
+        );
         let (old_ask_size, old_bid_size, new_ask_size, new_bid_size) = (
-            to_merkle_represent(ask_size_before),
-            to_merkle_represent(bid_size_before),
-            to_merkle_represent(orderbook.ask_size),
-            to_merkle_represent(orderbook.bid_size),
+            ask_size_before.to_amount(),
+            bid_size_before.to_amount(),
+            size.0.to_amount(),
+            size.1.to_amount(),
         );
         leaves.push(new_orderbook_merkle_leaf(
             symbol,
@@ -68,44 +77,56 @@ impl Prover {
                     // quote_available0 + r.quote_delta + r.quote_charge = quote_available
                     AskOrBid::Ask => (
                         r.base_available,
-                        r.base_frozen - r.base_delta,
-                        r.quote_available - r.quote_delta - r.quote_charge,
+                        r.base_frozen + r.base_delta.abs(),
+                        r.quote_available - r.quote_delta.abs() + r.quote_charge.abs(),
                         r.quote_frozen,
                     ),
                     // +base_available, -quote_frozen
                     // quote_frozen0 + r.quote_delta = quote_frozen
                     // base_available0 + r.base_delta + r.base_charge = base_available
                     AskOrBid::Bid => (
-                        r.base_available - r.base_charge - r.base_delta,
+                        r.base_available - r.base_delta.abs() + r.base_charge.abs(),
                         r.base_frozen,
                         r.quote_available,
-                        r.quote_frozen - r.quote_delta,
+                        r.quote_frozen + r.quote_delta.abs(),
                     ),
                 };
                 let (new_ba, new_bf, old_ba, old_bf) = (
-                    to_merkle_represent(r.base_available),
-                    to_merkle_represent(r.base_frozen),
-                    to_merkle_represent(ba),
-                    to_merkle_represent(bf),
+                    r.base_available.to_amount(),
+                    r.base_frozen.to_amount(),
+                    ba.to_amount(),
+                    bf.to_amount(),
                 );
                 leaves.push(new_account_merkle_leaf(
                     &r.user_id, symbol.0, old_ba, old_bf, new_ba, new_bf,
                 ));
                 let (new_qa, new_qf, old_qa, old_qf) = (
-                    to_merkle_represent(r.quote_available),
-                    to_merkle_represent(r.quote_frozen),
-                    to_merkle_represent(qa),
-                    to_merkle_represent(qf),
+                    r.quote_available.to_amount(),
+                    r.quote_frozen.to_amount(),
+                    qa.to_amount(),
+                    qf.to_amount(),
                 );
                 leaves.push(new_account_merkle_leaf(
                     &r.user_id, symbol.1, old_qa, old_qf, new_qa, new_qf,
                 ));
             });
         let (new_taker_ba, new_taker_bf, old_taker_ba, old_taker_bf) = (
-            to_merkle_represent(taker.base_available),
-            to_merkle_represent(taker.base_frozen),
-            to_merkle_represent(taker_base_before.available),
-            to_merkle_represent(taker_base_before.frozen),
+            taker.base_available.to_amount(),
+            taker.base_frozen.to_amount(),
+            taker_base_before.available.to_amount(),
+            taker_base_before.frozen.to_amount(),
+        );
+        log::debug!(
+            "generating merkle leaf of {:?}: taker base = [{:?}({:?}), {:?}({:?})] -> [{:?}({:?}), {:?}({:?})]",
+            taker.event_id,
+            old_taker_ba,
+            taker_base_before.available,
+            old_taker_bf,
+            taker_base_before.frozen,
+            new_taker_ba,
+            taker.base_available,
+            new_taker_bf,
+            taker.base_frozen,
         );
         leaves.push(new_account_merkle_leaf(
             &user_id,
@@ -116,10 +137,22 @@ impl Prover {
             new_taker_bf,
         ));
         let (new_taker_qa, new_taker_qf, old_taker_qa, old_taker_qf) = (
-            to_merkle_represent(taker.quote_available),
-            to_merkle_represent(taker.quote_frozen),
-            to_merkle_represent(taker_quote_before.available),
-            to_merkle_represent(taker_quote_before.frozen),
+            taker.quote_available.to_amount(),
+            taker.quote_frozen.to_amount(),
+            taker_quote_before.available.to_amount(),
+            taker_quote_before.frozen.to_amount(),
+        );
+        log::debug!(
+            "generating merkle leaf of {:?}: taker quote = [{:?}({:?}), {:?}({:?})] -> [{:?}({:?}), {:?}({:?})]",
+            taker.event_id,
+            old_taker_qa,
+            taker_quote_before.available,
+            old_taker_qf,
+            taker_quote_before.frozen,
+            new_taker_qa,
+            taker.quote_available,
+            new_taker_qf,
+            taker.quote_frozen,
         );
         leaves.push(new_account_merkle_leaf(
             &user_id,
@@ -155,10 +188,10 @@ impl Prover {
         account_after: &Balance,
     ) {
         let (new_available, new_frozen, old_available, old_frozen) = (
-            to_merkle_represent(account_after.available),
-            to_merkle_represent(account_after.frozen),
-            to_merkle_represent(account_before.available),
-            to_merkle_represent(account_before.frozen),
+            account_after.available.to_amount(),
+            account_after.frozen.to_amount(),
+            account_before.available.to_amount(),
+            account_before.frozen.to_amount(),
         );
         let leaves = vec![new_account_merkle_leaf(
             &cmd.user_id,
@@ -226,11 +259,11 @@ fn new_account_merkle_leaf(
 ) -> MerkleLeaf {
     let mut key = vec![ACCOUNT_KEY; 37];
     key[1..33].copy_from_slice(<B256 as AsRef<[u8]>>::as_ref(user_id));
-    key[33..].copy_from_slice(&currency.to_be_bytes()[..]);
+    key[33..].copy_from_slice(&currency.to_le_bytes()[..]);
     MerkleLeaf {
         key: key,
-        old_v: u128be_to_h256(old_available, old_frozen),
-        new_v: u128be_to_h256(new_available, new_frozen),
+        old_v: u128le_to_h256(old_available, old_frozen),
+        new_v: u128le_to_h256(new_available, new_frozen),
     }
 }
 
@@ -242,11 +275,11 @@ fn new_orderbook_merkle_leaf(
     new_bid_size: u128,
 ) -> MerkleLeaf {
     let mut key = vec![ORDERBOOK_KEY; 9];
-    key[1..5].copy_from_slice(&symbol.0.to_be_bytes()[..]);
-    key[5..].copy_from_slice(&symbol.1.to_be_bytes()[..]);
+    key[1..5].copy_from_slice(&symbol.0.to_le_bytes()[..]);
+    key[5..].copy_from_slice(&symbol.1.to_le_bytes()[..]);
     MerkleLeaf {
         key: key,
-        old_v: u128be_to_h256(old_ask_size, old_bid_size),
-        new_v: u128be_to_h256(new_ask_size, new_bid_size),
+        old_v: u128le_to_h256(old_ask_size, old_bid_size),
+        new_v: u128le_to_h256(new_ask_size, new_bid_size),
     }
 }

@@ -139,6 +139,7 @@ pub fn try_unfreeze(
 }
 
 #[cfg(test)]
+#[allow(unused_must_use)]
 mod test {
     use super::*;
     use crate::core::UserId;
