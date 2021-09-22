@@ -322,6 +322,7 @@ fn d6() -> Amount {
     MILL.into()
 }
 
+#[allow(dead_code)]
 fn d9() -> Amount {
     BILL.into()
 }
