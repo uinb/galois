@@ -120,7 +120,10 @@ pub fn init(rx: Receiver<Proof>) -> anyhow::Result<()> {
     let dominator = signer.public();
     let api = Api::new(client)
         .map(|api| api.set_signer(signer))
-        .map_err(|_| anyhow!("Fusotao node not available"))?;
+        .map_err(|e| {
+            log::error!("{:?}", e);
+            anyhow!("Fusotao node not available or runtime metadata check failed")
+        })?;
     let path: PathBuf = [&C.sequence.coredump_dir, "fusotao.seq"].iter().collect();
     let finalized_file = OpenOptions::new()
         .read(true)
@@ -141,12 +144,14 @@ pub fn init(rx: Receiver<Proof>) -> anyhow::Result<()> {
         log::debug!("proofs of sequence {:?}: {:?}", cur, proof);
         let xt: UncheckedExtrinsicV4<_> =
             sub_api::compose_extrinsic!(wapi.clone(), "Receipts", "verify", proof);
-        // FIXME handle network error?
-        wapi.send_extrinsic(xt.hex_encode(), XtStatus::InBlock)
-            .unwrap();
-        // FIXME only update when finalized
-        seq.copy_from_slice(&cur.to_le_bytes()[..]);
-        log::info!("proofs of sequence {:?} has been uploaded", cur);
+        match wapi.send_extrinsic(xt.hex_encode(), XtStatus::InBlock) {
+            Ok(_) => {
+                // TODO scan block and revert status once chain fork
+                seq.copy_from_slice(&cur.to_le_bytes()[..]);
+                log::info!("proofs of sequence {:?} has been submitted", cur);
+            }
+            Err(e) => log::error!("submitting proofs failed, {:?}", e),
+        }
     });
     let path: PathBuf = [&C.sequence.coredump_dir, "fusotao.blk"].iter().collect();
     let finalized_file = OpenOptions::new()
@@ -173,7 +178,7 @@ pub fn init(rx: Receiver<Proof>) -> anyhow::Result<()> {
                     // FIXME commit manually after memmap flush ok
                     blk.flush().unwrap();
                     if !cmds.is_empty() {
-                        log::info!("all events before finalized block {:?} handled", hash);
+                        log::info!("all events before finalized block {:?} synchronized", hash);
                     }
                 }
                 Err(_) => log::warn!(
