@@ -300,6 +300,12 @@ mod test {
         let (l, r) = split_h256(v);
         (u128::from_le_bytes(l), u128::from_le_bytes(r))
     }
+
+    fn split_h256_u128_sum(v: &[u8; 32]) -> u128 {
+        let (l, r) = split_h256_u128(v);
+        l + r
+    }
+
     fn construct_pair() -> OrderBook {
         let base_scale = 5;
         let quote_scale = 1;
@@ -604,6 +610,45 @@ mod test {
                 &cr,
             );
             println!("{:?}", cr.last().unwrap());
+
+            let size = data.orderbooks.get(&(1, 0)).unwrap().size();
+            let cmd2 = LimitCmd {
+                symbol: (1, 0),
+                user_id: UserId::from_low_u64_be(1),
+                order_id: 6,
+                price: dec!(88),
+                amount: dec!(0.3),
+                ask_or_bid: AskOrBid::Ask,
+                nonce: 1,
+                signature: vec![0],
+            };
+            let taker_base_before =
+                assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.0);
+            let taker_quote_before =
+                assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.1);
+            let (c, val) =
+                assets::freeze_if(&cmd2.symbol, cmd2.ask_or_bid, cmd2.price, cmd2.amount);
+            assets::try_freeze(&mut data.accounts, &cmd2.user_id, c, val).unwrap();
+            let mr = matcher::execute_limit(
+                data.orderbooks.get_mut(&(1, 0)).unwrap(),
+                cmd2.user_id,
+                cmd2.order_id,
+                cmd2.price,
+                cmd2.amount,
+                cmd2.ask_or_bid,
+            );
+            let cr = clearing::clear(&mut data.accounts, 8, &(1, 0), tf, mf, &mr, 0);
+            pp.prove_trade_cmd(
+                &mut data,
+                cmd2.nonce,
+                cmd2.signature.clone(),
+                (cmd2, mf, tf).into(),
+                size.0,
+                size.1,
+                &taker_base_before,
+                &taker_quote_before,
+                &cr,
+            );
         });
         // ignore transfer in
         rx.recv().unwrap();
@@ -695,7 +740,7 @@ mod test {
             // maker - base
             assert_eq!(
                 split_h256_u128(&proof.leaves[1].old_v),
-                (891110000000000000, 220000000000000000) // (219780000000000000, 0)
+                (891110000000000000, 220000000000000000)
             );
             assert_eq!(
                 split_h256_u128(&proof.leaves[1].new_v),
@@ -738,6 +783,42 @@ mod test {
             );
             let (na, nf) = split_h256_u128(&proof.leaves[6].new_v);
             assert_eq!(na + nf + 22000000000000000000, 99990000000000000000);
+        }
+        // ask 0.3, 88
+        {
+            let proof = rx.recv().unwrap();
+            // ask,bid
+            assert_eq!(
+                split_h256_u128(&proof.leaves[0].old_v),
+                (0, 290000000000000000)
+            );
+            assert_eq!(
+                split_h256_u128(&proof.leaves[0].new_v),
+                (10000000000000000, 0)
+            );
+            // maker - base
+            let mb00 = split_h256_u128_sum(&proof.leaves[1].old_v);
+            let mb01 = split_h256_u128_sum(&proof.leaves[1].new_v);
+            // maker - quote
+            let mq00 = split_h256_u128_sum(&proof.leaves[2].old_v);
+            let mq01 = split_h256_u128_sum(&proof.leaves[2].new_v);
+            // maker - base
+            let mb10 = split_h256_u128_sum(&proof.leaves[3].old_v);
+            let mb11 = split_h256_u128_sum(&proof.leaves[3].new_v);
+            // maker - quote
+            let mq10 = split_h256_u128_sum(&proof.leaves[4].old_v);
+            let mq11 = split_h256_u128_sum(&proof.leaves[4].new_v);
+
+            let incr_base = (mb01 - mb00) + (mb11 - mb10);
+            let decr_quote = (mq00 - mq01) + (mq10 - mq11);
+            // taker - base
+            let tb0 = split_h256_u128_sum(&proof.leaves[5].old_v);
+            let tb1 = split_h256_u128_sum(&proof.leaves[5].new_v);
+            assert_eq!(incr_base, (tb0 - tb1) / 1000 * 999);
+            // taker - quote
+            let tq0 = split_h256_u128_sum(&proof.leaves[6].old_v);
+            let tq1 = split_h256_u128_sum(&proof.leaves[6].new_v);
+            assert_eq!(decr_quote / 1000 * 999, tq1 - tq0);
         }
     }
 }
