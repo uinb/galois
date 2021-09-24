@@ -71,21 +71,22 @@ impl Prover {
             .iter()
             .take_while(|o| o.role == Role::Maker)
             .for_each(|ref r| {
+                log::debug!("{:?}", r);
                 let (ba, bf, qa, qf) = match r.ask_or_bid {
                     // -base_frozen, +quote_available
                     // base_frozen0 + r.base_delta = base_frozen
-                    // quote_available0 + r.quote_delta + r.quote_charge = quote_available
+                    // qa - q0 + abs(r.quote_charge) = abs(quote_delta)
                     AskOrBid::Ask => (
                         r.base_available,
                         r.base_frozen + r.base_delta.abs(),
-                        r.quote_available - r.quote_delta.abs() + r.quote_charge.abs(),
+                        r.quote_available + r.quote_charge.abs() - r.quote_delta.abs(),
                         r.quote_frozen,
                     ),
                     // +base_available, -quote_frozen
                     // quote_frozen0 + r.quote_delta = quote_frozen
-                    // base_available0 + r.base_delta + r.base_charge = base_available
+                    // ba0 - ba + abs(r.base_charge) = abs(base_delta)
                     AskOrBid::Bid => (
-                        r.base_available - r.base_delta.abs() + r.base_charge.abs(),
+                        r.base_available + r.base_charge.abs() - r.base_delta.abs(),
                         r.base_frozen,
                         r.quote_available,
                         r.quote_frozen + r.quote_delta.abs(),
@@ -281,5 +282,543 @@ fn new_orderbook_merkle_leaf(
         key: key,
         old_v: u128le_to_h256(old_ask_size, old_bid_size),
         new_v: u128le_to_h256(new_ask_size, new_bid_size),
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{assets, clearing, core::*, fusotao::*, matcher, orderbook::*};
+    use rust_decimal_macros::dec;
+    use sha2::{Digest, Sha256};
+    use smt::{sha256::Sha256Hasher, CompiledMerkleProof, H256};
+
+    fn split_h256(v: &[u8; 32]) -> ([u8; 16], [u8; 16]) {
+        (v[..16].try_into().unwrap(), v[16..].try_into().unwrap())
+    }
+
+    fn split_h256_u128(v: &[u8; 32]) -> (u128, u128) {
+        let (l, r) = split_h256(v);
+        (u128::from_le_bytes(l), u128::from_le_bytes(r))
+    }
+
+    fn split_h256_u128_sum(v: &[u8; 32]) -> u128 {
+        let (l, r) = split_h256_u128(v);
+        l + r
+    }
+
+    fn construct_pair() -> OrderBook {
+        let base_scale = 5;
+        let quote_scale = 1;
+        let taker_fee = dec!(0.001);
+        let maker_fee = dec!(0.001);
+        let min_amount = dec!(1);
+        let min_vol = dec!(1);
+        OrderBook::new(
+            base_scale,
+            quote_scale,
+            taker_fee,
+            maker_fee,
+            min_amount,
+            min_vol,
+            true,
+            true,
+        )
+    }
+
+    #[test]
+    pub fn test_transfer_in() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut merkle_tree = GlobalStates::default();
+            let pp = Prover::new(tx);
+            let mut all = Accounts::new();
+            let cmd0 = AssetsCmd {
+                user_id: UserId::from_low_u64_be(1),
+                in_or_out: InOrOut::In,
+                currency: 1,
+                amount: dec!(1.11111),
+                nonce_or_block_number: 1,
+                signature_or_hash: vec![0],
+            };
+            let after =
+                assets::add_to_available(&mut all, &cmd0.user_id, cmd0.currency, cmd0.amount)
+                    .unwrap();
+            let cmd1 = cmd0.clone();
+            pp.prove_assets_cmd(
+                &mut merkle_tree,
+                1,
+                cmd0,
+                &assets::Balance::default(),
+                &after,
+            );
+            let transfer_again =
+                assets::add_to_available(&mut all, &cmd1.user_id, cmd1.currency, cmd1.amount)
+                    .unwrap();
+            pp.prove_assets_cmd(&mut merkle_tree, 1, cmd1, &after, &transfer_again);
+        });
+        let proof = rx.recv().unwrap();
+        let p0 = CompiledMerkleProof(proof.proof_of_exists.clone());
+        let old = proof
+            .leaves
+            .iter()
+            .map(|v| (Sha256::digest(&v.key).into(), v.old_v.into()))
+            .collect::<Vec<_>>();
+        let r = p0.verify::<Sha256Hasher>(&H256::default(), old).unwrap();
+        assert!(r);
+        let p1 = CompiledMerkleProof(proof.proof_of_cmd.clone());
+        let new = proof
+            .leaves
+            .iter()
+            .map(|v| (Sha256::digest(&v.key).into(), v.new_v.into()))
+            .collect::<Vec<_>>();
+        let r = p1.verify::<Sha256Hasher>(&proof.root.into(), new).unwrap();
+        assert!(r);
+        assert_eq!(
+            split_h256_u128(&proof.leaves[0].new_v),
+            (1111110000000000000, 0)
+        );
+        assert_eq!(split_h256_u128(&proof.leaves[0].old_v), (0, 0));
+        let new_root = proof.root.clone();
+        let proof = rx.recv().unwrap();
+        let p0 = CompiledMerkleProof(proof.proof_of_exists.clone());
+        let old = proof
+            .leaves
+            .iter()
+            .map(|v| (Sha256::digest(&v.key).into(), v.old_v.into()))
+            .collect::<Vec<_>>();
+        let r = p0.verify::<Sha256Hasher>(&new_root.into(), old).unwrap();
+        assert!(r);
+        let p1 = CompiledMerkleProof(proof.proof_of_cmd.clone());
+        let new = proof
+            .leaves
+            .iter()
+            .map(|v| (Sha256::digest(&v.key).into(), v.new_v.into()))
+            .collect::<Vec<_>>();
+        let r = p1.verify::<Sha256Hasher>(&proof.root.into(), new).unwrap();
+        assert!(r);
+        assert_eq!(
+            split_h256_u128(&proof.leaves[0].new_v),
+            (2222220000000000000, 0)
+        );
+        assert_eq!(
+            split_h256_u128(&proof.leaves[0].old_v),
+            (1111110000000000000, 0)
+        );
+    }
+
+    #[test]
+    pub fn test_trade() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut merkle_tree = GlobalStates::default();
+            let pp = Prover::new(tx);
+            let mut all = Accounts::new();
+            let orderbook = construct_pair();
+            let cmd0 = AssetsCmd {
+                user_id: UserId::from_low_u64_be(1),
+                in_or_out: InOrOut::In,
+                currency: 1,
+                amount: dec!(1.11111),
+                nonce_or_block_number: 1,
+                signature_or_hash: vec![0],
+            };
+            let after =
+                assets::add_to_available(&mut all, &cmd0.user_id, cmd0.currency, cmd0.amount)
+                    .unwrap();
+            pp.prove_assets_cmd(
+                &mut merkle_tree,
+                1,
+                cmd0,
+                &assets::Balance::default(),
+                &after,
+            );
+            let cmd1 = AssetsCmd {
+                user_id: UserId::from_low_u64_be(2),
+                in_or_out: InOrOut::In,
+                currency: 0,
+                amount: dec!(99.99),
+                nonce_or_block_number: 1,
+                signature_or_hash: vec![0],
+            };
+            let transfer_again =
+                assets::add_to_available(&mut all, &cmd1.user_id, cmd1.currency, cmd1.amount)
+                    .unwrap();
+            pp.prove_assets_cmd(&mut merkle_tree, 1, cmd1, &after, &transfer_again);
+
+            let mut orderbooks = std::collections::HashMap::new();
+            let (mf, tf) = (orderbook.maker_fee, orderbook.taker_fee);
+            orderbooks.insert((1, 0), orderbook);
+            let mut data = Data {
+                orderbooks: orderbooks,
+                accounts: all,
+                merkle_tree: merkle_tree,
+            };
+
+            let size = data.orderbooks.get(&(1, 0)).unwrap().size();
+            let cmd2 = LimitCmd {
+                symbol: (1, 0),
+                user_id: UserId::from_low_u64_be(1),
+                order_id: 1,
+                price: dec!(100),
+                amount: dec!(0.11),
+                ask_or_bid: AskOrBid::Ask,
+                nonce: 1,
+                signature: vec![0],
+            };
+            let taker_base_before =
+                assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.0);
+            let taker_quote_before =
+                assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.1);
+            let (c, val) =
+                assets::freeze_if(&cmd2.symbol, cmd2.ask_or_bid, cmd2.price, cmd2.amount);
+            assets::try_freeze(&mut data.accounts, &cmd2.user_id, c, val).unwrap();
+            let mr = matcher::execute_limit(
+                data.orderbooks.get_mut(&(1, 0)).unwrap(),
+                cmd2.user_id,
+                cmd2.order_id,
+                cmd2.price,
+                cmd2.amount,
+                cmd2.ask_or_bid,
+            );
+            let cr = clearing::clear(&mut data.accounts, 3, &(1, 0), tf, mf, &mr, 0);
+            pp.prove_trade_cmd(
+                &mut data,
+                cmd2.nonce,
+                cmd2.signature.clone(),
+                (cmd2, mf, tf).into(),
+                size.0,
+                size.1,
+                &taker_base_before,
+                &taker_quote_before,
+                &cr,
+            );
+
+            let size = data.orderbooks.get(&(1, 0)).unwrap().size();
+            let cmd2 = LimitCmd {
+                symbol: (1, 0),
+                user_id: UserId::from_low_u64_be(2),
+                order_id: 3,
+                price: dec!(90),
+                amount: dec!(0.01),
+                ask_or_bid: AskOrBid::Bid,
+                nonce: 1,
+                signature: vec![0],
+            };
+            let taker_base_before =
+                assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.0);
+            let taker_quote_before =
+                assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.1);
+            let (c, val) =
+                assets::freeze_if(&cmd2.symbol, cmd2.ask_or_bid, cmd2.price, cmd2.amount);
+            assets::try_freeze(&mut data.accounts, &cmd2.user_id, c, val).unwrap();
+            let mr = matcher::execute_limit(
+                data.orderbooks.get_mut(&(1, 0)).unwrap(),
+                cmd2.user_id,
+                cmd2.order_id,
+                cmd2.price,
+                cmd2.amount,
+                cmd2.ask_or_bid,
+            );
+            let cr = clearing::clear(&mut data.accounts, 5, &(1, 0), tf, mf, &mr, 0);
+            pp.prove_trade_cmd(
+                &mut data,
+                cmd2.nonce,
+                cmd2.signature.clone(),
+                (cmd2, mf, tf).into(),
+                size.0,
+                size.1,
+                &taker_base_before,
+                &taker_quote_before,
+                &cr,
+            );
+
+            let size = data.orderbooks.get(&(1, 0)).unwrap().size();
+            let cmd2 = LimitCmd {
+                symbol: (1, 0),
+                user_id: UserId::from_low_u64_be(1),
+                order_id: 4,
+                price: dec!(100),
+                amount: dec!(0.11),
+                ask_or_bid: AskOrBid::Ask,
+                nonce: 1,
+                signature: vec![0],
+            };
+            let taker_base_before =
+                assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.0);
+            let taker_quote_before =
+                assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.1);
+            let (c, val) =
+                assets::freeze_if(&cmd2.symbol, cmd2.ask_or_bid, cmd2.price, cmd2.amount);
+            assets::try_freeze(&mut data.accounts, &cmd2.user_id, c, val).unwrap();
+            let mr = matcher::execute_limit(
+                data.orderbooks.get_mut(&(1, 0)).unwrap(),
+                cmd2.user_id,
+                cmd2.order_id,
+                cmd2.price,
+                cmd2.amount,
+                cmd2.ask_or_bid,
+            );
+            let cr = clearing::clear(&mut data.accounts, 6, &(1, 0), tf, mf, &mr, 0);
+            pp.prove_trade_cmd(
+                &mut data,
+                cmd2.nonce,
+                cmd2.signature.clone(),
+                (cmd2, mf, tf).into(),
+                size.0,
+                size.1,
+                &taker_base_before,
+                &taker_quote_before,
+                &cr,
+            );
+
+            let size = data.orderbooks.get(&(1, 0)).unwrap().size();
+            let cmd2 = LimitCmd {
+                symbol: (1, 0),
+                user_id: UserId::from_low_u64_be(2),
+                order_id: 5,
+                price: dec!(110),
+                amount: dec!(0.5),
+                ask_or_bid: AskOrBid::Bid,
+                nonce: 1,
+                signature: vec![0],
+            };
+            let taker_base_before =
+                assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.0);
+            let taker_quote_before =
+                assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.1);
+            let (c, val) =
+                assets::freeze_if(&cmd2.symbol, cmd2.ask_or_bid, cmd2.price, cmd2.amount);
+            assets::try_freeze(&mut data.accounts, &cmd2.user_id, c, val).unwrap();
+            let mr = matcher::execute_limit(
+                data.orderbooks.get_mut(&(1, 0)).unwrap(),
+                cmd2.user_id,
+                cmd2.order_id,
+                cmd2.price,
+                cmd2.amount,
+                cmd2.ask_or_bid,
+            );
+            let cr = clearing::clear(&mut data.accounts, 7, &(1, 0), tf, mf, &mr, 0);
+            pp.prove_trade_cmd(
+                &mut data,
+                cmd2.nonce,
+                cmd2.signature.clone(),
+                (cmd2, mf, tf).into(),
+                size.0,
+                size.1,
+                &taker_base_before,
+                &taker_quote_before,
+                &cr,
+            );
+            println!("{:?}", cr.last().unwrap());
+
+            let size = data.orderbooks.get(&(1, 0)).unwrap().size();
+            let cmd2 = LimitCmd {
+                symbol: (1, 0),
+                user_id: UserId::from_low_u64_be(1),
+                order_id: 6,
+                price: dec!(88),
+                amount: dec!(0.3),
+                ask_or_bid: AskOrBid::Ask,
+                nonce: 1,
+                signature: vec![0],
+            };
+            let taker_base_before =
+                assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.0);
+            let taker_quote_before =
+                assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.1);
+            let (c, val) =
+                assets::freeze_if(&cmd2.symbol, cmd2.ask_or_bid, cmd2.price, cmd2.amount);
+            assets::try_freeze(&mut data.accounts, &cmd2.user_id, c, val).unwrap();
+            let mr = matcher::execute_limit(
+                data.orderbooks.get_mut(&(1, 0)).unwrap(),
+                cmd2.user_id,
+                cmd2.order_id,
+                cmd2.price,
+                cmd2.amount,
+                cmd2.ask_or_bid,
+            );
+            let cr = clearing::clear(&mut data.accounts, 8, &(1, 0), tf, mf, &mr, 0);
+            pp.prove_trade_cmd(
+                &mut data,
+                cmd2.nonce,
+                cmd2.signature.clone(),
+                (cmd2, mf, tf).into(),
+                size.0,
+                size.1,
+                &taker_base_before,
+                &taker_quote_before,
+                &cr,
+            );
+        });
+        // ignore transfer in
+        rx.recv().unwrap();
+        rx.recv().unwrap();
+        // ask 0.11, 100
+        {
+            let proof = rx.recv().unwrap();
+            // ask,bid
+            assert_eq!(split_h256_u128(&proof.leaves[0].old_v), (0, 0));
+            assert_eq!(
+                split_h256_u128(&proof.leaves[0].new_v),
+                (110000000000000000, 0)
+            );
+            // base
+            assert_eq!(
+                split_h256_u128(&proof.leaves[1].old_v),
+                (1111110000000000000, 0)
+            );
+            assert_eq!(
+                split_h256_u128(&proof.leaves[1].new_v),
+                (1001110000000000000, 110000000000000000)
+            );
+            // quote
+            assert_eq!(split_h256_u128(&proof.leaves[2].old_v), (0, 0));
+            assert_eq!(split_h256_u128(&proof.leaves[2].new_v), (0, 0));
+        }
+        // bid 0.01, 90
+        {
+            let proof = rx.recv().unwrap();
+            // ask,bid
+            assert_eq!(
+                split_h256_u128(&proof.leaves[0].old_v),
+                (110000000000000000, 0)
+            );
+            assert_eq!(
+                split_h256_u128(&proof.leaves[0].new_v),
+                (110000000000000000, 10000000000000000)
+            );
+            // base
+            assert_eq!(split_h256_u128(&proof.leaves[1].old_v), (0, 0));
+            assert_eq!(split_h256_u128(&proof.leaves[1].new_v), (0, 0));
+            // quote
+            assert_eq!(
+                split_h256_u128(&proof.leaves[2].old_v),
+                (99990000000000000000, 0)
+            );
+            assert_eq!(
+                split_h256_u128(&proof.leaves[2].new_v),
+                (99090000000000000000, 900000000000000000)
+            );
+        }
+        // ask 0.11, 100
+        {
+            let proof = rx.recv().unwrap();
+            // ask,bid
+            assert_eq!(
+                split_h256_u128(&proof.leaves[0].old_v),
+                (110000000000000000, 10000000000000000)
+            );
+            assert_eq!(
+                split_h256_u128(&proof.leaves[0].new_v),
+                (220000000000000000, 10000000000000000)
+            );
+            // base
+            assert_eq!(
+                split_h256_u128(&proof.leaves[1].old_v),
+                (1001110000000000000, 110000000000000000)
+            );
+            assert_eq!(
+                split_h256_u128(&proof.leaves[1].new_v),
+                (891110000000000000, 220000000000000000)
+            );
+            // quote
+            assert_eq!(split_h256_u128(&proof.leaves[2].old_v), (0, 0));
+            assert_eq!(split_h256_u128(&proof.leaves[2].new_v), (0, 0));
+        }
+        // bid 0.5, 110
+        {
+            let proof = rx.recv().unwrap();
+            // ask,bid
+            assert_eq!(
+                split_h256_u128(&proof.leaves[0].old_v),
+                (220000000000000000, 10000000000000000)
+            );
+            assert_eq!(
+                split_h256_u128(&proof.leaves[0].new_v),
+                (0, 290000000000000000)
+            );
+            // maker - base
+            assert_eq!(
+                split_h256_u128(&proof.leaves[1].old_v),
+                (891110000000000000, 220000000000000000)
+            );
+            assert_eq!(
+                split_h256_u128(&proof.leaves[1].new_v),
+                (891110000000000000, 110000000000000000)
+            );
+            // maker - quote
+            assert_eq!(split_h256_u128(&proof.leaves[2].old_v), (0, 0));
+            assert_eq!(
+                split_h256_u128(&proof.leaves[2].new_v),
+                (10989000000000000000, 0)
+            );
+            // maker - base
+            assert_eq!(
+                split_h256_u128(&proof.leaves[3].old_v),
+                (891110000000000000, 110000000000000000)
+            );
+            assert_eq!(
+                split_h256_u128(&proof.leaves[3].new_v),
+                (891110000000000000, 0)
+            );
+            // maker - quote
+            assert_eq!(
+                split_h256_u128(&proof.leaves[4].old_v),
+                (10989000000000000000, 0)
+            );
+            assert_eq!(
+                split_h256_u128(&proof.leaves[4].new_v),
+                (21978000000000000000, 0)
+            );
+            // taker - base
+            assert_eq!(split_h256_u128(&proof.leaves[5].old_v), (0, 0));
+            assert_eq!(
+                split_h256_u128(&proof.leaves[5].new_v),
+                (219780000000000000, 0)
+            );
+            // taker - quote
+            assert_eq!(
+                split_h256_u128(&proof.leaves[6].old_v),
+                (99090000000000000000, 900000000000000000)
+            );
+            let (na, nf) = split_h256_u128(&proof.leaves[6].new_v);
+            assert_eq!(na + nf + 22000000000000000000, 99990000000000000000);
+        }
+        // ask 0.3, 88
+        {
+            let proof = rx.recv().unwrap();
+            // ask,bid
+            assert_eq!(
+                split_h256_u128(&proof.leaves[0].old_v),
+                (0, 290000000000000000)
+            );
+            assert_eq!(
+                split_h256_u128(&proof.leaves[0].new_v),
+                (10000000000000000, 0)
+            );
+            // maker - base
+            let mb00 = split_h256_u128_sum(&proof.leaves[1].old_v);
+            let mb01 = split_h256_u128_sum(&proof.leaves[1].new_v);
+            // maker - quote
+            let mq00 = split_h256_u128_sum(&proof.leaves[2].old_v);
+            let mq01 = split_h256_u128_sum(&proof.leaves[2].new_v);
+            // maker - base
+            let mb10 = split_h256_u128_sum(&proof.leaves[3].old_v);
+            let mb11 = split_h256_u128_sum(&proof.leaves[3].new_v);
+            // maker - quote
+            let mq10 = split_h256_u128_sum(&proof.leaves[4].old_v);
+            let mq11 = split_h256_u128_sum(&proof.leaves[4].new_v);
+
+            let incr_base = (mb01 - mb00) + (mb11 - mb10);
+            let decr_quote = (mq00 - mq01) + (mq10 - mq11);
+            // taker - base
+            let tb0 = split_h256_u128_sum(&proof.leaves[5].old_v);
+            let tb1 = split_h256_u128_sum(&proof.leaves[5].new_v);
+            assert_eq!(incr_base, (tb0 - tb1) / 1000 * 999);
+            // taker - quote
+            let tq0 = split_h256_u128_sum(&proof.leaves[6].old_v);
+            let tq1 = split_h256_u128_sum(&proof.leaves[6].new_v);
+            assert_eq!(decr_quote / 1000 * 999, tq1 - tq0);
+        }
     }
 }
