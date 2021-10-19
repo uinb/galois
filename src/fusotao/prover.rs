@@ -372,8 +372,8 @@ mod test {
                 in_or_out: InOrOut::In,
                 currency: 1,
                 amount: dec!(1.11111),
-                nonce_or_block_number: 1,
-                signature_or_hash: vec![0],
+                block_number: 1,
+                extrinsic_hash: vec![0],
             };
             let after =
                 assets::add_to_available(&mut all, &cmd0.user_id, cmd0.currency, cmd0.amount)
@@ -454,8 +454,8 @@ mod test {
                 in_or_out: InOrOut::In,
                 currency: 1,
                 amount: dec!(1.11111),
-                nonce_or_block_number: 1,
-                signature_or_hash: vec![0],
+                block_number: 1,
+                extrinsic_hash: vec![0],
             };
             let after =
                 assets::add_to_available(&mut all, &cmd0.user_id, cmd0.currency, cmd0.amount)
@@ -472,8 +472,8 @@ mod test {
                 in_or_out: InOrOut::In,
                 currency: 0,
                 amount: dec!(99.99),
-                nonce_or_block_number: 1,
-                signature_or_hash: vec![0],
+                block_number: 1,
+                extrinsic_hash: vec![0],
             };
             let transfer_again =
                 assets::add_to_available(&mut all, &cmd1.user_id, cmd1.currency, cmd1.amount)
