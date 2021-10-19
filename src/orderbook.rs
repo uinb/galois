@@ -12,14 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::core::{Amount, Fee, Price, Symbol, UserId};
+use crate::core::{Amount, Fee, OrderId, Price, Symbol, UserId};
 use linked_hash_map::LinkedHashMap;
-use rust_decimal::{prelude::Zero, Decimal};
+use rust_decimal::{Decimal, prelude::Zero};
 use serde::{Deserialize, Serialize};
-use std::collections::{
-    btree_map::OccupiedEntry,
-    {BTreeMap, HashMap},
-};
+use std::collections::{btree_map::OccupiedEntry, {BTreeMap, HashMap}};
 
 const DEFAULT_PAGE_SIZE: usize = 256;
 
@@ -43,8 +40,8 @@ impl std::convert::TryFrom<u32> for AskOrBid {
 
     fn try_from(x: u32) -> anyhow::Result<Self> {
         match x {
-            0 => Ok(AskOrBid::Ask),
-            1 => Ok(AskOrBid::Bid),
+            crate::sequence::ASK_LIMIT => Ok(AskOrBid::Ask),
+            crate::sequence::BID_LIMIT => Ok(AskOrBid::Bid),
             _ => Err(anyhow::anyhow!("")),
         }
     }
@@ -72,14 +69,14 @@ impl std::ops::Not for AskOrBid {
 
 #[derive(Deserialize, Serialize, Debug, Eq, PartialEq, Clone)]
 pub struct Order {
-    pub id: u64,
+    pub id: OrderId,
     pub user: UserId,
     pub price: Price,
     pub unfilled: Amount,
 }
 
 impl Order {
-    pub const fn new(id: u64, user: UserId, price: Price, unfilled: Amount) -> Self {
+    pub const fn new(id: OrderId, user: UserId, price: Price, unfilled: Amount) -> Self {
         Self {
             id,
             user,
@@ -99,7 +96,7 @@ impl Order {
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
 pub struct OrderPage {
-    pub orders: LinkedHashMap<u64, Order>,
+    pub orders: LinkedHashMap<OrderId, Order>,
     pub amount: Amount,
     pub price: Price,
 }
@@ -110,7 +107,7 @@ impl OrderPage {
     fn with_init_order(order: Order) -> Self {
         let amount = order.unfilled;
         let price = order.price;
-        let mut orders = LinkedHashMap::<u64, Order>::new();
+        let mut orders = LinkedHashMap::<OrderId, Order>::new();
         orders.insert(order.id, order);
         Self {
             orders,
@@ -135,21 +132,21 @@ impl OrderPage {
         self.amount -= amount;
     }
 
-    fn remove(&mut self, order_id: u64) -> Option<Order> {
+    fn remove(&mut self, order_id: OrderId) -> Option<Order> {
         self.orders.remove(&order_id).map(|x| {
             self.amount -= x.unfilled;
             x
         })
     }
 
-    fn get(&self, order_id: u64) -> Option<&Order> {
+    fn get(&self, order_id: OrderId) -> Option<&Order> {
         self.orders.get(&order_id)
     }
 }
 
 pub type Tape = BTreeMap<Price, OrderPage>;
 
-pub type Index = HashMap<u64, Price>;
+pub type Index = HashMap<OrderId, Price>;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Default)]
 pub struct OrderBook {
@@ -164,6 +161,7 @@ pub struct OrderBook {
     pub min_vol: Amount,
     pub enable_market_order: bool,
     pub open: bool,
+    max_id: OrderId,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
@@ -197,6 +195,7 @@ impl OrderBook {
             min_vol,
             enable_market_order,
             open: open,
+            max_id: 0,
         }
     }
 
@@ -231,6 +230,7 @@ impl OrderBook {
     }
 
     pub fn insert(&mut self, order: Order, ask_or_bid: AskOrBid) {
+        self.max_id = order.id;
         match ask_or_bid {
             AskOrBid::Ask => Self::insert_into(&mut self.asks, &mut self.indices, order),
             AskOrBid::Bid => Self::insert_into(&mut self.bids, &mut self.indices, order),
@@ -255,7 +255,7 @@ impl OrderBook {
     //     }
     // }
 
-    pub fn remove(&mut self, order_id: u64) -> Option<(Order, AskOrBid)> {
+    pub fn remove(&mut self, order_id: OrderId) -> Option<(Order, AskOrBid)> {
         let price = self.indices.remove(&order_id)?;
         match (self.get_best_ask(), self.get_best_bid()) {
             (Some(best_ask), Some(_)) => {
@@ -275,7 +275,7 @@ impl OrderBook {
         }
     }
 
-    fn remove_from(tape: &mut Tape, order_id: u64, price: &Price) -> Option<Order> {
+    fn remove_from(tape: &mut Tape, order_id: OrderId, price: &Price) -> Option<Order> {
         let page = tape.get_mut(price)?;
         let removed = page.remove(order_id);
         if page.is_empty() {
@@ -303,7 +303,7 @@ impl OrderBook {
         self.bids.last_key_value().map(|(price, _)| *price)
     }
 
-    pub fn find_order(&self, order_id: u64) -> Option<&Order> {
+    pub fn find_order(&self, order_id: OrderId) -> Option<&Order> {
         let price = self.indices.get(&order_id)?;
         match (self.get_best_ask(), self.get_best_bid()) {
             (Some(best_ask), Some(_)) => {
@@ -319,11 +319,9 @@ impl OrderBook {
         }
     }
 
-    pub fn should_accept(&self, price: Price, amount: Amount) -> bool {
-        return self.open
-            && amount >= self.min_amount
-            && price.scale() <= self.quote_scale
-            && amount.scale() <= self.base_scale;
+    pub fn should_accept(&self, price: Price, amount: Amount, id: OrderId) -> bool {
+        self.open && id > self.max_id && amount >= self.min_amount
+            && price.scale() <= self.quote_scale && amount.scale() <= self.base_scale
     }
 }
 

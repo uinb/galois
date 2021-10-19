@@ -15,15 +15,12 @@
 #[cfg(feature = "fusotao")]
 use crate::fusotao::GlobalStates;
 use crate::{assets::Balance, orderbook::OrderBook};
-use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
+use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    fs::File,
-    io::{BufReader, BufWriter},
-};
+use std::{collections::HashMap, fs::File, io::{BufReader, BufWriter}};
 
+pub use crate::event::InOrOut;
 pub use crate::matcher::{Role, State as OrderState};
 pub use crate::orderbook::AskOrBid;
 

@@ -66,10 +66,8 @@ impl EncryptedConfig for MysqlConfig {
                 .ok_or_else(|| anyhow::anyhow!("invalid mysql config"))?,
         );
         let mc = magic_crypt::new_magic_crypt!(key, 64);
-        let dec = mc.decrypt_base64_to_string(
-            opts.get_pass()
-                .ok_or_else(|| anyhow::anyhow!("invalid mysql config"))?,
-        )?;
+        let dec = mc.decrypt_base64_to_string(opts.get_pass()
+            .ok_or_else(|| anyhow::anyhow!("invalid mysql config"))?)?;
         self.url.replace_range(f..=t, &dec);
         Ok(())
     }
@@ -132,31 +130,24 @@ fn init_config(toml: &str) -> anyhow::Result<Config> {
             let cfg: Config = toml::from_str(toml)?;
         }
     }
-    cfg_if! {
-        if #[cfg(feature = "fusotao")] {
-            let mut loggers = cfg
-                .log
-                .loggers()
-                .iter()
-                .map(|l| (l.name().to_string(), l.clone()))
-                .collect::<std::collections::HashMap<String, _>>();
-            loggers
-                .entry("ws".to_string())
-                .or_insert_with(|| Logger::builder().build("ws".to_string(), log::LevelFilter::Error));
-            loggers
-                .entry("fusotao_client".to_string())
-                .or_insert_with(|| {
-                    Logger::builder().build("fusotao_client".to_string(), log::LevelFilter::Error)
-                });
-            let log = log4rs::Config::builder()
-                .loggers::<Vec<_>>(loggers.into_values().collect())
-                .appenders(cfg.log.appenders_lossy(&Default::default()).0)
-                .build(cfg.log.root())?;
-            log4rs::init_config(log)?;
-        } else {
-            log4rs::init_raw_config(cfg.log)?;
-        }
-    }
+    let mut loggers = cfg.log
+        .loggers()
+        .iter()
+        .map(|l| (l.name().to_string(), l.clone()))
+        .collect::<std::collections::HashMap<String, _>>();
+    loggers
+        .entry("ws".to_string())
+        .or_insert_with(|| Logger::builder().build("ws".to_string(), log::LevelFilter::Error));
+    loggers
+        .entry("fusotao_client".to_string())
+        .or_insert_with(|| {
+            Logger::builder().build("fusotao_client".to_string(), log::LevelFilter::Error)
+        });
+    let log = log4rs::Config::builder()
+        .loggers::<Vec<_>>(loggers.into_values().collect())
+        .appenders(cfg.log.appenders_lossy(&Default::default()).0)
+        .build(cfg.log.root())?;
+    log4rs::init_config(log)?;
     Ok(cfg)
 }
 

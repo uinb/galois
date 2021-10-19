@@ -207,8 +207,43 @@ impl Prover {
             .send(Proof {
                 event_id: event_id,
                 user_id: cmd.user_id,
-                nonce: cmd.nonce_or_block_number,
-                signature: cmd.signature_or_hash.clone(),
+                nonce: cmd.block_number,
+                signature: cmd.extrinsic_hash.clone(),
+                cmd: cmd.into(),
+                leaves: leaves,
+                proof_of_exists: pr0,
+                proof_of_cmd: pr1,
+                root: merkle_tree.root().clone().into(),
+            })
+            .unwrap();
+    }
+
+    pub fn prove_cmd_rejected(
+        &self,
+        merkle_tree: &mut GlobalStates,
+        event_id: u64,
+        cmd: AssetsCmd,
+        account_before: &Balance,
+    ) {
+        let (old_available, old_frozen) = (
+            account_before.available.to_amount(),
+            account_before.frozen.to_amount(),
+        );
+        let leaves = vec![new_account_merkle_leaf(
+            &cmd.user_id,
+            cmd.currency,
+            old_available,
+            old_frozen,
+            old_available,
+            old_frozen,
+        )];
+        let (pr0, pr1) = gen_proofs(merkle_tree, &leaves);
+        self.0
+            .send(Proof {
+                event_id: event_id,
+                user_id: cmd.user_id,
+                nonce: cmd.block_number,
+                signature: cmd.extrinsic_hash.clone(),
                 cmd: cmd.into(),
                 leaves: leaves,
                 proof_of_exists: pr0,
@@ -337,8 +372,8 @@ mod test {
                 in_or_out: InOrOut::In,
                 currency: 1,
                 amount: dec!(1.11111),
-                nonce_or_block_number: 1,
-                signature_or_hash: vec![0],
+                block_number: 1,
+                extrinsic_hash: vec![0],
             };
             let after =
                 assets::add_to_available(&mut all, &cmd0.user_id, cmd0.currency, cmd0.amount)
@@ -419,8 +454,8 @@ mod test {
                 in_or_out: InOrOut::In,
                 currency: 1,
                 amount: dec!(1.11111),
-                nonce_or_block_number: 1,
-                signature_or_hash: vec![0],
+                block_number: 1,
+                extrinsic_hash: vec![0],
             };
             let after =
                 assets::add_to_available(&mut all, &cmd0.user_id, cmd0.currency, cmd0.amount)
@@ -437,8 +472,8 @@ mod test {
                 in_or_out: InOrOut::In,
                 currency: 0,
                 amount: dec!(99.99),
-                nonce_or_block_number: 1,
-                signature_or_hash: vec![0],
+                block_number: 1,
+                extrinsic_hash: vec![0],
             };
             let transfer_again =
                 assets::add_to_available(&mut all, &cmd1.user_id, cmd1.currency, cmd1.amount)

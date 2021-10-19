@@ -68,6 +68,18 @@ pub enum InOrOut {
     Out,
 }
 
+impl std::convert::TryFrom<u32> for InOrOut {
+    type Error = anyhow::Error;
+
+    fn try_from(x: u32) -> anyhow::Result<Self> {
+        match x {
+            crate::sequence::TRANSFER_IN => Ok(InOrOut::In),
+            crate::sequence::TRANSFER_OUT => Ok(InOrOut::Out),
+            _ => Err(anyhow::anyhow!("")),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AssetsCmd {
     pub user_id: UserId,
@@ -75,9 +87,9 @@ pub struct AssetsCmd {
     pub currency: Currency,
     pub amount: Amount,
     #[cfg(feature = "fusotao")]
-    pub nonce_or_block_number: u32,
+    pub block_number: u32,
     #[cfg(feature = "fusotao")]
-    pub signature_or_hash: Vec<u8>,
+    pub extrinsic_hash: Vec<u8>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -197,7 +209,7 @@ fn handle_event(
             let orderbook = data
                 .orderbooks
                 .get_mut(&cmd.symbol)
-                .filter(|b| b.should_accept(cmd.price, cmd.amount))
+                .filter(|b| b.should_accept(cmd.price, cmd.amount, id))
                 .filter(|b| b.find_order(cmd.order_id).is_none())
                 .ok_or(EventsError::EventRejected(
                     id,
@@ -332,41 +344,54 @@ fn handle_event(
             cfg_if! {
                 if #[cfg(feature = "fusotao")] {
                     let before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.currency);
+                    match assets::deduct_available(
+                        &mut data.accounts,
+                        &cmd.user_id,
+                        cmd.currency,
+                        cmd.amount,
+                    ) {
+                        Ok(after) => {
+                            prover.prove_assets_cmd(&mut data.merkle_tree, id, cmd, &before, &after);
+                            Ok(())
+                        }
+                        Err(e) => {
+                            prover.prove_cmd_rejected(&mut data.merkle_tree, id, cmd, &before);
+                            Err(EventsError::EventRejected(id, e))
+                        }
+                    }
+                } else {
+                    assets::deduct_available(
+                        &mut data.accounts,
+                        &cmd.user_id,
+                        cmd.currency,
+                        cmd.amount,
+                    ).map_err(|e|EventsError::EventRejected(id, e))?;
+                    Ok(())
                 }
             }
-            let after = assets::deduct_available(
-                &mut data.accounts,
-                &cmd.user_id,
-                cmd.currency,
-                cmd.amount,
-            )
-            .map_err(|e| EventsError::EventRejected(id, e))?;
-            cfg_if! {
-                if #[cfg(feature = "fusotao")] {
-                    prover.prove_assets_cmd(&mut data.merkle_tree, id, cmd, &before, &after);
-                }
-            }
-            Ok(())
         }
         Event::TransferIn(id, cmd, _) => {
             cfg_if! {
                 if #[cfg(feature = "fusotao")] {
                     let before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.currency);
-                }
-            }
-            let after = assets::add_to_available(
-                &mut data.accounts,
-                &cmd.user_id,
-                cmd.currency,
-                cmd.amount,
-            )
-            .map_err(|e| EventsError::EventRejected(id, e))?;
-            cfg_if! {
-                if #[cfg(feature = "fusotao")] {
+                    let after = assets::add_to_available(
+                        &mut data.accounts,
+                        &cmd.user_id,
+                        cmd.currency,
+                        cmd.amount,
+                    ).map_err(|e| EventsError::EventRejected(id, e))?;
                     prover.prove_assets_cmd(&mut data.merkle_tree, id, cmd, &before, &after);
+                    Ok(())
+                } else {
+                    assets::add_to_available(
+                        &mut data.accounts,
+                        &cmd.user_id,
+                        cmd.currency,
+                        cmd.amount,
+                    ).map_err(|e| EventsError::EventRejected(id, e))?;
+                    Ok(())
                 }
             }
-            Ok(())
         }
         Event::UpdateSymbol(_, cmd, _) => {
             if !data.orderbooks.contains_key(&cmd.symbol) {
