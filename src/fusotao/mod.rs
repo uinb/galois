@@ -89,7 +89,22 @@ pub struct CoinHostedEvent {
 }
 
 #[derive(Encode, Decode, Clone, Debug)]
+pub struct CoinRevokedEvent {
+    fund_owner: FusoAccountId,
+    dominator: FusoAccountId,
+    amount: u128,
+}
+
+#[derive(Encode, Decode, Clone, Debug)]
 pub struct TokenHostedEvent {
+    fund_owner: FusoAccountId,
+    dominator: FusoAccountId,
+    token_id: u32,
+    amount: u128,
+}
+
+#[derive(Encode, Decode, Clone, Debug)]
+pub struct TokenRevokedEvent {
     fund_owner: FusoAccountId,
     dominator: FusoAccountId,
     token_id: u32,
@@ -200,18 +215,22 @@ fn sync_finalized_blocks(
     signer: &Public,
     decoder: &EventsDecoder,
 ) -> anyhow::Result<(Vec<sequence::Command>, Hash)> {
-    let mut finalized = api.get_finalized_head()?.unwrap();
+    let mut finalized = api
+        .get_finalized_head()?
+        .ok_or(anyhow!("finalized heads couldn't be found"))?;
     let recent = finalized;
     let mut cmds = vec![];
     while finalized != current {
-        let latest: SignedBlock<FusoBlock> =
-            api.get_signed_block(Some(finalized)).unwrap().unwrap();
-        let e = api
-            .get_opaque_storage_by_key_hash(
-                sub_api::utils::storage_key("System", "Events"),
-                Some(finalized),
-            )?
-            .unwrap();
+        // not good,
+        let latest: SignedBlock<FusoBlock> = api.get_signed_block(Some(finalized))?.unwrap();
+        let e = api.get_opaque_storage_by_key_hash(
+            sub_api::utils::storage_key("System", "Events"),
+            Some(finalized),
+        )?;
+        if e.is_none() {
+            break;
+        }
+        let e = e.unwrap();
         let raw_events = decoder.decode_events(&mut e.as_slice()).map_err(|e| {
             log::error!("{:?}", e);
             anyhow::anyhow!("decode events error")
@@ -227,8 +246,8 @@ fn sync_finalized_blocks(
                             cmd.currency = Some(0);
                             cmd.amount = Some(to_decimal_represent(decoded.amount));
                             cmd.user_id = Some(format!("{}", decoded.fund_owner));
-                            cmd.nonce = Some(0);
-                            cmd.signature = Some(hex::encode(finalized));
+                            cmd.block_number = Some(0);
+                            cmd.extrinsic_hash = Some(hex::encode(finalized));
                             cmds.push(cmd);
                         }
                     }
@@ -240,8 +259,34 @@ fn sync_finalized_blocks(
                             cmd.currency = Some(decoded.token_id);
                             cmd.amount = Some(to_decimal_represent(decoded.amount));
                             cmd.user_id = Some(format!("{}", decoded.fund_owner));
-                            cmd.nonce = Some(0);
-                            cmd.signature = Some(hex::encode(finalized));
+                            cmd.block_number = Some(0);
+                            cmd.extrinsic_hash = Some(hex::encode(finalized));
+                            cmds.push(cmd);
+                        }
+                    }
+                    "CoinRevoked" => {
+                        let decoded = CoinRevokedEvent::decode(&mut &raw.data[..]).unwrap();
+                        if &decoded.dominator == signer {
+                            let mut cmd = sequence::Command::default();
+                            cmd.cmd = sequence::TRANSFER_OUT;
+                            cmd.currency = Some(0);
+                            cmd.amount = Some(to_decimal_represent(decoded.amount));
+                            cmd.user_id = Some(format!("{}", decoded.fund_owner));
+                            cmd.block_number = Some(0);
+                            cmd.extrinsic_hash = Some(hex::encode(finalized));
+                            cmds.push(cmd);
+                        }
+                    }
+                    "TokenRevoked" => {
+                        let decoded = TokenRevokedEvent::decode(&mut &raw.data[..]).unwrap();
+                        if &decoded.dominator == signer {
+                            let mut cmd = sequence::Command::default();
+                            cmd.cmd = sequence::TRANSFER_OUT;
+                            cmd.currency = Some(decoded.token_id);
+                            cmd.amount = Some(to_decimal_represent(decoded.amount));
+                            cmd.user_id = Some(format!("{}", decoded.fund_owner));
+                            cmd.block_number = Some(0);
+                            cmd.extrinsic_hash = Some(hex::encode(finalized));
                             cmds.push(cmd);
                         }
                     }
