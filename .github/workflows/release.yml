@@ -1,22 +1,42 @@
 name: Release
 
 on:
-  release:
-    types: [created]
+  push:
+    tags: [ "*" ]
 
 jobs:
-  release:
-    name: release ${{ matrix.target }}
+  create-release:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [x86_64-pc-windows-gnu, x86_64-unknown-linux-musl]
     steps:
-      - uses: actions/checkout@master
-      - name: Compile and release
-        uses: rust-build/rust-build.action@latest
+      - uses: actions/checkout@v2
+      - uses: taiki-e/create-gh-release-action@v1
+        with:
+          changelog: CHANGELOG.md
+          draft: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RUSTTARGET: ${{ matrix.target }}
-          EXTRA_FILES: "README.md LICENSE galois.yml"
+  update-release:
+    name: Publish binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly-2021-08-16
+          override: true
+          components: rustfmt, clippy
+      - name: Build release with all features enabled
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --all-features
+      - uses: montudor/action-zip@v1
+        with:
+          args: zip -j -r galois.zip target/release/galois galois.toml.template README.md LICENSE
+      - name: Upload binaries to release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: galois.zip
+          tag: ${{ github.ref }}
+          overwrite: true

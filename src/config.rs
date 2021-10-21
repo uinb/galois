@@ -56,19 +56,9 @@ pub struct MysqlConfig {
 impl EncryptedConfig for MysqlConfig {
     fn decrypt(&mut self, key: &str) -> anyhow::Result<()> {
         use magic_crypt::MagicCryptTrait;
-        let opts = mysql::Opts::from_url(&self.url)?;
-        let (f, t) = (
-            self.url
-                .find(":")
-                .ok_or_else(|| anyhow::anyhow!("invalid mysql config"))?,
-            self.url
-                .find('@')
-                .ok_or_else(|| anyhow::anyhow!("invalid mysql config"))?,
-        );
         let mc = magic_crypt::new_magic_crypt!(key, 64);
-        let dec = mc.decrypt_base64_to_string(opts.get_pass()
-            .ok_or_else(|| anyhow::anyhow!("invalid mysql config"))?)?;
-        self.url.replace_range(f..=t, &dec);
+        let dec = mc.decrypt_base64_to_string(&self.url)?;
+        self.url.replace_range(.., &dec);
         Ok(())
     }
 }
@@ -86,7 +76,7 @@ impl EncryptedConfig for FusotaoConfig {
         use magic_crypt::MagicCryptTrait;
         let mc = magic_crypt::new_magic_crypt!(key, 64);
         let dec = mc.decrypt_base64_to_string(&self.key_seed)?;
-        self.node_url.replace_range(.., &dec);
+        self.key_seed.replace_range(.., &dec);
         Ok(())
     }
 }
@@ -130,7 +120,8 @@ fn init_config(toml: &str) -> anyhow::Result<Config> {
             let cfg: Config = toml::from_str(toml)?;
         }
     }
-    let mut loggers = cfg.log
+    let mut loggers = cfg
+        .log
         .loggers()
         .iter()
         .map(|l| (l.name().to_string(), l.clone()))
