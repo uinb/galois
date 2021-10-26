@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use argparse::{ArgumentParser, Store, StoreTrue};
+use argparse::{ArgumentParser, Store};
 use cfg_if::cfg_if;
 use lazy_static::lazy_static;
 use log4rs::config::{Logger, RawConfig as LogConfig};
@@ -45,6 +45,7 @@ pub struct SequenceConfig {
     pub batch_size: usize,
     pub dump_mode: String,
     pub fetch_intervel_ms: u64,
+    pub enable_from_genesis: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -67,7 +68,7 @@ impl EncryptedConfig for MysqlConfig {
 pub struct FusotaoConfig {
     pub node_url: String,
     pub key_seed: String,
-    pub claim_block: String,
+    pub claim_block: u32,
 }
 
 #[cfg(feature = "enc-conf")]
@@ -88,18 +89,14 @@ pub struct RedisConfig {
 
 lazy_static! {
     pub static ref C: Config = init_config_file().unwrap();
-    pub static ref ENABLE_START_FROM_GENESIS: bool = true;
 }
 
 fn init_config_file() -> anyhow::Result<Config> {
     let mut file = String::new();
-    let mut from_genesis = false;
     {
         let mut args = ArgumentParser::new();
         args.refer(&mut file)
             .add_option(&["-c"], Store, "toml config file");
-        args.refer(&mut from_genesis)
-            .add_option(&["-g"], StoreTrue, "start from genesis");
         args.parse_args_or_exit();
     }
     init_config(&std::fs::read_to_string(file)?)

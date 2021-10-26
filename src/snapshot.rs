@@ -67,10 +67,10 @@ pub fn load() -> anyhow::Result<(u64, core::Data)> {
             );
             Ok((event_id + 1, core::Data::from_raw(fs::File::open(f)?)?))
         }
-        None => match *config::ENABLE_START_FROM_GENESIS {
+        None => match config::C.sequence.enable_from_genesis {
             true => Ok((1, core::Data::new())),
             false => Err(anyhow::anyhow!(
-                "missing snapshot, add `-g` to start from genesis"
+                "missing snapshot, add `enable_from_genesis` to force to start"
             )),
         },
     }

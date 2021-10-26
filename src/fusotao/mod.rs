@@ -18,6 +18,8 @@ pub use prover::Prover;
 
 use crate::{config::C, core::*, event::*, sequence};
 use anyhow::anyhow;
+use async_std::task::block_on;
+use futures::future::try_join_all;
 use memmap::MmapMut;
 use parity_scale_codec::{Compact, Decode, Encode, WrapperTypeEncode};
 use rust_decimal::{prelude::*, Decimal};
@@ -41,7 +43,7 @@ use sub_api::{
         ws_client::{EventsDecoder, RuntimeEvent},
         WsRpcClient,
     },
-    Api, FromHexString, Hash, SignedBlock, UncheckedExtrinsicV4, XtStatus,
+    Api, SignedBlock, UncheckedExtrinsicV4, XtStatus,
 };
 
 pub type GlobalStates = SparseMerkleTree<Sha256Hasher, H256, DefaultStore<H256>>;
@@ -49,6 +51,7 @@ pub type FusoAccountId = Public;
 pub type FusoAddress = MultiAddress<FusoAccountId, ()>;
 pub type FusoHeader = Header<u32, BlakeTwo256>;
 pub type FusoBlock = Block<FusoHeader, OpaqueExtrinsic>;
+pub type FusoApi = Api<Sr25519, WsRpcClient>;
 
 const ONE_ONCHAIN: u128 = 1_000_000_000_000_000_000;
 const MILL: u32 = 1_000_000;
@@ -113,6 +116,110 @@ pub struct TokenRevokedEvent {
 
 impl WrapperTypeEncode for UserId {}
 
+fn new_api(signer: Sr25519) -> anyhow::Result<FusoApi> {
+    let client = WsRpcClient::new(
+        &C.fusotao
+            .as_ref()
+            .ok_or(anyhow!("Invalid fusotao config"))?
+            .node_url,
+    );
+    Api::new(client)
+        .map(|api| api.set_signer(signer))
+        .map_err(|e| {
+            log::error!("{:?}", e);
+            anyhow!("Fusotao node not available or runtime metadata check failed")
+        })
+}
+
+fn start_submitting(api: FusoApi, rx: Receiver<Proof>) -> anyhow::Result<()> {
+    use sp_core::Pair;
+    let path: PathBuf = [&C.sequence.coredump_dir, "fusotao.seq"].iter().collect();
+    // TODO `-g`
+    let finalized_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(&path)?;
+    finalized_file.set_len(8)?;
+    let mut seq = unsafe { MmapMut::map_mut(&finalized_file)? };
+    let mut cur = u64::from_le_bytes(seq.as_ref().try_into()?);
+    if cur == 0 && !C.sequence.enable_from_genesis {
+        panic!("couldn't load seq memmap file, add `-g` to force start from genesis");
+    }
+    log::info!("initiate proving at sequence {:?}", cur);
+    std::thread::spawn(move || loop {
+        let proof = rx.recv().unwrap();
+        if cur >= proof.event_id {
+            continue;
+        }
+        cur = proof.event_id;
+        log::debug!("proofs of sequence {:?}: {:?}", cur, proof);
+        let xt: UncheckedExtrinsicV4<_> =
+            sub_api::compose_extrinsic!(api.clone(), "Receipts", "verify", proof);
+        match api.send_extrinsic(xt.hex_encode(), XtStatus::InBlock) {
+            Ok(_) => {
+                // TODO scan block and revert status once chain fork
+                seq.copy_from_slice(&cur.to_le_bytes()[..]);
+                seq.flush().unwrap();
+                log::info!("proofs of sequence {:?} has been submitted", cur);
+            }
+            Err(e) => log::error!("submitting proofs failed, {:?}", e),
+        }
+    });
+    Ok(())
+}
+
+fn start_listening(api: FusoApi, who: Public) -> anyhow::Result<()> {
+    let path: PathBuf = [&C.sequence.coredump_dir, "fusotao.blk"].iter().collect();
+    let finalized_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(&path)?;
+    finalized_file.set_len(4)?;
+    let mut blk = unsafe { MmapMut::map_mut(&finalized_file)? };
+    let mut cur = u32::from_le_bytes(blk.as_ref().try_into()?);
+    if cur == 0 {
+        if !C.sequence.enable_from_genesis {
+            panic!("couldn't load blk memmap file, add `-g` to force start from genesis");
+        } else {
+            let at = C.fusotao.as_ref().unwrap().claim_block;
+            blk.copy_from_slice(&at.to_le_bytes()[..]);
+            blk.flush().unwrap();
+        }
+    }
+    log::info!("start synchronizing events from block {}", cur);
+    let decoder = EventsDecoder::try_from(api.metadata.clone()).unwrap();
+    std::thread::spawn(move || loop {
+        match sync_finalized_blocks(cur, 10, &api, &who, &decoder) {
+            Ok((cmds, sync, last)) => {
+                if !cmds.is_empty() {
+                    log::info!(
+                        "prepare handle {} events before block {:?}",
+                        cmds.len(),
+                        sync
+                    );
+                }
+                match sequence::insert_sequences(&cmds) {
+                    Ok(()) => {
+                        blk[..].copy_from_slice(&sync.to_le_bytes()[..]);
+                        // FIXME commit manually after memmap flush ok
+                        blk.flush().unwrap();
+                        log::info!("all events before before block {} synchronized", sync);
+                    }
+                    Err(_) => log::warn!("save sequences from block {} failed", cur),
+                }
+                cur = sync;
+                if cur >= last {
+                    std::thread::sleep(Duration::from_millis(7000));
+                }
+            }
+            Err(e) => log::error!("sync blocks failed, {:?}", e),
+        }
+    });
+    Ok(())
+}
+
 /// AccountId of chain = MultiAddress<sp_runtime::AccountId32, ()>::Id = GenericAddress::Id
 /// 1. from_ss58check() or from_ss58check_with_version()
 /// 2. new or from public
@@ -126,179 +233,126 @@ pub fn init(rx: Receiver<Proof>) -> anyhow::Result<()> {
         None,
     )
     .map_err(|_| anyhow!("Invalid fusotao config"))?;
-    let client = WsRpcClient::new(
-        &C.fusotao
-            .as_ref()
-            .ok_or(anyhow!("Invalid fusotao config"))?
-            .node_url,
-    );
-    let dominator = signer.public();
-    let api = Api::new(client)
-        .map(|api| api.set_signer(signer))
-        .map_err(|e| {
-            log::error!("{:?}", e);
-            anyhow!("Fusotao node not available or runtime metadata check failed")
-        })?;
-    let path: PathBuf = [&C.sequence.coredump_dir, "fusotao.seq"].iter().collect();
-    let finalized_file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .open(&path)?;
-    finalized_file.set_len(8)?;
-    let mut seq = unsafe { MmapMut::map_mut(&finalized_file)? };
-    let mut cur = u64::from_le_bytes(seq.as_ref().try_into()?);
-    log::info!("initiate proving at sequence {:?}", cur);
-    let wapi = api.clone();
-    std::thread::spawn(move || loop {
-        let proof = rx.recv().unwrap();
-        if cur >= proof.event_id {
-            continue;
-        }
-        cur = proof.event_id;
-        log::debug!("proofs of sequence {:?}: {:?}", cur, proof);
-        let xt: UncheckedExtrinsicV4<_> =
-            sub_api::compose_extrinsic!(wapi.clone(), "Receipts", "verify", proof);
-        match wapi.send_extrinsic(xt.hex_encode(), XtStatus::InBlock) {
-            Ok(_) => {
-                // TODO scan block and revert status once chain fork
-                seq.copy_from_slice(&cur.to_le_bytes()[..]);
-                log::info!("proofs of sequence {:?} has been submitted", cur);
-            }
-            Err(e) => log::error!("submitting proofs failed, {:?}", e),
-        }
-    });
-    let path: PathBuf = [&C.sequence.coredump_dir, "fusotao.blk"].iter().collect();
-    let finalized_file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .open(&path)?;
-    finalized_file.set_len(32)?;
-    let mut blk = unsafe { MmapMut::map_mut(&finalized_file)? };
-    if blk.iter().fold(0u8, |x, a| x | a) == 0 {
-        let from = Hash::from_hex(C.fusotao.as_ref().unwrap().claim_block.clone()).unwrap();
-        blk.copy_from_slice(&from[..]);
-        blk.flush().unwrap();
-    }
-    let decoder = EventsDecoder::try_from(api.metadata.clone()).unwrap();
-    std::thread::spawn(move || loop {
-        let current = Hash::from_slice(blk.as_ref());
-        log::debug!("latest synchronized block: {:?}", current);
-        if let Ok((cmds, hash)) = sync_finalized_blocks(current, &api, &dominator, &decoder) {
-            log::debug!("prepare handle events {:?} before block {:?}", cmds, hash);
-            match sequence::insert_sequences(&cmds) {
-                Ok(()) => {
-                    blk[..].copy_from_slice(&hash[..]);
-                    // FIXME commit manually after memmap flush ok
-                    blk.flush().unwrap();
-                    if !cmds.is_empty() {
-                        log::info!("all events before finalized block {:?} synchronized", hash);
-                    }
-                }
-                Err(_) => log::warn!(
-                    "write sequences from fusotao failed({:?} ~ {:?}), retry",
-                    current,
-                    hash
-                ),
-            }
-        }
-        std::thread::sleep(Duration::from_millis(3000));
-    });
+    let api = new_api(signer.clone())?;
+    start_submitting(api.clone(), rx)?;
+    start_listening(api, signer.public())?;
     log::info!("fusotao prover initialized");
     Ok(())
 }
 
-fn sync_finalized_blocks(
-    current: Hash,
-    api: &Api<Sr25519, WsRpcClient>,
+async fn resolve_block(
+    api: &FusoApi,
+    at: u32,
     signer: &Public,
     decoder: &EventsDecoder,
-) -> anyhow::Result<(Vec<sequence::Command>, Hash)> {
-    let mut finalized = api
+) -> anyhow::Result<Vec<sequence::Command>> {
+    let hash = api
+        .get_block_hash(at)?
+        .ok_or(anyhow!("block {} is not born", at))?;
+    let e = api.get_opaque_storage_by_key_hash(
+        sub_api::utils::storage_key("System", "Events"),
+        Some(hash),
+    )?;
+    if e.is_none() {
+        log::warn!("no events in block {}", at);
+        return Ok(vec![]);
+    }
+    let e = e.unwrap();
+    let raw_events = decoder.decode_events(&mut e.as_slice()).map_err(|e| {
+        log::error!("{:?}", e);
+        anyhow::anyhow!("decode events error")
+    })?;
+    let mut cmds = vec![];
+    for (_, event) in raw_events.into_iter() {
+        match event {
+            RuntimeEvent::Raw(raw) if raw.module == "Receipts" => match raw.variant.as_ref() {
+                "CoinHosted" => {
+                    let decoded = CoinHostedEvent::decode(&mut &raw.data[..]).unwrap();
+                    if &decoded.dominator == signer {
+                        let mut cmd = sequence::Command::default();
+                        cmd.cmd = sequence::TRANSFER_IN;
+                        cmd.currency = Some(0);
+                        cmd.amount = Some(to_decimal_represent(decoded.amount));
+                        cmd.user_id = Some(format!("{}", decoded.fund_owner));
+                        cmd.block_number = Some(at);
+                        cmd.extrinsic_hash = Some(hex::encode(hash));
+                        cmds.push(cmd);
+                    }
+                }
+                "TokenHosted" => {
+                    let decoded = TokenHostedEvent::decode(&mut &raw.data[..]).unwrap();
+                    if &decoded.dominator == signer {
+                        let mut cmd = sequence::Command::default();
+                        cmd.cmd = sequence::TRANSFER_IN;
+                        cmd.currency = Some(decoded.token_id);
+                        cmd.amount = Some(to_decimal_represent(decoded.amount));
+                        cmd.user_id = Some(format!("{}", decoded.fund_owner));
+                        cmd.block_number = Some(at);
+                        cmd.extrinsic_hash = Some(hex::encode(hash));
+                        cmds.push(cmd);
+                    }
+                }
+                "CoinRevoked" => {
+                    let decoded = CoinRevokedEvent::decode(&mut &raw.data[..]).unwrap();
+                    if &decoded.dominator == signer {
+                        let mut cmd = sequence::Command::default();
+                        cmd.cmd = sequence::TRANSFER_OUT;
+                        cmd.currency = Some(0);
+                        cmd.amount = Some(to_decimal_represent(decoded.amount));
+                        cmd.user_id = Some(format!("{}", decoded.fund_owner));
+                        cmd.block_number = Some(at);
+                        cmd.extrinsic_hash = Some(hex::encode(hash));
+                        cmds.push(cmd);
+                    }
+                }
+                "TokenRevoked" => {
+                    let decoded = TokenRevokedEvent::decode(&mut &raw.data[..]).unwrap();
+                    if &decoded.dominator == signer {
+                        let mut cmd = sequence::Command::default();
+                        cmd.cmd = sequence::TRANSFER_OUT;
+                        cmd.currency = Some(decoded.token_id);
+                        cmd.amount = Some(to_decimal_represent(decoded.amount));
+                        cmd.user_id = Some(format!("{}", decoded.fund_owner));
+                        cmd.block_number = Some(at);
+                        cmd.extrinsic_hash = Some(hex::encode(hash));
+                        cmds.push(cmd);
+                    }
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+    Ok(cmds)
+}
+
+fn sync_finalized_blocks(
+    from_block_included: u32,
+    limit: u32,
+    api: &FusoApi,
+    signer: &Public,
+    decoder: &EventsDecoder,
+) -> anyhow::Result<(Vec<sequence::Command>, u32, u32)> {
+    let finalized_block_hash = api
         .get_finalized_head()?
         .ok_or(anyhow!("finalized heads couldn't be found"))?;
-    let recent = finalized;
-    let mut cmds = vec![];
-    while finalized != current {
-        // not good,
-        let latest: SignedBlock<FusoBlock> = api.get_signed_block(Some(finalized))?.unwrap();
-        let e = api.get_opaque_storage_by_key_hash(
-            sub_api::utils::storage_key("System", "Events"),
-            Some(finalized),
-        )?;
-        if e.is_none() {
-            break;
-        }
-        let e = e.unwrap();
-        let raw_events = decoder.decode_events(&mut e.as_slice()).map_err(|e| {
-            log::error!("{:?}", e);
-            anyhow::anyhow!("decode events error")
-        })?;
-        for (_, event) in raw_events.into_iter() {
-            match event {
-                RuntimeEvent::Raw(raw) if raw.module == "Receipts" => match raw.variant.as_ref() {
-                    "CoinHosted" => {
-                        let decoded = CoinHostedEvent::decode(&mut &raw.data[..]).unwrap();
-                        if &decoded.dominator == signer {
-                            let mut cmd = sequence::Command::default();
-                            cmd.cmd = sequence::TRANSFER_IN;
-                            cmd.currency = Some(0);
-                            cmd.amount = Some(to_decimal_represent(decoded.amount));
-                            cmd.user_id = Some(format!("{}", decoded.fund_owner));
-                            cmd.block_number = Some(0);
-                            cmd.extrinsic_hash = Some(hex::encode(finalized));
-                            cmds.push(cmd);
-                        }
-                    }
-                    "TokenHosted" => {
-                        let decoded = TokenHostedEvent::decode(&mut &raw.data[..]).unwrap();
-                        if &decoded.dominator == signer {
-                            let mut cmd = sequence::Command::default();
-                            cmd.cmd = sequence::TRANSFER_IN;
-                            cmd.currency = Some(decoded.token_id);
-                            cmd.amount = Some(to_decimal_represent(decoded.amount));
-                            cmd.user_id = Some(format!("{}", decoded.fund_owner));
-                            cmd.block_number = Some(0);
-                            cmd.extrinsic_hash = Some(hex::encode(finalized));
-                            cmds.push(cmd);
-                        }
-                    }
-                    "CoinRevoked" => {
-                        let decoded = CoinRevokedEvent::decode(&mut &raw.data[..]).unwrap();
-                        if &decoded.dominator == signer {
-                            let mut cmd = sequence::Command::default();
-                            cmd.cmd = sequence::TRANSFER_OUT;
-                            cmd.currency = Some(0);
-                            cmd.amount = Some(to_decimal_represent(decoded.amount));
-                            cmd.user_id = Some(format!("{}", decoded.fund_owner));
-                            cmd.block_number = Some(0);
-                            cmd.extrinsic_hash = Some(hex::encode(finalized));
-                            cmds.push(cmd);
-                        }
-                    }
-                    "TokenRevoked" => {
-                        let decoded = TokenRevokedEvent::decode(&mut &raw.data[..]).unwrap();
-                        if &decoded.dominator == signer {
-                            let mut cmd = sequence::Command::default();
-                            cmd.cmd = sequence::TRANSFER_OUT;
-                            cmd.currency = Some(decoded.token_id);
-                            cmd.amount = Some(to_decimal_represent(decoded.amount));
-                            cmd.user_id = Some(format!("{}", decoded.fund_owner));
-                            cmd.block_number = Some(0);
-                            cmd.extrinsic_hash = Some(hex::encode(finalized));
-                            cmds.push(cmd);
-                        }
-                    }
-                    _ => {}
-                },
-                _ => {}
-            }
-        }
-        finalized = latest.block.header.parent_hash;
+    let finalized_block: SignedBlock<FusoBlock> =
+        api.get_signed_block(Some(finalized_block_hash))?.unwrap();
+    let finalized_block_number = finalized_block.block.header.number;
+    log::info!(
+        "current block: {}, finalized block: {}, {:?}",
+        from_block_included,
+        finalized_block_number,
+        finalized_block_hash,
+    );
+    let mut f = vec![];
+    let mut i = 0;
+    while from_block_included + i <= finalized_block_number && i < limit {
+        f.push(resolve_block(api, i, signer, decoder));
+        i += 1;
     }
-    cmds.reverse();
-    Ok((cmds, recent))
+    let r = block_on(try_join_all(f))?.into_iter().flatten().collect();
+    Ok((r, from_block_included + i, finalized_block_number))
 }
 
 #[derive(Clone, Encode, Decode, Eq, PartialEq, Debug)]
