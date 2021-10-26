@@ -348,7 +348,7 @@ fn sync_finalized_blocks(
     let mut f = vec![];
     let mut i = 0;
     while from_block_included + i <= finalized_block_number && i < limit {
-        f.push(resolve_block(api, i, signer, decoder));
+        f.push(resolve_block(api, from_block_included + i, signer, decoder));
         i += 1;
     }
     let r = block_on(try_join_all(f))?.into_iter().flatten().collect();
