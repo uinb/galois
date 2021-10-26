@@ -18,7 +18,6 @@ use std::sync::{atomic, mpsc, Arc};
 fn main() {
     print_banner();
     lazy_static::initialize(&config::C);
-    lazy_static::initialize(&config::ENABLE_START_FROM_GENESIS);
     let (id, coredump) = snapshot::load().unwrap();
     let (output_tx, output_rx) = mpsc::channel();
     let (event_tx, event_rx) = mpsc::channel();
