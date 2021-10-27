@@ -217,7 +217,7 @@ fn handle_event(
                 ))?;
             cfg_if! {
                 if #[cfg(feature = "fusotao")] {
-                    log::info!("predicate root={:?} at {}", data.merkle_tree.root(), id-1);
+                    log::info!("predicate root={:02x?} before applying {}", data.merkle_tree.root(), id);
                     let size = orderbook.size();
                     let taker_base_before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.0);
                     let taker_quote_before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.1);
@@ -278,7 +278,7 @@ fn handle_event(
                 .ok_or(EventsError::EventRejected(id, anyhow!("order not exists")))?;
             cfg_if! {
                 if #[cfg(feature = "fusotao")] {
-                    log::info!("predicate root={:?} at {}", data.merkle_tree.root(), id-1);
+                    log::info!("predicate root={:02x?} before applying {}", data.merkle_tree.root(), id);
                     let size = orderbook.size();
                     let taker_base_before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.0);
                     let taker_quote_before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.1);
@@ -345,7 +345,7 @@ fn handle_event(
         Event::TransferOut(id, cmd, _) => {
             cfg_if! {
                 if #[cfg(feature = "fusotao")] {
-                    log::info!("predicate root={:?} at {}", data.merkle_tree.root(), id-1);
+                    log::info!("predicate root={:02x?} before applying {}", data.merkle_tree.root(), id);
                     let before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.currency);
                     match assets::deduct_available(
                         &mut data.accounts,
@@ -376,7 +376,7 @@ fn handle_event(
         Event::TransferIn(id, cmd, _) => {
             cfg_if! {
                 if #[cfg(feature = "fusotao")] {
-                    log::info!("predicate root={:?} at {}", data.merkle_tree.root(), id-1);
+                    log::info!("predicate root={:02x?} before applying {}", data.merkle_tree.root(), id);
                     let before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.currency);
                     let after = assets::add_to_available(
                         &mut data.accounts,
