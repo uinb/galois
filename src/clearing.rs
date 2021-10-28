@@ -32,93 +32,97 @@ pub fn clear(
 ) -> Vec<Output> {
     let base = symbol.0;
     let quote = symbol.1;
-    if mr.taker.state == State::Submitted {
-        let base_account = assets::get_balance_to_owned(accounts, &mr.taker.user_id, base);
-        let quote_account = assets::get_balance_to_owned(accounts, &mr.taker.user_id, quote);
-        return vec![Output {
-            event_id,
-            order_id: mr.taker.order_id,
-            user_id: mr.taker.user_id,
-            symbol: *symbol,
-            role: Role::Taker,
-            state: mr.taker.state,
-            ask_or_bid: AskOrBid::Ask,
-            price: mr.taker.price,
-            base_delta: Amount::zero(),
-            quote_delta: Amount::zero(),
-            base_charge: Amount::zero(),
-            quote_charge: Amount::zero(),
-            base_available: base_account.available,
-            quote_available: quote_account.available,
-            base_frozen: base_account.frozen,
-            quote_frozen: quote_account.frozen,
-            timestamp: time,
-        }];
-    }
-    match mr.maker.is_empty() {
-        // cancel
-        true => match mr.taker.ask_or_bid {
-            AskOrBid::Ask => {
-                // revert base
-                assets::try_unfreeze(accounts, &mr.taker.user_id, base, mr.taker.unfilled).unwrap();
-                let base_account = assets::get_balance_to_owned(accounts, &mr.taker.user_id, base);
-                let quote_account =
-                    assets::get_balance_to_owned(accounts, &mr.taker.user_id, quote);
-                vec![Output {
-                    event_id,
-                    order_id: mr.taker.order_id,
-                    user_id: mr.taker.user_id,
-                    symbol: *symbol,
-                    role: Role::Taker,
-                    state: mr.taker.state,
-                    ask_or_bid: AskOrBid::Ask,
-                    price: mr.taker.price,
-                    base_delta: Amount::zero(),
-                    quote_delta: Amount::zero(),
-                    base_charge: Amount::zero(),
-                    quote_charge: Amount::zero(),
-                    base_available: base_account.available,
-                    quote_available: quote_account.available,
-                    base_frozen: base_account.frozen,
-                    quote_frozen: quote_account.frozen,
-                    timestamp: time,
-                }]
+    match mr.taker.state {
+        State::Submitted => {
+            let base_account = assets::get_balance_to_owned(accounts, &mr.taker.user_id, base);
+            let quote_account = assets::get_balance_to_owned(accounts, &mr.taker.user_id, quote);
+            vec![Output {
+                event_id,
+                order_id: mr.taker.order_id,
+                user_id: mr.taker.user_id,
+                symbol: *symbol,
+                role: Role::Taker,
+                state: mr.taker.state,
+                ask_or_bid: AskOrBid::Ask,
+                price: mr.taker.price,
+                base_delta: Amount::zero(),
+                quote_delta: Amount::zero(),
+                base_charge: Amount::zero(),
+                quote_charge: Amount::zero(),
+                base_available: base_account.available,
+                quote_available: quote_account.available,
+                base_frozen: base_account.frozen,
+                quote_frozen: quote_account.frozen,
+                timestamp: time,
+            }]
+        }
+        State::Canceled => {
+            match mr.taker.ask_or_bid {
+                AskOrBid::Ask => {
+                    // revert base
+                    assets::try_unfreeze(accounts, &mr.taker.user_id, base, mr.taker.unfilled)
+                        .unwrap();
+                    let base_account =
+                        assets::get_balance_to_owned(accounts, &mr.taker.user_id, base);
+                    let quote_account =
+                        assets::get_balance_to_owned(accounts, &mr.taker.user_id, quote);
+                    vec![Output {
+                        event_id,
+                        order_id: mr.taker.order_id,
+                        user_id: mr.taker.user_id,
+                        symbol: *symbol,
+                        role: Role::Taker,
+                        state: mr.taker.state,
+                        ask_or_bid: AskOrBid::Ask,
+                        price: mr.taker.price,
+                        base_delta: Amount::zero(),
+                        quote_delta: Amount::zero(),
+                        base_charge: Amount::zero(),
+                        quote_charge: Amount::zero(),
+                        base_available: base_account.available,
+                        quote_available: quote_account.available,
+                        base_frozen: base_account.frozen,
+                        quote_frozen: quote_account.frozen,
+                        timestamp: time,
+                    }]
+                }
+                AskOrBid::Bid => {
+                    // revert quote
+                    assets::try_unfreeze(
+                        accounts,
+                        &mr.taker.user_id,
+                        quote,
+                        mr.taker.unfilled * mr.taker.price,
+                    )
+                    .unwrap();
+                    let base_account =
+                        assets::get_balance_to_owned(accounts, &mr.taker.user_id, base);
+                    let quote_account =
+                        assets::get_balance_to_owned(accounts, &mr.taker.user_id, quote);
+                    vec![Output {
+                        event_id,
+                        order_id: mr.taker.order_id,
+                        user_id: mr.taker.user_id,
+                        symbol: *symbol,
+                        role: Role::Taker,
+                        state: mr.taker.state,
+                        ask_or_bid: AskOrBid::Ask,
+                        price: mr.taker.price,
+                        base_delta: Amount::zero(),
+                        quote_delta: Amount::zero(),
+                        base_charge: Amount::zero(),
+                        quote_charge: Amount::zero(),
+                        base_available: base_account.available,
+                        quote_available: quote_account.available,
+                        base_frozen: base_account.frozen,
+                        quote_frozen: quote_account.frozen,
+                        timestamp: time,
+                    }]
+                }
             }
-            AskOrBid::Bid => {
-                // revert quote
-                assets::try_unfreeze(
-                    accounts,
-                    &mr.taker.user_id,
-                    quote,
-                    mr.taker.unfilled * mr.taker.price,
-                )
-                .unwrap();
-                let base_account = assets::get_balance_to_owned(accounts, &mr.taker.user_id, base);
-                let quote_account =
-                    assets::get_balance_to_owned(accounts, &mr.taker.user_id, quote);
-                vec![Output {
-                    event_id,
-                    order_id: mr.taker.order_id,
-                    user_id: mr.taker.user_id,
-                    symbol: *symbol,
-                    role: Role::Taker,
-                    state: mr.taker.state,
-                    ask_or_bid: AskOrBid::Ask,
-                    price: mr.taker.price,
-                    base_delta: Amount::zero(),
-                    quote_delta: Amount::zero(),
-                    base_charge: Amount::zero(),
-                    quote_charge: Amount::zero(),
-                    base_available: base_account.available,
-                    quote_available: quote_account.available,
-                    base_frozen: base_account.frozen,
-                    quote_frozen: quote_account.frozen,
-                    timestamp: time,
-                }]
-            }
-        },
-        // deal
-        false => {
+        }
+        // Filled, PartialFilled, ConditionalCanceled
+        _ => {
             match mr.taker.ask_or_bid {
                 AskOrBid::Ask => {
                     let mut cr = Vec::<Output>::new();
@@ -163,6 +167,10 @@ pub fn clear(
                     }
                     // taker base account frozen decr sum(filled)
                     // taker quote account available incr sum(filled * price)
+                    if mr.taker.state == State::ConditionalCanceled {
+                        assets::try_unfreeze(accounts, &mr.taker.user_id, base, mr.taker.unfilled)
+                            .unwrap();
+                    }
                     let base_account =
                         assets::deduct_frozen(accounts, &mr.taker.user_id, base, base_sum).unwrap();
                     assets::add_to_available(accounts, &mr.taker.user_id, quote, quote_sum)
@@ -194,9 +202,9 @@ pub fn clear(
                         timestamp: time,
                     });
                     cr
-                    // maker has the dealing right
+                    // makers deal
                     // for taker ask, maker bid, ask_price <= bid_price
-                    // the quote taker gained would be great or equal to (ask_price * amount)
+                    // the quote taker gained would be great or equal than (ask_price * amount)
                     // nothing need to return to taker
                 }
                 AskOrBid::Bid => {
@@ -264,6 +272,15 @@ pub fn clear(
                     if return_quote > Decimal::zero() {
                         assets::try_unfreeze(accounts, &mr.taker.user_id, quote, return_quote)
                             .unwrap();
+                    }
+                    if mr.taker.state == State::ConditionalCanceled {
+                        assets::try_unfreeze(
+                            accounts,
+                            &mr.taker.user_id,
+                            quote,
+                            mr.taker.unfilled * mr.taker.price,
+                        )
+                        .unwrap();
                     }
                     let base_account =
                         assets::get_balance_to_owned(accounts, &mr.taker.user_id, base);
@@ -597,7 +614,7 @@ pub mod test {
     }
 
     #[test]
-    pub fn test_output() {
+    pub fn test_self_trade() {
         let base_scale = 6;
         let quote_scale = 2;
         let taker_fee = dec!(0.001);
@@ -653,26 +670,21 @@ pub mod test {
 
         let symbol = (101, 100);
         let out = super::clear(&mut accounts, 2, &symbol, taker_fee, maker_fee, &mr, 0);
-        assert_eq!(out[0].base_delta, dec!(-0.1));
-        assert_eq!(out[0].quote_delta, dec!(1333.3));
+        assert_eq!(out[0].base_delta, Decimal::zero());
+        assert_eq!(out[0].quote_delta, Decimal::zero());
         assert_eq!(out[0].base_charge, Decimal::zero());
         assert_eq!(out[0].quote_charge, Decimal::zero());
 
-        assert_eq!(out[1].base_delta, dec!(0.1));
-        assert_eq!(out[1].quote_delta, dec!(-1333.3));
-        assert_eq!(out[1].base_charge, dec!(-0.0001));
-        assert_eq!(out[1].quote_charge, Decimal::zero());
-
         let b1_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 100);
-        assert_eq!(b1_100.available, dec!(4666.8));
-        assert_eq!(b1_100.frozen, dec!(5333.2));
+        assert_eq!(b1_100.available, dec!(10000));
+        assert_eq!(b1_100.frozen, Decimal::zero());
         let b1_101 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 101);
-        assert_eq!(b1_101.available, dec!(0.9999));
-        assert_eq!(b1_101.frozen, Decimal::zero());
+        assert_eq!(b1_101.available, dec!(0.9));
+        assert_eq!(b1_101.frozen, dec!(0.1));
 
         assert_eq!(
             assets::get_balance_to_owned(&accounts, &SYSTEM, 101).available,
-            dec!(0.0001),
+            Decimal::zero(),
         );
     }
 
