@@ -155,6 +155,7 @@ coredump_dir = "/tmp/snapshot"
 batch_size = 1000
 dump_mode = "disk"
 fetch_intervel_ms = 5
+enable_from_genesis = true
 [log]
 [log.appenders.console]
 kind = "console"

@@ -134,7 +134,6 @@ fn new_api(signer: Sr25519) -> anyhow::Result<FusoApi> {
 fn start_submitting(api: FusoApi, rx: Receiver<Proof>) -> anyhow::Result<()> {
     use sp_core::Pair;
     let path: PathBuf = [&C.sequence.coredump_dir, "fusotao.seq"].iter().collect();
-    // TODO `-g`
     let finalized_file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -144,7 +143,9 @@ fn start_submitting(api: FusoApi, rx: Receiver<Proof>) -> anyhow::Result<()> {
     let mut seq = unsafe { MmapMut::map_mut(&finalized_file)? };
     let mut cur = u64::from_le_bytes(seq.as_ref().try_into()?);
     if cur == 0 && !C.sequence.enable_from_genesis {
-        panic!("couldn't load seq memmap file, add `-g` to force start from genesis");
+        panic!(
+            "couldn't load seq memmap file, set `enable_from_genesis` to force start from genesis"
+        );
     }
     log::info!("initiate proving at sequence {:?}", cur);
     std::thread::spawn(move || loop {

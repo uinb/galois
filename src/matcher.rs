@@ -21,6 +21,7 @@ pub enum State {
     Canceled,
     Filled,
     PartialFilled,
+    ConditionalCanceled,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
@@ -45,6 +46,7 @@ impl Into<u32> for State {
             State::Canceled => 1,
             State::Filled => 2,
             State::PartialFilled => 3,
+            State::ConditionalCanceled => 4,
         }
     }
 }
@@ -188,7 +190,7 @@ pub fn execute_limit(
         }
         if let Some(mut best) = book.get_best_if_match(ask_or_bid, &order.price) {
             let page = best.get_mut();
-            let mut traded = take(page, &mut order);
+            let (mut traded, self_traded) = take(page, &mut order);
             if page.is_empty() {
                 best.remove();
             }
@@ -198,6 +200,12 @@ pub fn execute_limit(
                 }
             });
             makers.append(&mut traded);
+            if self_traded {
+                return Match {
+                    taker: Taker::taker(order, ask_or_bid, State::ConditionalCanceled),
+                    maker: makers,
+                };
+            }
         } else {
             book.insert(order.clone(), ask_or_bid);
             return Match {
@@ -211,10 +219,13 @@ pub fn execute_limit(
     }
 }
 
-fn take(page: &mut OrderPage, taker: &mut Order) -> Vec<Maker> {
+fn take(page: &mut OrderPage, taker: &mut Order) -> (Vec<Maker>, bool) {
     let mut matches = Vec::<Maker>::new();
     while !taker.is_filled() && !page.is_empty() {
         let mut oldest = page.orders.entries().next().unwrap();
+        if oldest.get().user == taker.user {
+            return (matches, true);
+        }
         let m = if taker.unfilled >= oldest.get().unfilled {
             let maker = oldest.get().clone();
             oldest.remove();
@@ -228,7 +239,7 @@ fn take(page: &mut OrderPage, taker: &mut Order) -> Vec<Maker> {
         page.decr_size(&m.filled);
         matches.push(m);
     }
-    matches
+    (matches, false)
 }
 
 pub fn cancel(orderbook: &mut OrderBook, order_id: u64) -> Option<Match> {
@@ -244,7 +255,7 @@ mod test {
     use rust_decimal_macros::dec;
 
     #[test]
-    pub fn test_trade() {
+    pub fn test_best() {
         let base_scale = 5;
         let quote_scale = 1;
         let taker_fee = dec!(0.001);
@@ -293,6 +304,39 @@ mod test {
                 .amount
         );
         assert!(book.indices.contains_key(&1001));
+    }
+
+    #[test]
+    pub fn test_trade() {
+        let base_scale = 5;
+        let quote_scale = 1;
+        let taker_fee = dec!(0.001);
+        let maker_fee = dec!(0.001);
+        let min_amount = dec!(1);
+        let min_vol = dec!(1);
+        let mut book = OrderBook::new(
+            base_scale,
+            quote_scale,
+            taker_fee,
+            maker_fee,
+            min_amount,
+            min_vol,
+            true,
+            true,
+        );
+
+        let price = dec!(0.1);
+        let amount = dec!(100);
+        let mr = execute_limit(
+            &mut book,
+            UserId::from_low_u64_be(1),
+            1001,
+            price,
+            amount,
+            AskOrBid::Bid,
+        );
+        assert_eq!(State::Submitted, mr.taker.state);
+        assert!(mr.maker.is_empty());
 
         let price = dec!(0.1);
         let amount = dec!(1000);
@@ -306,27 +350,11 @@ mod test {
         );
         assert_eq!(State::Submitted, mr.taker.state);
         assert!(mr.maker.is_empty());
-        assert_eq!(
-            dec!(0.1),
-            *book
-                .get_best_if_match(AskOrBid::Ask, &dec!(0.1))
-                .unwrap()
-                .key()
-        );
-        assert_eq!(
-            dec!(1100),
-            book.get_best_if_match(AskOrBid::Ask, &dec!(0.1))
-                .unwrap()
-                .get()
-                .amount
-        );
-        assert!(book.indices.contains_key(&1002));
-
         let price = dec!(0.08);
         let amount = dec!(200);
         let mr = execute_limit(
             &mut book,
-            UserId::from_low_u64_be(1),
+            UserId::from_low_u64_be(2),
             1003,
             price,
             amount,
@@ -346,7 +374,7 @@ mod test {
             mr.maker.get(1).unwrap()
         );
         assert_eq!(
-            Taker::taker_filled(UserId::from_low_u64_be(1), 1003, price, AskOrBid::Ask),
+            Taker::taker_filled(UserId::from_low_u64_be(2), 1003, price, AskOrBid::Ask),
             mr.taker
         );
         assert_eq!(
@@ -368,7 +396,7 @@ mod test {
         let amount = dec!(100);
         let mr = execute_limit(
             &mut book,
-            UserId::from_low_u64_be(1),
+            UserId::from_low_u64_be(2),
             1004,
             price,
             amount,
@@ -414,7 +442,7 @@ mod test {
         assert!(mr.is_some());
         assert_eq!(
             Taker::cancel(
-                UserId::from_low_u64_be(1),
+                UserId::from_low_u64_be(2),
                 1004,
                 price,
                 unfilled,
@@ -436,6 +464,103 @@ mod test {
         assert!(book.asks.is_empty());
     }
 
+    #[test]
+    pub fn test_self_trade_on_best() {
+        let base_scale = 5;
+        let quote_scale = 1;
+        let taker_fee = dec!(0.001);
+        let maker_fee = dec!(0.001);
+        let min_amount = dec!(1);
+        let min_vol = dec!(1);
+        let mut book = OrderBook::new(
+            base_scale,
+            quote_scale,
+            taker_fee,
+            maker_fee,
+            min_amount,
+            min_vol,
+            true,
+            true,
+        );
+
+        let price = dec!(0.1);
+        let amount = dec!(100);
+        execute_limit(
+            &mut book,
+            UserId::from_low_u64_be(1),
+            1001,
+            price,
+            amount,
+            AskOrBid::Bid,
+        );
+        let mr = execute_limit(
+            &mut book,
+            UserId::from_low_u64_be(1),
+            1002,
+            price,
+            amount,
+            AskOrBid::Ask,
+        );
+        assert_eq!(mr.taker.state, State::ConditionalCanceled);
+        assert!(mr.maker.is_empty());
+        assert!(book.find_order(1001).is_some());
+        assert!(book.find_order(1002).is_none());
+    }
+
+    #[test]
+    pub fn test_self_trade_on_second_position() {
+        let base_scale = 5;
+        let quote_scale = 1;
+        let taker_fee = dec!(0.001);
+        let maker_fee = dec!(0.001);
+        let min_amount = dec!(1);
+        let min_vol = dec!(1);
+        let mut book = OrderBook::new(
+            base_scale,
+            quote_scale,
+            taker_fee,
+            maker_fee,
+            min_amount,
+            min_vol,
+            true,
+            true,
+        );
+
+        let price = dec!(0.1);
+        let amount = dec!(100);
+        execute_limit(
+            &mut book,
+            UserId::from_low_u64_be(2),
+            1001,
+            price,
+            amount,
+            AskOrBid::Bid,
+        );
+        execute_limit(
+            &mut book,
+            UserId::from_low_u64_be(1),
+            1002,
+            price,
+            amount,
+            AskOrBid::Bid,
+        );
+        let mr = execute_limit(
+            &mut book,
+            UserId::from_low_u64_be(1),
+            1003,
+            price,
+            amount * dec!(2),
+            AskOrBid::Ask,
+        );
+        assert_eq!(mr.taker.state, State::ConditionalCanceled);
+        assert_eq!(mr.taker.unfilled, amount);
+        assert_eq!(mr.maker.len(), 1);
+        assert_eq!(mr.maker[0].filled, amount);
+        assert!(book.find_order(1001).is_none());
+        assert!(book.find_order(1002).is_some());
+        assert!(book.find_order(1003).is_none());
+    }
+    // useless, the order id should be global unique rather than just in orderbook scope
     #[test]
     pub fn test_order_replay() {
         let base_scale = 5;
