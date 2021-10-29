@@ -1,12 +1,16 @@
-# v0.1.1
+# v0.2.0
 
-- first release
-- fusotao master compatible
+- self-trade prevention
+
+# v0.1.3
+
+- synchronizing blocks concurrently
 
 # v0.1.2
 
 - attach config example
 
-# v0.1.3
+# v0.1.1
 
-- synchronizing blocks concurrently
+- first release
+- fusotao master compatible
