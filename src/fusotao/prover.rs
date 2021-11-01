@@ -15,6 +15,7 @@
 use super::*;
 use crate::{assets::Balance, core::*, event::*, matcher::*, orderbook::AskOrBid, output::Output};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 
 const ACCOUNT_KEY: u8 = 0x00;
@@ -67,50 +68,66 @@ impl Prover {
             new_ask_size,
             new_bid_size,
         ));
+        let mut makers = HashMap::<UserId, Output>::new();
         outputs
             .iter()
             .take_while(|o| o.role == Role::Maker)
-            .for_each(|ref r| {
-                log::debug!("{:?}", r);
-                let (ba, bf, qa, qf) = match r.ask_or_bid {
-                    // -base_frozen, +quote_available
-                    // base_frozen0 + r.base_delta = base_frozen
-                    // qa - q0 + abs(r.quote_charge) = abs(quote_delta)
-                    AskOrBid::Ask => (
-                        r.base_available,
-                        r.base_frozen + r.base_delta.abs(),
-                        r.quote_available + r.quote_charge.abs() - r.quote_delta.abs(),
-                        r.quote_frozen,
-                    ),
-                    // +base_available, -quote_frozen
-                    // quote_frozen0 + r.quote_delta = quote_frozen
-                    // ba0 - ba + abs(r.base_charge) = abs(base_delta)
-                    AskOrBid::Bid => (
-                        r.base_available + r.base_charge.abs() - r.base_delta.abs(),
-                        r.base_frozen,
-                        r.quote_available,
-                        r.quote_frozen + r.quote_delta.abs(),
-                    ),
-                };
-                let (new_ba, new_bf, old_ba, old_bf) = (
-                    r.base_available.to_amount(),
-                    r.base_frozen.to_amount(),
-                    ba.to_amount(),
-                    bf.to_amount(),
-                );
-                leaves.push(new_account_merkle_leaf(
-                    &r.user_id, symbol.0, old_ba, old_bf, new_ba, new_bf,
-                ));
-                let (new_qa, new_qf, old_qa, old_qf) = (
-                    r.quote_available.to_amount(),
-                    r.quote_frozen.to_amount(),
-                    qa.to_amount(),
-                    qf.to_amount(),
-                );
-                leaves.push(new_account_merkle_leaf(
-                    &r.user_id, symbol.1, old_qa, old_qf, new_qa, new_qf,
-                ));
+            .for_each(|r| {
+                makers
+                    .entry(r.user_id.clone())
+                    .and_modify(|out| {
+                        out.quote_charge = out.quote_charge + r.quote_charge;
+                        out.quote_delta = out.quote_delta + r.quote_delta;
+                        out.quote_available = r.quote_available;
+                        out.quote_frozen = r.quote_frozen;
+                        out.base_charge = out.base_charge + r.base_charge;
+                        out.base_delta = out.base_delta + r.base_delta;
+                        out.base_available = r.base_available;
+                        out.base_frozen = r.base_frozen;
+                    })
+                    .or_insert_with(|| r.clone());
             });
+        makers.into_values().for_each(|r| {
+            log::debug!("{:?}", r);
+            let (ba, bf, qa, qf) = match r.ask_or_bid {
+                // -base_frozen, +quote_available
+                // base_frozen0 + r.base_delta = base_frozen
+                // qa - q0 + abs(r.quote_charge) = abs(quote_delta)
+                AskOrBid::Ask => (
+                    r.base_available,
+                    r.base_frozen + r.base_delta.abs(),
+                    r.quote_available + r.quote_charge.abs() - r.quote_delta.abs(),
+                    r.quote_frozen,
+                ),
+                // +base_available, -quote_frozen
+                // quote_frozen0 + r.quote_delta = quote_frozen
+                // ba0 - ba + abs(r.base_charge) = abs(base_delta)
+                AskOrBid::Bid => (
+                    r.base_available + r.base_charge.abs() - r.base_delta.abs(),
+                    r.base_frozen,
+                    r.quote_available,
+                    r.quote_frozen + r.quote_delta.abs(),
+                ),
+            };
+            let (new_ba, new_bf, old_ba, old_bf) = (
+                r.base_available.to_amount(),
+                r.base_frozen.to_amount(),
+                ba.to_amount(),
+                bf.to_amount(),
+            );
+            leaves.push(new_account_merkle_leaf(
+                &r.user_id, symbol.0, old_ba, old_bf, new_ba, new_bf,
+            ));
+            let (new_qa, new_qf, old_qa, old_qf) = (
+                r.quote_available.to_amount(),
+                r.quote_frozen.to_amount(),
+                qa.to_amount(),
+                qf.to_amount(),
+            );
+            leaves.push(new_account_merkle_leaf(
+                &r.user_id, symbol.1, old_qa, old_qf, new_qa, new_qf,
+            ));
+        });
         let (new_taker_ba, new_taker_bf, old_taker_ba, old_taker_bf) = (
             taker.base_available.to_amount(),
             taker.base_frozen.to_amount(),
