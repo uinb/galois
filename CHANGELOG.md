@@ -1,3 +1,7 @@
+# v0.2.1
+
+- merge makers in a proof
+
 # v0.2.0
 
 - self-trade prevention

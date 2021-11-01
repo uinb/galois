@@ -15,6 +15,7 @@
 use super::*;
 use crate::{assets::Balance, core::*, event::*, matcher::*, orderbook::AskOrBid, output::Output};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 
 const ACCOUNT_KEY: u8 = 0x00;
@@ -67,50 +68,66 @@ impl Prover {
             new_ask_size,
             new_bid_size,
         ));
+        let mut makers = HashMap::<UserId, Output>::new();
         outputs
             .iter()
             .take_while(|o| o.role == Role::Maker)
-            .for_each(|ref r| {
-                log::debug!("{:?}", r);
-                let (ba, bf, qa, qf) = match r.ask_or_bid {
-                    // -base_frozen, +quote_available
-                    // base_frozen0 + r.base_delta = base_frozen
-                    // qa - q0 + abs(r.quote_charge) = abs(quote_delta)
-                    AskOrBid::Ask => (
-                        r.base_available,
-                        r.base_frozen + r.base_delta.abs(),
-                        r.quote_available + r.quote_charge.abs() - r.quote_delta.abs(),
-                        r.quote_frozen,
-                    ),
-                    // +base_available, -quote_frozen
-                    // quote_frozen0 + r.quote_delta = quote_frozen
-                    // ba0 - ba + abs(r.base_charge) = abs(base_delta)
-                    AskOrBid::Bid => (
-                        r.base_available + r.base_charge.abs() - r.base_delta.abs(),
-                        r.base_frozen,
-                        r.quote_available,
-                        r.quote_frozen + r.quote_delta.abs(),
-                    ),
-                };
-                let (new_ba, new_bf, old_ba, old_bf) = (
-                    r.base_available.to_amount(),
-                    r.base_frozen.to_amount(),
-                    ba.to_amount(),
-                    bf.to_amount(),
-                );
-                leaves.push(new_account_merkle_leaf(
-                    &r.user_id, symbol.0, old_ba, old_bf, new_ba, new_bf,
-                ));
-                let (new_qa, new_qf, old_qa, old_qf) = (
-                    r.quote_available.to_amount(),
-                    r.quote_frozen.to_amount(),
-                    qa.to_amount(),
-                    qf.to_amount(),
-                );
-                leaves.push(new_account_merkle_leaf(
-                    &r.user_id, symbol.1, old_qa, old_qf, new_qa, new_qf,
-                ));
+            .for_each(|r| {
+                makers
+                    .entry(r.user_id.clone())
+                    .and_modify(|out| {
+                        out.quote_charge = out.quote_charge + r.quote_charge;
+                        out.quote_delta = out.quote_delta + r.quote_delta;
+                        out.quote_available = r.quote_available;
+                        out.quote_frozen = r.quote_frozen;
+                        out.base_charge = out.base_charge + r.base_charge;
+                        out.base_delta = out.base_delta + r.base_delta;
+                        out.base_available = r.base_available;
+                        out.base_frozen = r.base_frozen;
+                    })
+                    .or_insert_with(|| r.clone());
             });
+        makers.into_values().for_each(|r| {
+            log::debug!("{:?}", r);
+            let (ba, bf, qa, qf) = match r.ask_or_bid {
+                // -base_frozen, +quote_available
+                // base_frozen0 + r.base_delta = base_frozen
+                // qa - q0 + abs(r.quote_charge) = abs(quote_delta)
+                AskOrBid::Ask => (
+                    r.base_available,
+                    r.base_frozen + r.base_delta.abs(),
+                    r.quote_available + r.quote_charge.abs() - r.quote_delta.abs(),
+                    r.quote_frozen,
+                ),
+                // +base_available, -quote_frozen
+                // quote_frozen0 + r.quote_delta = quote_frozen
+                // ba0 - ba + abs(r.base_charge) = abs(base_delta)
+                AskOrBid::Bid => (
+                    r.base_available + r.base_charge.abs() - r.base_delta.abs(),
+                    r.base_frozen,
+                    r.quote_available,
+                    r.quote_frozen + r.quote_delta.abs(),
+                ),
+            };
+            let (new_ba, new_bf, old_ba, old_bf) = (
+                r.base_available.to_amount(),
+                r.base_frozen.to_amount(),
+                ba.to_amount(),
+                bf.to_amount(),
+            );
+            leaves.push(new_account_merkle_leaf(
+                &r.user_id, symbol.0, old_ba, old_bf, new_ba, new_bf,
+            ));
+            let (new_qa, new_qf, old_qa, old_qf) = (
+                r.quote_available.to_amount(),
+                r.quote_frozen.to_amount(),
+                qa.to_amount(),
+                qf.to_amount(),
+            );
+            leaves.push(new_account_merkle_leaf(
+                &r.user_id, symbol.1, old_qa, old_qf, new_qa, new_qf,
+            ));
+        });
         let (new_taker_ba, new_taker_bf, old_taker_ba, old_taker_bf) = (
             taker.base_available.to_amount(),
             taker.base_frozen.to_amount(),
@@ -779,44 +796,26 @@ mod test {
             );
             assert_eq!(
                 split_h256_u128(&proof.leaves[1].new_v),
-                (891110000000000000, 110000000000000000)
+                (891110000000000000, 0)
             );
             // maker - quote
             assert_eq!(split_h256_u128(&proof.leaves[2].old_v), (0, 0));
             assert_eq!(
                 split_h256_u128(&proof.leaves[2].new_v),
-                (10989000000000000000, 0)
-            );
-            // maker - base
-            assert_eq!(
-                split_h256_u128(&proof.leaves[3].old_v),
-                (891110000000000000, 110000000000000000)
-            );
-            assert_eq!(
-                split_h256_u128(&proof.leaves[3].new_v),
-                (891110000000000000, 0)
-            );
-            // maker - quote
-            assert_eq!(
-                split_h256_u128(&proof.leaves[4].old_v),
-                (10989000000000000000, 0)
-            );
-            assert_eq!(
-                split_h256_u128(&proof.leaves[4].new_v),
                 (21978000000000000000, 0)
             );
             // taker - base
-            assert_eq!(split_h256_u128(&proof.leaves[5].old_v), (0, 0));
+            assert_eq!(split_h256_u128(&proof.leaves[3].old_v), (0, 0));
             assert_eq!(
-                split_h256_u128(&proof.leaves[5].new_v),
+                split_h256_u128(&proof.leaves[3].new_v),
                 (219780000000000000, 0)
             );
             // taker - quote
             assert_eq!(
-                split_h256_u128(&proof.leaves[6].old_v),
+                split_h256_u128(&proof.leaves[4].old_v),
                 (99090000000000000000, 900000000000000000)
             );
-            let (na, nf) = split_h256_u128(&proof.leaves[6].new_v);
+            let (na, nf) = split_h256_u128(&proof.leaves[4].new_v);
             assert_eq!(na + nf + 22000000000000000000, 99990000000000000000);
         }
         // ask 0.3, 88
@@ -832,27 +831,27 @@ mod test {
                 (10000000000000000, 0)
             );
             // maker - base
-            let mb00 = split_h256_u128_sum(&proof.leaves[1].old_v);
-            let mb01 = split_h256_u128_sum(&proof.leaves[1].new_v);
+            let mb0 = split_h256_u128_sum(&proof.leaves[1].old_v);
+            let mb1 = split_h256_u128_sum(&proof.leaves[1].new_v);
             // maker - quote
-            let mq00 = split_h256_u128_sum(&proof.leaves[2].old_v);
-            let mq01 = split_h256_u128_sum(&proof.leaves[2].new_v);
-            // maker - base
-            let mb10 = split_h256_u128_sum(&proof.leaves[3].old_v);
-            let mb11 = split_h256_u128_sum(&proof.leaves[3].new_v);
-            // maker - quote
-            let mq10 = split_h256_u128_sum(&proof.leaves[4].old_v);
-            let mq11 = split_h256_u128_sum(&proof.leaves[4].new_v);
+            let mq0 = split_h256_u128_sum(&proof.leaves[2].old_v);
+            let mq1 = split_h256_u128_sum(&proof.leaves[2].new_v);
+            // // maker - base
+            // let mb10 = split_h256_u128_sum(&proof.leaves[3].old_v);
+            // let mb11 = split_h256_u128_sum(&proof.leaves[3].new_v);
+            // // maker - quote
+            // let mq10 = split_h256_u128_sum(&proof.leaves[4].old_v);
+            // let mq11 = split_h256_u128_sum(&proof.leaves[4].new_v);
 
-            let incr_base = (mb01 - mb00) + (mb11 - mb10);
-            let decr_quote = (mq00 - mq01) + (mq10 - mq11);
+            let incr_base = mb1 - mb0;
+            let decr_quote = mq0 - mq1;
             // taker - base
-            let tb0 = split_h256_u128_sum(&proof.leaves[5].old_v);
-            let tb1 = split_h256_u128_sum(&proof.leaves[5].new_v);
+            let tb0 = split_h256_u128_sum(&proof.leaves[3].old_v);
+            let tb1 = split_h256_u128_sum(&proof.leaves[3].new_v);
             assert_eq!(incr_base, (tb0 - tb1) / 1000 * 999);
             // taker - quote
-            let tq0 = split_h256_u128_sum(&proof.leaves[6].old_v);
-            let tq1 = split_h256_u128_sum(&proof.leaves[6].new_v);
+            let tq0 = split_h256_u128_sum(&proof.leaves[4].old_v);
+            let tq1 = split_h256_u128_sum(&proof.leaves[4].new_v);
             assert_eq!(decr_quote / 1000 * 999, tq1 - tq0);
         }
     }

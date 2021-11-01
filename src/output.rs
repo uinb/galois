@@ -29,7 +29,7 @@ use std::{
     time::Duration,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Output {
     pub event_id: u64,
     pub order_id: u64,
