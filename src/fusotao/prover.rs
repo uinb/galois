@@ -796,44 +796,26 @@ mod test {
             );
             assert_eq!(
                 split_h256_u128(&proof.leaves[1].new_v),
-                (891110000000000000, 110000000000000000)
+                (891110000000000000, 0)
             );
             // maker - quote
             assert_eq!(split_h256_u128(&proof.leaves[2].old_v), (0, 0));
             assert_eq!(
                 split_h256_u128(&proof.leaves[2].new_v),
-                (10989000000000000000, 0)
-            );
-            // maker - base
-            assert_eq!(
-                split_h256_u128(&proof.leaves[3].old_v),
-                (891110000000000000, 110000000000000000)
-            );
-            assert_eq!(
-                split_h256_u128(&proof.leaves[3].new_v),
-                (891110000000000000, 0)
-            );
-            // maker - quote
-            assert_eq!(
-                split_h256_u128(&proof.leaves[4].old_v),
-                (10989000000000000000, 0)
-            );
-            assert_eq!(
-                split_h256_u128(&proof.leaves[4].new_v),
                 (21978000000000000000, 0)
             );
             // taker - base
-            assert_eq!(split_h256_u128(&proof.leaves[5].old_v), (0, 0));
+            assert_eq!(split_h256_u128(&proof.leaves[3].old_v), (0, 0));
             assert_eq!(
-                split_h256_u128(&proof.leaves[5].new_v),
+                split_h256_u128(&proof.leaves[3].new_v),
                 (219780000000000000, 0)
             );
             // taker - quote
             assert_eq!(
-                split_h256_u128(&proof.leaves[6].old_v),
+                split_h256_u128(&proof.leaves[4].old_v),
                 (99090000000000000000, 900000000000000000)
             );
-            let (na, nf) = split_h256_u128(&proof.leaves[6].new_v);
+            let (na, nf) = split_h256_u128(&proof.leaves[4].new_v);
             assert_eq!(na + nf + 22000000000000000000, 99990000000000000000);
         }
         // ask 0.3, 88
@@ -849,27 +831,27 @@ mod test {
                 (10000000000000000, 0)
             );
             // maker - base
-            let mb00 = split_h256_u128_sum(&proof.leaves[1].old_v);
-            let mb01 = split_h256_u128_sum(&proof.leaves[1].new_v);
+            let mb0 = split_h256_u128_sum(&proof.leaves[1].old_v);
+            let mb1 = split_h256_u128_sum(&proof.leaves[1].new_v);
             // maker - quote
-            let mq00 = split_h256_u128_sum(&proof.leaves[2].old_v);
-            let mq01 = split_h256_u128_sum(&proof.leaves[2].new_v);
-            // maker - base
-            let mb10 = split_h256_u128_sum(&proof.leaves[3].old_v);
-            let mb11 = split_h256_u128_sum(&proof.leaves[3].new_v);
-            // maker - quote
-            let mq10 = split_h256_u128_sum(&proof.leaves[4].old_v);
-            let mq11 = split_h256_u128_sum(&proof.leaves[4].new_v);
+            let mq0 = split_h256_u128_sum(&proof.leaves[2].old_v);
+            let mq1 = split_h256_u128_sum(&proof.leaves[2].new_v);
+            // // maker - base
+            // let mb10 = split_h256_u128_sum(&proof.leaves[3].old_v);
+            // let mb11 = split_h256_u128_sum(&proof.leaves[3].new_v);
+            // // maker - quote
+            // let mq10 = split_h256_u128_sum(&proof.leaves[4].old_v);
+            // let mq11 = split_h256_u128_sum(&proof.leaves[4].new_v);
 
-            let incr_base = (mb01 - mb00) + (mb11 - mb10);
-            let decr_quote = (mq00 - mq01) + (mq10 - mq11);
+            let incr_base = mb1 - mb0;
+            let decr_quote = mq0 - mq1;
             // taker - base
-            let tb0 = split_h256_u128_sum(&proof.leaves[5].old_v);
-            let tb1 = split_h256_u128_sum(&proof.leaves[5].new_v);
+            let tb0 = split_h256_u128_sum(&proof.leaves[3].old_v);
+            let tb1 = split_h256_u128_sum(&proof.leaves[3].new_v);
             assert_eq!(incr_base, (tb0 - tb1) / 1000 * 999);
             // taker - quote
-            let tq0 = split_h256_u128_sum(&proof.leaves[6].old_v);
-            let tq1 = split_h256_u128_sum(&proof.leaves[6].new_v);
+            let tq0 = split_h256_u128_sum(&proof.leaves[4].old_v);
+            let tq1 = split_h256_u128_sum(&proof.leaves[4].new_v);
             assert_eq!(decr_quote / 1000 * 999, tq1 - tq0);
         }
     }
