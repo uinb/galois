@@ -254,20 +254,23 @@ impl Prover {
             old_available,
             old_frozen,
         )];
+        let old_root = merkle_tree.root().clone();
         let (pr0, pr1) = gen_proofs(merkle_tree, &leaves);
-        self.0
-            .send(Proof {
-                event_id: event_id,
-                user_id: cmd.user_id,
-                nonce: cmd.block_number,
-                signature: cmd.extrinsic_hash.clone(),
-                cmd: cmd.into(),
-                leaves: leaves,
-                proof_of_exists: pr0,
-                proof_of_cmd: pr1,
-                root: merkle_tree.root().clone().into(),
-            })
-            .unwrap();
+        if &old_root != merkle_tree.root() {
+            self.0
+                .send(Proof {
+                    event_id: event_id,
+                    user_id: cmd.user_id,
+                    nonce: cmd.block_number,
+                    signature: cmd.extrinsic_hash.clone(),
+                    cmd: cmd.into(),
+                    leaves: leaves,
+                    proof_of_exists: pr0,
+                    proof_of_cmd: pr1,
+                    root: merkle_tree.root().clone().into(),
+                })
+                .unwrap();
+        }
     }
 }
 
