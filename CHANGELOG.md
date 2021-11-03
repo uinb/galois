@@ -1,3 +1,7 @@
+# v0.2.2
+
+- ignore unchanged merkle root
+
 # v0.2.1
 
 - merge makers in a proof
