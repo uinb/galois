@@ -462,16 +462,11 @@ fn handle_event(
 #[cfg(feature = "fusotao")]
 fn updateExchangeFee(delta: u64, data: &Data) {
     let mut times: u32 = (delta / 1000) as u32;
-
-
     times = if times > 0 { times } else { 1 };
-
     let mut cmds = vec![];
-
-
     data.orderbooks
         .iter()
-        .map(|(k, v)| {
+        .for_each(|(k, v)| {
             if times != v.fee_times {
                 let mut cmd = Command::default();
                 cmd.cmd = UPDATE_SYMBOL;
