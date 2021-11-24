@@ -251,8 +251,9 @@ pub fn cancel(orderbook: &mut OrderBook, order_id: u64) -> Option<Match> {
 
 #[cfg(test)]
 mod test {
-    use crate::{core::*, matcher::*, orderbook::*};
     use rust_decimal_macros::dec;
+
+    use crate::{core::*, matcher::*, orderbook::*};
 
     #[test]
     pub fn test_best() {
@@ -429,7 +430,7 @@ mod test {
                 1002,
                 price,
                 unfilled,
-                AskOrBid::Bid
+                AskOrBid::Bid,
             ),
             mr.unwrap().taker
         );
@@ -446,7 +447,7 @@ mod test {
                 1004,
                 price,
                 unfilled,
-                AskOrBid::Ask
+                AskOrBid::Ask,
             ),
             mr.unwrap().taker
         );
@@ -560,6 +561,7 @@ mod test {
         assert!(book.find_order(1002).is_some());
         assert!(book.find_order(1003).is_none());
     }
+
     // useless, the order id should be global unique rather than just in orderbook scope
     #[test]
     pub fn test_order_replay() {

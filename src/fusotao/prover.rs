@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::*;
-use crate::{assets::Balance, core::*, event::*, matcher::*, orderbook::AskOrBid, output::Output};
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::mpsc::Sender;
+
+use sha2::{Digest, Sha256};
+
+use crate::{assets::Balance, core::*, event::*, matcher::*, orderbook::AskOrBid, output::Output};
+
+use super::*;
 
 const ACCOUNT_KEY: u8 = 0x00;
 const ORDERBOOK_KEY: u8 = 0x01;
@@ -342,10 +345,11 @@ fn new_orderbook_merkle_leaf(
 
 #[cfg(test)]
 mod test {
-    use crate::{assets, clearing, core::*, fusotao::*, matcher, orderbook::*};
     use rust_decimal_macros::dec;
     use sha2::{Digest, Sha256};
-    use smt::{sha256::Sha256Hasher, CompiledMerkleProof, H256};
+    use smt::{CompiledMerkleProof, H256, sha256::Sha256Hasher};
+
+    use crate::{assets, clearing, core::*, fusotao::*, matcher, orderbook::*};
 
     fn split_h256(v: &[u8; 32]) -> ([u8; 16], [u8; 16]) {
         (v[..16].try_into().unwrap(), v[16..].try_into().unwrap())

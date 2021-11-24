@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use rust_decimal::{Decimal, prelude::Zero};
+
 use crate::{
     assets,
     core::*,
@@ -19,7 +21,6 @@ use crate::{
     orderbook::AskOrBid,
     output::Output,
 };
-use rust_decimal::{prelude::Zero, Decimal};
 
 pub fn clear(
     accounts: &mut Accounts,
@@ -94,7 +95,7 @@ pub fn clear(
                         quote,
                         mr.taker.unfilled * mr.taker.price,
                     )
-                    .unwrap();
+                        .unwrap();
                     let base_account =
                         assets::get_balance_to_owned(accounts, &mr.taker.user_id, base);
                     let quote_account =
@@ -280,7 +281,7 @@ pub fn clear(
                             quote,
                             mr.taker.unfilled * mr.taker.price,
                         )
-                        .unwrap();
+                            .unwrap();
                     }
                     let base_account =
                         assets::get_balance_to_owned(accounts, &mr.taker.user_id, base);
@@ -315,12 +316,13 @@ pub fn clear(
 #[allow(unused_must_use)]
 #[cfg(test)]
 pub mod test {
+    use rust_decimal::{Decimal, prelude::Zero};
+    use rust_decimal_macros::dec;
+
     use crate::assets;
     use crate::core::*;
     use crate::matcher::*;
     use crate::orderbook::*;
-    use rust_decimal::{prelude::Zero, Decimal};
-    use rust_decimal_macros::dec;
 
     impl UserId {
         // adapt to legacy code
@@ -368,7 +370,7 @@ pub mod test {
             0,
         );
         let b1_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 100);
-        assert_eq!(dec!(1), b1_100.available,);
+        assert_eq!(dec!(1), b1_100.available, );
         assert_eq!(dec!(0), b1_100.frozen);
         let b1_101 = assets::get_balance_to_owned(&mut accounts, &UserId::from_low_u64_be(1), 101);
         assert_eq!(dec!(1), b1_101.available);
@@ -655,7 +657,7 @@ pub mod test {
             100,
             price * amount,
         )
-        .unwrap();
+            .unwrap();
         let b1_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 100);
         assert_eq!(b1_100.frozen, dec!(6666.5));
         assert_eq!(b1_100.available, dec!(3333.5));
@@ -730,7 +732,7 @@ pub mod test {
             100,
             price * amount,
         )
-        .unwrap();
+            .unwrap();
         let mr = execute_limit(
             &mut book,
             UserId::from_low_u64_be(2),
@@ -800,7 +802,7 @@ pub mod test {
             100,
             price * amount,
         )
-        .unwrap();
+            .unwrap();
         execute_limit(
             &mut book,
             UserId::from_low_u64_be(2),

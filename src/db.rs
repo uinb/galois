@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::config::C;
 use lazy_static::lazy_static;
+
+use crate::config::C;
 
 lazy_static! {
     pub static ref DB: mysql::Pool = mysql::Pool::new(&C.mysql.url).unwrap();

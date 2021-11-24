@@ -2,3 +2,4 @@
 Cargo.lock
 *.toml
 !Cargo.toml
+.idea

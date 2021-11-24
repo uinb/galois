@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{core::*, orderbook::AskOrBid};
 use anyhow::{anyhow, ensure};
 use rust_decimal::prelude::Zero;
 use serde::{Deserialize, Serialize};
+
+use crate::{core::*, orderbook::AskOrBid};
 
 #[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq, Default)]
 pub struct Balance {
@@ -141,10 +142,13 @@ pub fn try_unfreeze(
 #[cfg(test)]
 #[allow(unused_must_use)]
 mod test {
-    use super::*;
-    use crate::core::UserId;
-    use rust_decimal_macros::dec;
     use std::str::FromStr;
+
+    use rust_decimal_macros::dec;
+
+    use crate::core::UserId;
+
+    use super::*;
 
     #[test]
     pub fn test_transfer() {
@@ -200,7 +204,7 @@ mod test {
                 cmd.currency.unwrap(),
                 cmd.amount.unwrap(),
             )
-            .unwrap();
+                .unwrap();
         }
     }
 
@@ -227,10 +231,10 @@ mod test {
                 &UserId::from_str(
                     "0x0000000000000000000000000000000000000000000000000000000000000002"
                 )
-                .unwrap(),
-                101
+                    .unwrap(),
+                101,
             )
-            .available,
+                .available,
             dec!(9996.02)
         );
     }

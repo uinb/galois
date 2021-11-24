@@ -12,15 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(feature = "fusotao")]
-use crate::fusotao::GlobalStates;
-use crate::{assets::Balance, orderbook::OrderBook};
+use std::{collections::HashMap, fs::File, io::{BufReader, BufWriter}};
+use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+
 use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fs::File, io::{BufReader, BufWriter}};
 
+use crate::{assets::Balance, orderbook::OrderBook};
 pub use crate::event::InOrOut;
+#[cfg(feature = "fusotao")]
+use crate::fusotao::GlobalStates;
 pub use crate::matcher::{Role, State as OrderState};
 pub use crate::orderbook::AskOrBid;
 
@@ -152,6 +155,8 @@ pub struct Data {
     pub accounts: Accounts,
     #[cfg(feature = "fusotao")]
     pub merkle_tree: GlobalStates,
+    #[cfg(feature = "fusotao")]
+    pub current_proved_event: Arc<AtomicU64>,
 }
 
 unsafe impl Sync for Data {}
@@ -163,6 +168,8 @@ impl Data {
             accounts: HashMap::new(),
             #[cfg(feature = "fusotao")]
             merkle_tree: GlobalStates::default(),
+            #[cfg(feature = "fusotao")]
+            current_proved_event: Arc::new(AtomicU64::new(0)),
         }
     }
 
