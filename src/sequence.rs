@@ -12,13 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, ensure};
 use crate::{config::C, core::*, db::DB, event::*, orderbook::AskOrBid};
-use mysql::{*, prelude::*};
+use anyhow::{anyhow, ensure};
+use mysql::{prelude::*, *};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use std::{convert::{TryFrom, TryInto}, str::FromStr,
-          sync::{Arc, atomic::{AtomicBool, Ordering}, mpsc::Sender}, time::{Duration, SystemTime}};
+use std::{
+    convert::{TryFrom, TryInto},
+    str::FromStr,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::Sender,
+        Arc,
+    },
+    time::{Duration, SystemTime},
+};
 
 pub const ASK_LIMIT: u32 = 0;
 pub const BID_LIMIT: u32 = 1;
@@ -95,7 +103,8 @@ impl TryInto<Event> for Sequence {
                     user_id: UserId::from_str(self.cmd.user_id.as_ref().ok_or(anyhow!(""))?)?,
                     in_or_out: InOrOut::Out,
                     currency: self.cmd.currency.ok_or(anyhow!(""))?,
-                    amount: self.cmd
+                    amount: self
+                        .cmd
                         .amount
                         .filter(|a| a.is_sign_positive())
                         .ok_or(anyhow!(""))?,
@@ -112,7 +121,8 @@ impl TryInto<Event> for Sequence {
                     user_id: UserId::from_str(self.cmd.user_id.as_ref().ok_or(anyhow!(""))?)?,
                     in_or_out: InOrOut::In,
                     currency: self.cmd.currency.ok_or(anyhow!(""))?,
-                    amount: self.cmd
+                    amount: self
+                        .cmd
                         .amount
                         .filter(|a| a.is_sign_positive())
                         .ok_or(anyhow!(""))?,
@@ -129,20 +139,28 @@ impl TryInto<Event> for Sequence {
                     symbol: self.cmd.symbol().ok_or(anyhow!(""))?,
                     open: self.cmd.open.ok_or(anyhow!(""))?,
                     base_scale: self.cmd.base_scale.filter(|b| *b < 18).ok_or(anyhow!(""))?,
-                    quote_scale: self.cmd.quote_scale.filter(|q| *q < 18).ok_or(anyhow!(""))?,
-                    taker_fee: self.cmd
+                    quote_scale: self
+                        .cmd
+                        .quote_scale
+                        .filter(|q| *q < 18)
+                        .ok_or(anyhow!(""))?,
+                    taker_fee: self
+                        .cmd
                         .maker_fee
                         .filter(|f| f.is_sign_positive())
                         .ok_or(anyhow!(""))?,
-                    maker_fee: self.cmd
+                    maker_fee: self
+                        .cmd
                         .maker_fee
                         .filter(|f| f.is_sign_positive())
                         .ok_or(anyhow!(""))?,
-                    min_amount: self.cmd
+                    min_amount: self
+                        .cmd
                         .min_amount
                         .filter(|f| f.is_sign_positive())
                         .ok_or(anyhow!(""))?,
-                    min_vol: self.cmd
+                    min_vol: self
+                        .cmd
                         .min_vol
                         .filter(|f| f.is_sign_positive())
                         .ok_or(anyhow!(""))?,
@@ -392,7 +410,8 @@ fn fetch_sequence_from(id: u64) -> Vec<Sequence> {
             status: f_status,
             timestamp: f_timestamp,
         },
-    ).unwrap_or_default()
+    )
+    .unwrap_or_default()
 }
 
 pub fn insert_nop(id: u64) -> Option<bool> {
@@ -438,7 +457,8 @@ pub fn insert_sequences(seq: &Vec<Command>) -> anyhow::Result<()> {
                 "cmd" => serde_json::to_string(s).unwrap(),
             }
         }),
-    ).map_err(|_| anyhow!("Error: writing sequence to mysql failed, {:?}"))
+    )
+    .map_err(|e| anyhow!("Error: writing sequence to mysql failed, {:?}", e))
 }
 
 pub fn confirm(from: u64, exclude: u64) -> anyhow::Result<()> {
@@ -462,7 +482,8 @@ pub fn test_deserialize_cmd() {
         cmd: e,
         status: 0,
         timestamp: 0,
-    }.try_into();
+    }
+    .try_into();
     assert!(s.is_ok());
     let bid_limit = r#"{"quote":100, "base":101, "cmd":1, "price":"10.0", "amount":"0.5", "order_id":1, "user_id":"0x0000000000000000000000000000000000000000000000000000000000000001"}"#;
     let e = serde_json::from_str::<Command>(bid_limit).unwrap();
@@ -471,6 +492,7 @@ pub fn test_deserialize_cmd() {
         cmd: e,
         status: 0,
         timestamp: 0,
-    }.try_into();
+    }
+    .try_into();
     assert!(s.is_ok());
 }
