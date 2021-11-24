@@ -35,7 +35,7 @@ use std::{
     convert::{TryFrom, TryInto},
     fs::OpenOptions,
     path::PathBuf,
-    sync::mpsc::Receiver,
+    sync::mpsc::{Receiver, RecvTimeoutError},
     time::Duration,
 };
 use sub_api::{
@@ -133,7 +133,6 @@ fn new_api(signer: Sr25519) -> anyhow::Result<FusoApi> {
 }
 
 fn start_submitting(api: FusoApi, rx: Receiver<Proof>) -> anyhow::Result<()> {
-    use sp_core::Pair;
     let path: PathBuf = [&C.sequence.coredump_dir, "fusotao.seq"].iter().collect();
     let finalized_file = OpenOptions::new()
         .read(true)
@@ -152,53 +151,74 @@ fn start_submitting(api: FusoApi, rx: Receiver<Proof>) -> anyhow::Result<()> {
     }
     log::info!("initiate proving from sequence {:?}", max_proof_id);
     std::thread::spawn(move || loop {
-        let proof = rx.recv().unwrap();
+        let proof = match rx.recv_timeout(Duration::from_millis(60_000)) {
+            Ok(p) => Some(p),
+            Err(RecvTimeoutError::Timeout) => None,
+            Err(RecvTimeoutError::Disconnected) => break,
+        };
+        if proof.is_none() && !batch.is_empty() {
+            max_proof_id = submit_batch(api.clone(), &mut batch).unwrap();
+            (&mut seq_mmap[..]).copy_from_slice(&max_proof_id.to_le_bytes()[..]);
+            seq_mmap.flush().unwrap();
+            buf_len = 0;
+            continue;
+        }
+        let proof = proof.unwrap();
         if max_proof_id >= proof.event_id {
             continue;
         }
         log::debug!("proof of sequence => {:?}", proof);
         let size = proof.size_hint();
-        if size + buf_len <= MAX_EXTRINSIC_BYTES {
-            batch.push(proof);
-            buf_len += size;
-        } else {
+        if size + buf_len > MAX_EXTRINSIC_BYTES {
             if batch.is_empty() {
                 // FIXME the proof is too long to put into a single block, e.g. too many makers
                 // this a known bug, simply deleting the command would work. we'll add a constraint to fix it in the future
                 panic!("proof size too big, delete the command and reboot");
             }
-            // FIXME naive retry implementation
-            for i in 0..=3 {
-                max_proof_id = batch.last().unwrap().event_id;
-                let xt: UncheckedExtrinsicV4<_> =
-                    sub_api::compose_extrinsic!(api.clone(), "Receipts", "verify", batch.clone());
-                match api.send_extrinsic(xt.hex_encode(), XtStatus::InBlock) {
-                    Ok(_) => {
-                        // TODO scan block and revert status once chain fork
-                        (&mut seq_mmap[..]).copy_from_slice(&max_proof_id.to_le_bytes()[..]);
-                        seq_mmap.flush().unwrap();
-                        log::info!(
-                            "proof of sequence until {:?} have been submitted",
-                            max_proof_id
-                        );
-                        batch.clear();
-                        break;
-                    }
-                    Err(e) => {
-                        log::error!(
-                            "submit proof failed, remain {:?} times retrying, error => {:?}",
-                            3 - i,
-                            e
-                        );
-                        std::thread::sleep(Duration::from_millis(i * 15000));
-                    }
-                }
-            }
-            batch.push(proof);
-            buf_len = size;
+            max_proof_id = submit_batch(api.clone(), &mut batch).unwrap();
+            (&mut seq_mmap[..]).copy_from_slice(&max_proof_id.to_le_bytes()[..]);
+            seq_mmap.flush().unwrap();
+            buf_len = 0;
         }
+        batch.push(proof);
+        buf_len += size;
     });
     Ok(())
+}
+
+fn submit_batch(api: FusoApi, batch: &mut Vec<Proof>) -> anyhow::Result<u64> {
+    use sp_core::Pair;
+    if batch.is_empty() {
+        return Err(anyhow::anyhow!("Empty proofs"));
+    }
+    let last_submitted_id = batch.last().unwrap().event_id;
+    for i in 0..=3 {
+        let xt: UncheckedExtrinsicV4<_> =
+            sub_api::compose_extrinsic!(api, "Receipts", "verify", batch.clone());
+        match api.send_extrinsic(xt.hex_encode(), XtStatus::InBlock) {
+            Ok(_) => {
+                // FIXME scan block and revert status once chain fork
+                log::info!(
+                    "proof of sequence until {:?} have been submitted",
+                    last_submitted_id
+                );
+                batch.clear();
+                return Ok(last_submitted_id);
+            }
+            Err(e) => {
+                log::error!(
+                    "submit proof failed, remain {:?} times retrying, error => {:?}",
+                    3 - i,
+                    e
+                );
+                std::thread::sleep(Duration::from_millis(i * 15000));
+            }
+        }
+    }
+    return Err(anyhow::anyhow!(
+        "fail to submit proofs after 3 times retrying, {}",
+        last_submitted_id
+    ));
 }
 
 fn start_listening(api: FusoApi, who: Public) -> anyhow::Result<()> {
