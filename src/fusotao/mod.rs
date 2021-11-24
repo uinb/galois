@@ -57,6 +57,7 @@ const ONE_ONCHAIN: u128 = 1_000_000_000_000_000_000;
 const MILL: u32 = 1_000_000;
 const BILL: u32 = 1_000_000_000;
 const QUINTILL: u64 = 1_000_000_000_000_000_000;
+const MAX_EXTRINSIC_BYTES: usize = 1_000_000;
 
 #[derive(Clone, Debug, Serialize, Deserialize, Encode)]
 pub struct MerkleLeaf {
@@ -140,31 +141,61 @@ fn start_submitting(api: FusoApi, rx: Receiver<Proof>) -> anyhow::Result<()> {
         .create(true)
         .open(&path)?;
     finalized_file.set_len(8)?;
-    let mut seq = unsafe { MmapMut::map_mut(&finalized_file)? };
-    let mut cur = u64::from_le_bytes(seq.as_ref().try_into()?);
-    if cur == 0 && !C.sequence.enable_from_genesis {
+    let mut seq_mmap = unsafe { MmapMut::map_mut(&finalized_file)? };
+    let mut max_proof_id = u64::from_le_bytes(seq_mmap[..].try_into()?);
+    let mut buf_len = 0usize;
+    let mut batch = vec![];
+    if max_proof_id == 0 && !C.sequence.enable_from_genesis {
         panic!(
             "couldn't load seq memmap file, set `enable_from_genesis` to force start from genesis"
         );
     }
-    log::info!("initiate proving at sequence {:?}", cur);
+    log::info!("initiate proving from sequence {:?}", max_proof_id);
     std::thread::spawn(move || loop {
         let proof = rx.recv().unwrap();
-        if cur >= proof.event_id {
+        if max_proof_id >= proof.event_id {
             continue;
         }
-        cur = proof.event_id;
-        log::debug!("proofs of sequence {:?}: {:?}", cur, proof);
-        let xt: UncheckedExtrinsicV4<_> =
-            sub_api::compose_extrinsic!(api.clone(), "Receipts", "verify", proof);
-        match api.send_extrinsic(xt.hex_encode(), XtStatus::InBlock) {
-            Ok(_) => {
-                // TODO scan block and revert status once chain fork
-                seq.copy_from_slice(&cur.to_le_bytes()[..]);
-                seq.flush().unwrap();
-                log::info!("proofs of sequence {:?} has been submitted", cur);
+        log::debug!("proof of sequence => {:?}", proof);
+        let size = proof.size_hint();
+        if size + buf_len <= MAX_EXTRINSIC_BYTES {
+            batch.push(proof);
+            buf_len += size;
+        } else {
+            if batch.is_empty() {
+                // FIXME the proof is too long to put into a single block, e.g. too many makers
+                // this a known bug, simply deleting the command would work. we'll add a constraint to fix it in the future
+                panic!("proof size too big, delete the command and reboot");
             }
-            Err(e) => log::error!("submitting proofs failed, {:?}", e),
+            // FIXME naive retry implementation
+            for i in 0..=3 {
+                max_proof_id = batch.last().unwrap().event_id;
+                let xt: UncheckedExtrinsicV4<_> =
+                    sub_api::compose_extrinsic!(api.clone(), "Receipts", "verify", batch.clone());
+                match api.send_extrinsic(xt.hex_encode(), XtStatus::InBlock) {
+                    Ok(_) => {
+                        // TODO scan block and revert status once chain fork
+                        (&mut seq_mmap[..]).copy_from_slice(&max_proof_id.to_le_bytes()[..]);
+                        seq_mmap.flush().unwrap();
+                        log::info!(
+                            "proof of sequence until {:?} have been submitted",
+                            max_proof_id
+                        );
+                        batch.clear();
+                        break;
+                    }
+                    Err(e) => {
+                        log::error!(
+                            "submit proof failed, remain {:?} times retrying, error => {:?}",
+                            3 - i,
+                            e
+                        );
+                        std::thread::sleep(Duration::from_millis(i * 15000));
+                    }
+                }
+            }
+            batch.push(proof);
+            buf_len = size;
         }
     });
     Ok(())
@@ -206,7 +237,7 @@ fn start_listening(api: FusoApi, who: Public) -> anyhow::Result<()> {
                         blk[..].copy_from_slice(&sync.to_le_bytes()[..]);
                         // FIXME commit manually after memmap flush ok
                         blk.flush().unwrap();
-                        log::info!("all events before before block {} synchronized", sync);
+                        log::info!("all events until block {} synchronized", sync);
                     }
                     Err(_) => log::warn!("save sequences from block {} failed", cur),
                 }
