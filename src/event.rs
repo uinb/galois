@@ -28,6 +28,7 @@ use thiserror::Error;
 
 use crate::{assets, clearing, core::*, matcher, orderbook::*, output, sequence, server, snapshot};
 use crate::sequence::{Command, UPDATE_SYMBOL};
+use std::sync::atomic::AtomicU64;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum Event {
@@ -156,20 +157,42 @@ type EventExecutionResult = Result<(), EventsError>;
 type OutputChannel = Sender<Vec<output::Output>>;
 type DriverChannel = Receiver<sequence::Fusion>;
 
+#[derive(Deserialize, Serialize, Copy, Clone, Debug)]
+pub struct U64wrapper {
+    pub value:u64
+}
+
+
+impl U64wrapper {
+
+    pub fn set(mut self, v: u64) {
+        self.value = v;
+    }
+}
+
 pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data, ready: Arc<AtomicBool>) {
     std::thread::spawn(move || {
+
+        let current_proved_event = Arc::new(U64wrapper{value:data.current_proved_event});
+
         cfg_if! {
             if #[cfg(feature = "fusotao")] {
                 use crate::fusotao;
                 let (tx, rx) = std::sync::mpsc::channel();
-                fusotao::init(rx, data.current_proved_event.clone()).unwrap();
+
+                fusotao::init(rx,current_proved_event.clone() ).unwrap();
                 let prover = fusotao::Prover::new(tx);
             }
         }
         ready.store(true, Ordering::Relaxed);
         log::info!("event handler initialized");
+
         loop {
             let fusion = recv.recv().unwrap();
+            let x = current_proved_event.value;
+
+            data.current_proved_event = x;
+
             match fusion {
                 sequence::Fusion::R(watch) => {
                     let (s, r) = (watch.session, watch.req_id);
@@ -184,6 +207,7 @@ pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data, ready: A
                     match seq.try_into() {
                         Ok(event) => {
                             cfg_if! {
+
                                 if #[cfg(feature = "fusotao")] {
                                     let result = handle_event(event, &mut data, &sender, &prover);
                                 } else {
@@ -217,6 +241,7 @@ fn handle_event(
     data: &mut Data,
     sender: &OutputChannel,
     #[cfg(feature = "fusotao")] prover: &crate::fusotao::Prover,
+
 ) -> EventExecutionResult {
     match event {
         Event::Limit(id, cmd, time) => {
@@ -447,10 +472,9 @@ fn handle_event(
             snapshot::dump(id, time, data);
             Ok(())
         }
-
         #[cfg(feature = "fusotao")]
         Event::SystemBusyCheck(id, time) => {
-            let current_proved_event = data.current_proved_event.into_inner();
+            let current_proved_event = data.current_proved_event;
             let delta = if id > current_proved_event { id - current_proved_event } else { current_proved_event - id };
             updateExchangeFee(delta, data);
             Ok(())
@@ -525,7 +549,7 @@ fn do_inspect(inspection: Inspection, data: &Data) -> EventExecutionResult {
 
         #[cfg(feature = "fusotao")]
         Inspection::QuerySystemBusy(session, req_id) => {
-            let current_proved_event = data.current_proved_event.clone().into_inner();
+            let current_proved_event = data.current_proved_event;
             let mut v: HashMap<String, u64> = HashMap::new();
             v.insert(String::from("current_proved_event"), current_proved_event);
             let v = serde_json::to_vec(&v).unwrap_or_default();
