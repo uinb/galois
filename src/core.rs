@@ -13,8 +13,6 @@
 // limitations under the License.
 
 use std::{collections::HashMap, fs::File, io::{BufReader, BufWriter}};
-use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 
 use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use rust_decimal::Decimal;
@@ -200,6 +198,9 @@ pub fn test_dump() {
         dec!(0.001),
         dec!(0.001),
         dec!(0.001),
+        dec!(0.001),
+        1,
+        dec!(0.001),
         dec!(1.0),
         false,
         true,
@@ -215,6 +216,10 @@ pub fn test_dump() {
             3,
             dec!(0.001),
             dec!(0.001),
+
+            dec!(0.001),
+            dec!(0.001),
+            1,
             dec!(0.001),
             dec!(1.0),
             false,

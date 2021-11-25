@@ -28,7 +28,6 @@ use thiserror::Error;
 
 use crate::{assets, clearing, core::*, matcher, orderbook::*, output, sequence, server, snapshot};
 use crate::sequence::{Command, UPDATE_SYMBOL};
-use std::sync::atomic::AtomicU64;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum Event {
@@ -483,8 +482,7 @@ fn handle_event(
 }
 
 
-#[cfg(feature = "fusotao")]
-fn updateExchangeFee(delta: u64, data: &Data) {
+fn genCmds(delta: u64, data: &Data) -> Vec<Command> {
     let mut times: u32 = (delta / 1000) as u32;
     times = if times > 0 { times } else { 1 };
     let mut cmds = vec![];
@@ -510,7 +508,14 @@ fn updateExchangeFee(delta: u64, data: &Data) {
                 cmds.push(cmd);
             }
         });
-    sequence::insert_sequences(&cmds);
+    cmds
+}
+#[cfg(feature = "fusotao")]
+fn updateExchangeFee(delta: u64, data: &Data) {
+    let cmds = genCmds(delta, data);
+    if !cmds.is_empty() {
+        sequence::insert_sequences(&cmds);
+    }
 }
 
 
@@ -579,6 +584,8 @@ fn do_inspect(inspection: Inspection, data: &Data) -> EventExecutionResult {
 
 #[test]
 pub fn test_serialize() {
+    use rust_decimal_macros::dec;
+
     assert_eq!("{}", serde_json::to_string(&Accounts::new()).unwrap());
     let mut account = Account::default();
     account.insert(
@@ -600,4 +607,28 @@ pub fn test_serialize() {
         })
             .unwrap()
     );
+
+    let mut data = Data::new();
+    data.current_proved_event  =1;
+    let orderbook = OrderBook::new(8,
+                                   8,
+                                   dec!(0.001),
+                                   dec!(0.001),
+                                   dec!(0.001),
+                                   dec!(0.001),
+                                   1,
+                                   dec!(0.1),
+                                   dec!(0.1),
+                                   true,
+                                   true);
+    data.orderbooks.insert((0,1), orderbook);
+
+    let cmd = genCmds(5000, &data);
+    assert_eq!(1, cmd.len());
+    assert_eq!(5, cmd[0].fee_times.unwrap());
+    assert_eq!(dec!(0.005), cmd[0].maker_fee.unwrap());
+    assert_eq!(dec!(0.005), cmd[0].taker_fee.unwrap());
+    assert_eq!(dec!(0.001), cmd[0].base_maker_fee.unwrap());
+    assert_eq!(dec!(0.001), cmd[0].base_taker_fee.unwrap());
+
 }

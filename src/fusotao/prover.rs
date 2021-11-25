@@ -377,6 +377,9 @@ mod test {
             quote_scale,
             taker_fee,
             maker_fee,
+            taker_fee,
+            maker_fee,
+            1,
             min_amount,
             min_vol,
             true,
@@ -511,6 +514,7 @@ mod test {
                 orderbooks: orderbooks,
                 accounts: all,
                 merkle_tree: merkle_tree,
+                current_proved_event: 1,
             };
 
             let size = data.orderbooks.get(&(1, 0)).unwrap().size();
