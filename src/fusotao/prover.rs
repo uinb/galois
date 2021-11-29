@@ -17,7 +17,7 @@ use std::sync::mpsc::Sender;
 
 use sha2::{Digest, Sha256};
 
-use crate::{assets::Balance, core::*, event::*, matcher::*, orderbook::AskOrBid, output::Output};
+use crate::{assets::Balance, core::*, matcher::*, orderbook::AskOrBid, output::Output};
 
 use super::*;
 
@@ -351,13 +351,14 @@ fn new_orderbook_merkle_leaf(
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicU64;
+
     use rust_decimal_macros::dec;
     use sha2::{Digest, Sha256};
     use smt::{CompiledMerkleProof, H256, sha256::Sha256Hasher};
 
     use crate::{assets, clearing, core::*, fusotao::*, matcher, orderbook::*};
-    use std::sync::Arc;
-    use std::sync::atomic::AtomicU64;
 
     fn split_h256(v: &[u8; 32]) -> ([u8; 16], [u8; 16]) {
         (v[..16].try_into().unwrap(), v[16..].try_into().unwrap())
@@ -400,7 +401,7 @@ mod test {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let mut merkle_tree = GlobalStates::default();
-            let pp = Prover::new(tx,Arc::new(AtomicU64::new(0)));
+            let pp = Prover::new(tx, Arc::new(AtomicU64::new(0)));
             let mut all = Accounts::new();
             let cmd0 = AssetsCmd {
                 user_id: UserId::from_low_u64_be(1),

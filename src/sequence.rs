@@ -20,7 +20,7 @@ use mysql::{*, prelude::*};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-use crate::{config::C, core::*, db::DB, event::*, orderbook::AskOrBid, sequence};
+use crate::{config::C, core::*, db::DB, event::*, orderbook::AskOrBid};
 
 pub const ASK_LIMIT: u32 = 0;
 pub const BID_LIMIT: u32 = 1;
@@ -36,9 +36,9 @@ pub const QUERY_ACCOUNTS: u32 = 16;
 pub const DUMP: u32 = 17;
 pub const UPDATE_DEPTH: u32 = 18;
 pub const CONFIRM_ALL: u32 = 19;
-pub const SYSTEM_BUSY_CHECK: u32 = 20;
+pub const PROVING_PERF_INDEX_CHECK: u32 = 20;
 pub const QUERY_EXCHANGE_FEE: u32 = 21;
-pub const QUERY_SYSTEM_BUSY: u32 = 22;
+pub const QUERY_PROVING_PERF_INDEX: u32 = 22;
 
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
 pub struct Sequence {
@@ -143,7 +143,6 @@ impl TryInto<Event> for Sequence {
                         .maker_fee
                         .filter(|f| f.is_sign_positive())
                         .ok_or(anyhow!(""))?,
-
                     base_maker_fee: self.cmd
                         .base_maker_fee
                         .filter(|f| f.is_sign_positive())
@@ -181,10 +180,7 @@ impl TryInto<Event> for Sequence {
             )),
             DUMP => Ok(Event::Dump(self.id, self.timestamp)),
             #[cfg(feature = "fusotao")]
-            SYSTEM_BUSY_CHECK => {
-                Ok(Event::SystemBusyCheck(self.id, self.timestamp))
-            }
-
+            PROVING_PERF_INDEX_CHECK => Ok(Event::ProvingPerfIndexCheck(self.id, self.timestamp)),
             _ => Err(anyhow!("Unsupported Command")),
         }
     }
@@ -209,7 +205,7 @@ impl Sequence {
 
     pub fn new_system_busy_check(at: u64) -> Self {
         let mut cmd = Command::default();
-        cmd.cmd = SYSTEM_BUSY_CHECK;
+        cmd.cmd = PROVING_PERF_INDEX_CHECK;
         Self {
             id: at,
             cmd: cmd,
@@ -258,7 +254,7 @@ impl TryInto<Inspection> for Watch {
                 self.session,
                 self.req_id,
             )),
-            QUERY_SYSTEM_BUSY => Ok(Inspection::QuerySystemBusy(self.session, self.req_id)),
+            QUERY_PROVING_PERF_INDEX => Ok(Inspection::QueryProvingPerfIndex(self.session, self.req_id)),
             _ => Err(anyhow!("Invalid Inspection")),
         }
     }
@@ -362,7 +358,7 @@ impl Command {
 
     #[must_use]
     pub const fn is_read(&self) -> bool {
-        matches!(self.cmd, QUERY_ACCOUNTS | QUERY_BALANCE | QUERY_ORDER | QUERY_EXCHANGE_FEE | QUERY_SYSTEM_BUSY)
+        matches!(self.cmd, QUERY_ACCOUNTS | QUERY_BALANCE | QUERY_ORDER | QUERY_EXCHANGE_FEE | QUERY_PROVING_PERF_INDEX)
     }
 }
 

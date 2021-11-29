@@ -42,8 +42,7 @@ pub enum Event {
     // special: `EventId` means dump at `EventId`
     Dump(EventId, Timestamp),
     #[cfg(feature = "fusotao")]
-    SystemBusyCheck(EventId, Timestamp),
-
+    ProvingPerfIndexCheck(EventId, Timestamp),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -135,7 +134,7 @@ pub enum Inspection {
     QueryBalance(UserId, Currency, u64, u64),
     QueryAccounts(UserId, u64, u64),
     #[cfg(feature = "fusotao")]
-    QuerySystemBusy(u64, u64),
+    QueryProvingPerfIndex(u64, u64),
     QueryExchangeFee(Symbol, u64, u64),
 }
 
@@ -456,11 +455,11 @@ fn handle_event(
             Ok(())
         }
         #[cfg(feature = "fusotao")]
-        Event::SystemBusyCheck(id, time) => {
+        Event::ProvingPerfIndexCheck(id, _) => {
             let current_proved_event = prover.proved_event_id.load(Ordering::Relaxed);
             if current_proved_event != 0 {
                 let delta = if id > current_proved_event { id - current_proved_event } else { current_proved_event - id };
-                updateExchangeFee(delta, data);
+                update_exchange_fee(delta, data);
             }
             Ok(())
         }
@@ -468,40 +467,37 @@ fn handle_event(
 }
 
 
-fn genCmds(delta: u64, data: &Data) -> Vec<Command> {
+fn gen_adjust_fee_cmds(delta: u64, data: &Data) -> Vec<Command> {
     let mut times: u32 = (delta / 1000) as u32;
     times = if times > 0 { times } else { 1 };
-    let mut cmds = vec![];
     data.orderbooks
         .iter()
-        .for_each(|(k, v)| {
-            if times != v.fee_times {
-                let mut cmd = Command::default();
-                cmd.cmd = UPDATE_SYMBOL;
-                cmd.base = Option::Some(k.0);
-                cmd.quote = Option::Some(k.1);
-                cmd.open = Option::Some(v.open);
-                cmd.enable_market_order = Option::Some(v.enable_market_order);
-                cmd.fee_times = Option::Some(times);
-                cmd.base_taker_fee = Option::Some(v.base_taker_fee);
-                cmd.base_maker_fee = Option::Some(v.base_maker_fee);
-                cmd.maker_fee = Option::Some(v.base_maker_fee * Decimal::from(times));
-                cmd.taker_fee = Option::Some(v.base_taker_fee * Decimal::from(times));
-                cmd.min_amount = Option::Some(v.min_amount);
-                cmd.min_vol = Option::Some(v.min_vol);
-                cmd.quote_scale = Option::Some(v.quote_scale);
-                cmd.base_scale = Option::Some(v.base_scale);
-                cmds.push(cmd);
-            }
-        });
-    cmds
+        .filter(|(_, v)| times != v.fee_times)
+        .map(|(k, v)| {
+            let mut cmd = Command::default();
+            cmd.cmd = UPDATE_SYMBOL;
+            cmd.base = Some(k.0);
+            cmd.quote = Some(k.1);
+            cmd.open = Some(v.open);
+            cmd.enable_market_order = Some(v.enable_market_order);
+            cmd.fee_times = Some(times);
+            cmd.base_taker_fee = Some(v.base_taker_fee);
+            cmd.base_maker_fee = Some(v.base_maker_fee);
+            cmd.maker_fee = Some(v.base_maker_fee * Decimal::from(times));
+            cmd.taker_fee = Some(v.base_taker_fee * Decimal::from(times));
+            cmd.min_amount = Some(v.min_amount);
+            cmd.min_vol = Some(v.min_vol);
+            cmd.quote_scale = Some(v.quote_scale);
+            cmd.base_scale = Some(v.base_scale);
+            cmd
+        }).collect::<Vec<_>>()
 }
 
 #[cfg(feature = "fusotao")]
-fn updateExchangeFee(delta: u64, data: &Data) {
-    let cmds = genCmds(delta, data);
+fn update_exchange_fee(delta: u64, data: &Data) {
+    let cmds = gen_adjust_fee_cmds(delta, data);
     if !cmds.is_empty() {
-        sequence::insert_sequences(&cmds);
+        let _ = sequence::insert_sequences(&cmds);
     }
 }
 
@@ -541,16 +537,14 @@ fn do_inspect(inspection: Inspection,
         Inspection::ConfirmAll(from, exclude) => {
             sequence::confirm(from, exclude).map_err(|_| EventsError::Interrupted)?;
         }
-
         #[cfg(feature = "fusotao")]
-        Inspection::QuerySystemBusy(session, req_id) => {
+        Inspection::QueryProvingPerfIndex(session, req_id) => {
             let current_proved_event = prover.proved_event_id.load(Ordering::Relaxed);
             let mut v: HashMap<String, u64> = HashMap::new();
             v.insert(String::from("current_proved_event"), current_proved_event);
             let v = serde_json::to_vec(&v).unwrap_or_default();
             server::publish(server::Message::with_payload(session, req_id, v));
         }
-
         Inspection::QueryExchangeFee(symbol, session, req_id) => {
             let mut v: HashMap<String, Fee> = HashMap::new();
             let orderbook = data.orderbooks.get(&symbol);
@@ -564,7 +558,6 @@ fn do_inspect(inspection: Inspection,
                     v.insert(String::from("taker_fee"), Decimal::new(0, 0));
                 }
             }
-
             let v = serde_json::to_vec(&v).unwrap_or_default();
             server::publish(server::Message::with_payload(session, req_id, v));
         }
@@ -611,7 +604,7 @@ pub fn test_serialize() {
                                    true,
                                    true);
     data.orderbooks.insert((0, 1), orderbook);
-    let cmd = genCmds(5000, &data);
+    let cmd = gen_adjust_fee_cmds(5000, &data);
     assert_eq!(1, cmd.len());
     assert_eq!(5, cmd[0].fee_times.unwrap());
     assert_eq!(dec!(0.005), cmd[0].maker_fee.unwrap());

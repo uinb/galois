@@ -24,7 +24,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::anyhow;
 use async_std::task::block_on;
-use futures::AsyncWriteExt;
 use futures::future::try_join_all;
 use memmap::MmapMut;
 use parity_scale_codec::{Compact, Decode, Encode, WrapperTypeEncode};
