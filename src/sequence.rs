@@ -38,7 +38,7 @@ pub const UPDATE_DEPTH: u32 = 18;
 pub const CONFIRM_ALL: u32 = 19;
 pub const SYSTEM_BUSY_CHECK: u32 = 20;
 pub const QUERY_EXCHANGE_FEE: u32 = 21;
-pub const QUERY_SYSTEM_BUSY: U32 = 22;
+pub const QUERY_SYSTEM_BUSY: u32 = 22;
 
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
 pub struct Sequence {
