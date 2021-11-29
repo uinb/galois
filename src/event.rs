@@ -467,8 +467,8 @@ fn handle_event(
     }
 }
 
-fn gen_adjust_fee_cmds(delta: u64, data: &Data) -> Vec<Command> {
-    let mut times: u32 = (delta / C.fusotao.as_ref().unwrap().fee_adjust_threshold) as u32;
+fn gen_adjust_fee_cmds(delta: u64, feeAdjustThreshold: u64, data: &Data) -> Vec<Command> {
+    let mut times: u32 = (delta / feeAdjustThreshold) as u32;
     times = if times > 0 { times } else { 1 };
     data.orderbooks
         .iter()
@@ -495,7 +495,7 @@ fn gen_adjust_fee_cmds(delta: u64, data: &Data) -> Vec<Command> {
 
 #[cfg(feature = "fusotao")]
 fn update_exchange_fee(delta: u64, data: &Data) {
-    let cmds = gen_adjust_fee_cmds(delta, data);
+    let cmds = gen_adjust_fee_cmds(delta, C.fusotao.as_ref().unwrap().fee_adjust_threshold, data);
     if !cmds.is_empty() {
         let _ = sequence::insert_sequences(&cmds);
     }
@@ -603,7 +603,7 @@ pub fn test_serialize() {
                                    true,
                                    true);
     data.orderbooks.insert((0, 1), orderbook);
-    let cmd = gen_adjust_fee_cmds(5000, &data);
+    let cmd = gen_adjust_fee_cmds(5000, 1000, &data);
     assert_eq!(1, cmd.len());
     assert_eq!(5, cmd[0].fee_times.unwrap());
     assert_eq!(dec!(0.005), cmd[0].maker_fee.unwrap());
