@@ -69,6 +69,18 @@ pub struct FusotaoConfig {
     pub node_url: String,
     pub key_seed: String,
     pub claim_block: u32,
+    pub fee_adjust_threshold: u64,
+}
+
+impl Default for FusotaoConfig {
+    fn default() -> Self {
+        Self {
+            node_url: String::from(""),
+            key_seed: String::from(""),
+            claim_block: 1,
+            fee_adjust_threshold: 10,
+        }
+    }
 }
 
 #[cfg(feature = "enc-conf")]

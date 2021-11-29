@@ -28,6 +28,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{assets, clearing, core::*, matcher, orderbook::*, output, sequence, server, snapshot};
+use crate::config::C;
 use crate::sequence::{Command, UPDATE_SYMBOL};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -466,9 +467,8 @@ fn handle_event(
     }
 }
 
-
 fn gen_adjust_fee_cmds(delta: u64, data: &Data) -> Vec<Command> {
-    let mut times: u32 = (delta / 1000) as u32;
+    let mut times: u32 = (delta / C.fusotao.as_ref().unwrap().fee_adjust_threshold) as u32;
     times = if times > 0 { times } else { 1 };
     data.orderbooks
         .iter()
@@ -500,7 +500,6 @@ fn update_exchange_fee(delta: u64, data: &Data) {
         let _ = sequence::insert_sequences(&cmds);
     }
 }
-
 
 fn do_inspect(inspection: Inspection,
               data: &Data,
