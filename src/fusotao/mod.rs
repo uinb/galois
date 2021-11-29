@@ -136,7 +136,7 @@ fn new_api(signer: Sr25519) -> anyhow::Result<FusoApi> {
         })
 }
 
-fn start_submitting(api: FusoApi, rx: Receiver<Proof>, current_proved_event: Arc<U64wrapper>) -> anyhow::Result<()> {
+fn start_submitting(api: FusoApi, rx: Receiver<Proof>, proved_event_id: Arc<AtomicU64>) -> anyhow::Result<()> {
     use sp_core::Pair;
     let path: PathBuf = [&C.sequence.coredump_dir, "fusotao.seq"].iter().collect();
     let finalized_file = OpenOptions::new()
@@ -147,7 +147,6 @@ fn start_submitting(api: FusoApi, rx: Receiver<Proof>, current_proved_event: Arc
     finalized_file.set_len(8)?;
     let mut seq = unsafe { MmapMut::map_mut(&finalized_file)? };
     let mut cur = u64::from_le_bytes(seq.as_ref().try_into()?);
-    current_proved_event.set(cur);
     if cur == 0 && !C.sequence.enable_from_genesis {
         panic!(
             "couldn't load seq memmap file, set `enable_from_genesis` to force start from genesis"
@@ -160,7 +159,6 @@ fn start_submitting(api: FusoApi, rx: Receiver<Proof>, current_proved_event: Arc
             continue;
         }
         cur = proof.event_id;
-
         log::debug!("proofs of sequence {:?}: {:?}", cur, proof);
         let xt: UncheckedExtrinsicV4<_> =
             sub_api::compose_extrinsic!(api.clone(), "Receipts", "verify", proof);
@@ -169,7 +167,7 @@ fn start_submitting(api: FusoApi, rx: Receiver<Proof>, current_proved_event: Arc
                 // TODO scan block and revert status once chain fork
                 seq.copy_from_slice(&cur.to_le_bytes()[..]);
                 seq.flush().unwrap();
-                current_proved_event.set(cur);
+                proved_event_id.store(cur, Ordering::Relaxed);
                 log::info!("proofs of sequence {:?} has been submitted", cur);
             }
             Err(e) => log::error!("submitting proofs failed, {:?}", e),
@@ -232,7 +230,7 @@ fn start_listening(api: FusoApi, who: Public) -> anyhow::Result<()> {
 /// AccountId of chain = MultiAddress<sp_runtime::AccountId32, ()>::Id = GenericAddress::Id
 /// 1. from_ss58check() or from_ss58check_with_version()
 /// 2. new or from public
-pub fn init(rx: Receiver<Proof>, current_proved_event: Arc<U64wrapper>) -> anyhow::Result<()> {
+pub fn init(rx: Receiver<Proof>, proved_event_id: Arc<AtomicU64>) -> anyhow::Result<()> {
     use sp_core::Pair;
     let signer = Sr25519::from_string(
         &C.fusotao
@@ -243,7 +241,7 @@ pub fn init(rx: Receiver<Proof>, current_proved_event: Arc<U64wrapper>) -> anyho
     )
         .map_err(|_| anyhow!("Invalid fusotao config"))?;
     let api = new_api(signer.clone())?;
-    start_submitting(api.clone(), rx, current_proved_event)?;
+    start_submitting(api.clone(), rx, proved_event_id)?;
     start_listening(api, signer.public())?;
     log::info!("fusotao prover initialized");
     Ok(())

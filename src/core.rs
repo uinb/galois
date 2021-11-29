@@ -153,7 +153,6 @@ pub struct Data {
     pub accounts: Accounts,
     #[cfg(feature = "fusotao")]
     pub merkle_tree: GlobalStates,
-    pub current_proved_event: u64,
 }
 
 unsafe impl Sync for Data {}
@@ -165,7 +164,6 @@ impl Data {
             accounts: HashMap::new(),
             #[cfg(feature = "fusotao")]
             merkle_tree: GlobalStates::default(),
-            current_proved_event: 0,
         }
     }
 
@@ -216,7 +214,6 @@ pub fn test_dump() {
             3,
             dec!(0.001),
             dec!(0.001),
-
             dec!(0.001),
             dec!(0.001),
             1,

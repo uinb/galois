@@ -206,6 +206,7 @@ impl Sequence {
             timestamp,
         }
     }
+
     pub fn new_system_busy_check(at: u64) -> Self {
         let mut cmd = Command::default();
         cmd.cmd = SYSTEM_BUSY_CHECK;
@@ -255,7 +256,7 @@ impl TryInto<Inspection> for Watch {
             QUERY_EXCHANGE_FEE => Ok(Inspection::QueryExchangeFee(
                 self.cmd.symbol().ok_or(anyhow!(""))?,
                 self.session,
-                self.req_id
+                self.req_id,
             )),
             QUERY_SYSTEM_BUSY => Ok(Inspection::QuerySystemBusy(self.session, self.req_id)),
             _ => Err(anyhow!("Invalid Inspection")),
@@ -410,14 +411,11 @@ pub fn init(sender: Sender<Fusion>, id: u64, startup: Arc<AtomicBool>) {
                         .send(Fusion::W(Sequence::new_dump_sequence(id, t)))
                         .unwrap();
                 }
-
                 //check system busy
                 if counter != 0 && counter % 1000 == 0 {
                     event_sender
                         .send(Fusion::W(Sequence::new_system_busy_check(id))).unwrap();
                 }
-
-
                 id += 1;
             }
             event_sender
@@ -496,9 +494,8 @@ pub fn insert_sequences(seq: &Vec<Command>) -> anyhow::Result<()> {
                 "cmd" => serde_json::to_string(s).unwrap(),
             }
         }),
-    ).map_err(|_| anyhow!("Error: writing sequence to mysql failed, {:?}"))
+    ).map_err(|e| anyhow!("Error: writing sequence to mysql failed, {:?}", e))
 }
-
 
 pub fn confirm(from: u64, exclude: u64) -> anyhow::Result<()> {
     let sql = "UPDATE t_sequence SET f_status=? WHERE f_status=? AND f_id>=? AND f_id<?";

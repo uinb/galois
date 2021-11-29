@@ -19,6 +19,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc::{Receiver, Sender},
 };
+use std::sync::atomic::AtomicU64;
 
 use anyhow::anyhow;
 use cfg_if::cfg_if;
@@ -126,7 +127,7 @@ impl Event {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone, Deserialize, Serialize)]
+#[derive(Debug, Eq, PartialEq, Clone, Deserialize, Serialize, Copy)]
 pub enum Inspection {
     ConfirmAll(u64, u64),
     UpdateDepth,
@@ -156,47 +157,32 @@ type EventExecutionResult = Result<(), EventsError>;
 type OutputChannel = Sender<Vec<output::Output>>;
 type DriverChannel = Receiver<sequence::Fusion>;
 
-#[derive(Deserialize, Serialize, Copy, Clone, Debug)]
-pub struct U64wrapper {
-    pub value:u64
-}
-
-
-impl U64wrapper {
-
-    pub fn set(mut self, v: u64) {
-        self.value = v;
-    }
-}
-
 pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data, ready: Arc<AtomicBool>) {
     std::thread::spawn(move || {
-
-        let current_proved_event = Arc::new(U64wrapper{value:data.current_proved_event});
-
         cfg_if! {
             if #[cfg(feature = "fusotao")] {
                 use crate::fusotao;
                 let (tx, rx) = std::sync::mpsc::channel();
-
-                fusotao::init(rx,current_proved_event.clone() ).unwrap();
-                let prover = fusotao::Prover::new(tx);
+                let proved_event_id = Arc::new(AtomicU64::new(0));
+                let prover = fusotao::Prover::new(tx, proved_event_id.clone());
+                fusotao::init(rx, proved_event_id).unwrap();
             }
         }
         ready.store(true, Ordering::Relaxed);
         log::info!("event handler initialized");
-
         loop {
             let fusion = recv.recv().unwrap();
-            let x = current_proved_event.value;
-
-            data.current_proved_event = x;
-
             match fusion {
                 sequence::Fusion::R(watch) => {
                     let (s, r) = (watch.session, watch.req_id);
                     if let Ok(inspection) = watch.try_into() {
-                        do_inspect(inspection, &data).unwrap();
+                        cfg_if! {
+                            if #[cfg(feature = "fusotao")] {
+                                do_inspect(inspection, &data, &prover).unwrap();
+                            }else {
+                                do_inspect(inspection, &data).unwrap();
+                            }
+                        }
                     } else {
                         server::publish(server::Message::with_payload(s, r, vec![]));
                     }
@@ -206,7 +192,6 @@ pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data, ready: A
                     match seq.try_into() {
                         Ok(event) => {
                             cfg_if! {
-
                                 if #[cfg(feature = "fusotao")] {
                                     let result = handle_event(event, &mut data, &sender, &prover);
                                 } else {
@@ -240,7 +225,6 @@ fn handle_event(
     data: &mut Data,
     sender: &OutputChannel,
     #[cfg(feature = "fusotao")] prover: &crate::fusotao::Prover,
-
 ) -> EventExecutionResult {
     match event {
         Event::Limit(id, cmd, time) => {
@@ -473,9 +457,11 @@ fn handle_event(
         }
         #[cfg(feature = "fusotao")]
         Event::SystemBusyCheck(id, time) => {
-            let current_proved_event = data.current_proved_event;
-            let delta = if id > current_proved_event { id - current_proved_event } else { current_proved_event - id };
-            updateExchangeFee(delta, data);
+            let current_proved_event = prover.proved_event_id.load(Ordering::Relaxed);
+            if current_proved_event != 0 {
+                let delta = if id > current_proved_event { id - current_proved_event } else { current_proved_event - id };
+                updateExchangeFee(delta, data);
+            }
             Ok(())
         }
     }
@@ -510,6 +496,7 @@ fn genCmds(delta: u64, data: &Data) -> Vec<Command> {
         });
     cmds
 }
+
 #[cfg(feature = "fusotao")]
 fn updateExchangeFee(delta: u64, data: &Data) {
     let cmds = genCmds(delta, data);
@@ -519,7 +506,10 @@ fn updateExchangeFee(delta: u64, data: &Data) {
 }
 
 
-fn do_inspect(inspection: Inspection, data: &Data) -> EventExecutionResult {
+fn do_inspect(inspection: Inspection,
+              data: &Data,
+              #[cfg(feature = "fusotao")] prover: &crate::fusotao::Prover,
+) -> EventExecutionResult {
     match inspection {
         Inspection::QueryOrder(symbol, order_id, session, req_id) => {
             let v = match data.orderbooks.get(&symbol) {
@@ -554,7 +544,7 @@ fn do_inspect(inspection: Inspection, data: &Data) -> EventExecutionResult {
 
         #[cfg(feature = "fusotao")]
         Inspection::QuerySystemBusy(session, req_id) => {
-            let current_proved_event = data.current_proved_event;
+            let current_proved_event = prover.proved_event_id.load(Ordering::Relaxed);
             let mut v: HashMap<String, u64> = HashMap::new();
             v.insert(String::from("current_proved_event"), current_proved_event);
             let v = serde_json::to_vec(&v).unwrap_or_default();
@@ -609,7 +599,6 @@ pub fn test_serialize() {
     );
 
     let mut data = Data::new();
-    data.current_proved_event  =1;
     let orderbook = OrderBook::new(8,
                                    8,
                                    dec!(0.001),
@@ -621,8 +610,7 @@ pub fn test_serialize() {
                                    dec!(0.1),
                                    true,
                                    true);
-    data.orderbooks.insert((0,1), orderbook);
-
+    data.orderbooks.insert((0, 1), orderbook);
     let cmd = genCmds(5000, &data);
     assert_eq!(1, cmd.len());
     assert_eq!(5, cmd[0].fee_times.unwrap());
@@ -630,5 +618,4 @@ pub fn test_serialize() {
     assert_eq!(dec!(0.005), cmd[0].taker_fee.unwrap());
     assert_eq!(dec!(0.001), cmd[0].base_maker_fee.unwrap());
     assert_eq!(dec!(0.001), cmd[0].base_taker_fee.unwrap());
-
 }

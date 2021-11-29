@@ -530,7 +530,6 @@ mod test {
             quote_scale,
             taker_fee,
             maker_fee,
-
             taker_fee,
             maker_fee,
             1,
