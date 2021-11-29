@@ -37,6 +37,7 @@ pub const DUMP: u32 = 17;
 pub const UPDATE_DEPTH: u32 = 18;
 pub const CONFIRM_ALL: u32 = 19;
 pub const SYSTEM_BUSY_CHECK: u32 = 20;
+pub const QUERY_EXCHANGE_FEE: u32 = 21;
 
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
 pub struct Sequence {
@@ -249,6 +250,11 @@ impl TryInto<Inspection> for Watch {
             CONFIRM_ALL => Ok(Inspection::ConfirmAll(
                 self.cmd.from.ok_or(anyhow!(""))?,
                 self.cmd.exclude.ok_or(anyhow!(""))?,
+            )),
+            QUERY_EXCHANGE_FEE => Ok(Inspection::QueryExchangeFee(
+                self.cmd.symbol().ok_or(anyhow!(""))?,
+                self.session,
+                self.req_id
             )),
             _ => Err(anyhow!("Invalid Inspection")),
         }
