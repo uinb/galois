@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::{convert::{TryFrom, TryInto}, str::FromStr,
+          sync::{Arc, atomic::{AtomicBool, Ordering}, mpsc::Sender}, time::{Duration, SystemTime}};
+
 use anyhow::{anyhow, ensure};
-use crate::{config::C, core::*, db::DB, event::*, orderbook::AskOrBid};
 use mysql::{*, prelude::*};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use std::{convert::{TryFrom, TryInto}, str::FromStr,
-          sync::{Arc, atomic::{AtomicBool, Ordering}, mpsc::Sender}, time::{Duration, SystemTime}};
+
+use crate::{config::C, core::*, db::DB, event::*, orderbook::AskOrBid};
 
 pub const ASK_LIMIT: u32 = 0;
 pub const BID_LIMIT: u32 = 1;
@@ -34,6 +36,9 @@ pub const QUERY_ACCOUNTS: u32 = 16;
 pub const DUMP: u32 = 17;
 pub const UPDATE_DEPTH: u32 = 18;
 pub const CONFIRM_ALL: u32 = 19;
+pub const PROVING_PERF_INDEX_CHECK: u32 = 20;
+pub const QUERY_EXCHANGE_FEE: u32 = 21;
+pub const QUERY_PROVING_PERF_INDEX: u32 = 22;
 
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
 pub struct Sequence {
@@ -138,6 +143,23 @@ impl TryInto<Event> for Sequence {
                         .maker_fee
                         .filter(|f| f.is_sign_positive())
                         .ok_or(anyhow!(""))?,
+                    base_maker_fee: self.cmd
+                        .base_maker_fee
+                        .filter(|f| f.is_sign_positive())
+                        .unwrap_or(self.cmd
+                            .maker_fee
+                            .filter(|f| f.is_sign_positive())
+                            .unwrap()),
+                    base_taker_fee: self.cmd
+                        .base_taker_fee
+                        .filter(|f| f.is_sign_positive())
+                        .unwrap_or(self.cmd
+                            .taker_fee
+                            .filter(|f| f.is_sign_positive())
+                            .unwrap()),
+                    fee_times: self.cmd
+                        .fee_times
+                        .unwrap_or(1),
                     min_amount: self.cmd
                         .min_amount
                         .filter(|f| f.is_sign_positive())
@@ -157,6 +179,8 @@ impl TryInto<Event> for Sequence {
                 self.timestamp,
             )),
             DUMP => Ok(Event::Dump(self.id, self.timestamp)),
+            #[cfg(feature = "fusotao")]
+            PROVING_PERF_INDEX_CHECK => Ok(Event::ProvingPerfIndexCheck(self.id, self.timestamp)),
             _ => Err(anyhow!("Unsupported Command")),
         }
     }
@@ -176,6 +200,17 @@ impl Sequence {
             cmd: cmd,
             status: 0,
             timestamp,
+        }
+    }
+
+    pub fn new_system_busy_check(at: u64) -> Self {
+        let mut cmd = Command::default();
+        cmd.cmd = PROVING_PERF_INDEX_CHECK;
+        Self {
+            id: at,
+            cmd: cmd,
+            status: 0,
+            timestamp: 0,
         }
     }
 }
@@ -214,6 +249,12 @@ impl TryInto<Inspection> for Watch {
                 self.cmd.from.ok_or(anyhow!(""))?,
                 self.cmd.exclude.ok_or(anyhow!(""))?,
             )),
+            QUERY_EXCHANGE_FEE => Ok(Inspection::QueryExchangeFee(
+                self.cmd.symbol().ok_or(anyhow!(""))?,
+                self.session,
+                self.req_id,
+            )),
+            QUERY_PROVING_PERF_INDEX => Ok(Inspection::QueryProvingPerfIndex(self.session, self.req_id)),
             _ => Err(anyhow!("Invalid Inspection")),
         }
     }
@@ -279,6 +320,12 @@ pub struct Command {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub maker_fee: Option<Fee>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_taker_fee: Option<Fee>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_maker_fee: Option<Fee>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fee_times: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub min_amount: Option<Amount>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min_vol: Option<Amount>,
@@ -311,7 +358,7 @@ impl Command {
 
     #[must_use]
     pub const fn is_read(&self) -> bool {
-        matches!(self.cmd, QUERY_ACCOUNTS | QUERY_BALANCE | QUERY_ORDER)
+        matches!(self.cmd, QUERY_ACCOUNTS | QUERY_BALANCE | QUERY_ORDER | QUERY_EXCHANGE_FEE | QUERY_PROVING_PERF_INDEX)
     }
 }
 
@@ -359,6 +406,11 @@ pub fn init(sender: Sender<Fusion>, id: u64, startup: Arc<AtomicBool>) {
                     event_sender
                         .send(Fusion::W(Sequence::new_dump_sequence(id, t)))
                         .unwrap();
+                }
+                //check system busy
+                if counter != 0 && counter % 1000 == 0 {
+                    event_sender
+                        .send(Fusion::W(Sequence::new_system_busy_check(id))).unwrap();
                 }
                 id += 1;
             }
@@ -438,7 +490,7 @@ pub fn insert_sequences(seq: &Vec<Command>) -> anyhow::Result<()> {
                 "cmd" => serde_json::to_string(s).unwrap(),
             }
         }),
-    ).map_err(|_| anyhow!("Error: writing sequence to mysql failed, {:?}"))
+    ).map_err(|e| anyhow!("Error: writing sequence to mysql failed, {:?}", e))
 }
 
 pub fn confirm(from: u64, exclude: u64) -> anyhow::Result<()> {

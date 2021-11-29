@@ -12,15 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(feature = "fusotao")]
-use crate::fusotao::GlobalStates;
-use crate::{assets::Balance, orderbook::OrderBook};
+use std::{collections::HashMap, fs::File, io::{BufReader, BufWriter}};
+
 use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fs::File, io::{BufReader, BufWriter}};
 
+use crate::{assets::Balance, orderbook::OrderBook};
 pub use crate::event::InOrOut;
+#[cfg(feature = "fusotao")]
+use crate::fusotao::GlobalStates;
 pub use crate::matcher::{Role, State as OrderState};
 pub use crate::orderbook::AskOrBid;
 
@@ -195,6 +196,9 @@ pub fn test_dump() {
         dec!(0.001),
         dec!(0.001),
         dec!(0.001),
+        dec!(0.001),
+        1,
+        dec!(0.001),
         dec!(1.0),
         false,
         true,
@@ -210,6 +214,9 @@ pub fn test_dump() {
             3,
             dec!(0.001),
             dec!(0.001),
+            dec!(0.001),
+            dec!(0.001),
+            1,
             dec!(0.001),
             dec!(1.0),
             false,

@@ -12,17 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{assets, clearing, core::*, matcher, orderbook::*, output, sequence, server, snapshot};
-use anyhow::anyhow;
-use cfg_if::cfg_if;
-use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::sync::{
+    Arc,
     atomic::{AtomicBool, Ordering},
     mpsc::{Receiver, Sender},
-    Arc,
 };
+use std::sync::atomic::AtomicU64;
+
+use anyhow::anyhow;
+use cfg_if::cfg_if;
+use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+use crate::{assets, clearing, core::*, matcher, orderbook::*, output, sequence, server, snapshot};
+use crate::config::C;
+use crate::sequence::{Command, UPDATE_SYMBOL};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum Event {
@@ -35,6 +42,8 @@ pub enum Event {
     CancelAll(EventId, Symbol, Timestamp),
     // special: `EventId` means dump at `EventId`
     Dump(EventId, Timestamp),
+    #[cfg(feature = "fusotao")]
+    ProvingPerfIndexCheck(EventId, Timestamp),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -100,6 +109,9 @@ pub struct SymbolCmd {
     pub quote_scale: Scale,
     pub taker_fee: Fee,
     pub maker_fee: Fee,
+    pub base_maker_fee: Fee,
+    pub base_taker_fee: Fee,
+    pub fee_times: u32,
     pub min_amount: Amount,
     pub min_vol: Vol,
     pub enable_market_order: bool,
@@ -115,13 +127,16 @@ impl Event {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone, Deserialize, Serialize)]
+#[derive(Debug, Eq, PartialEq, Clone, Deserialize, Serialize, Copy)]
 pub enum Inspection {
     ConfirmAll(u64, u64),
     UpdateDepth,
     QueryOrder(Symbol, OrderId, u64, u64),
     QueryBalance(UserId, Currency, u64, u64),
     QueryAccounts(UserId, u64, u64),
+    #[cfg(feature = "fusotao")]
+    QueryProvingPerfIndex(u64, u64),
+    QueryExchangeFee(Symbol, u64, u64),
 }
 
 impl Default for Inspection {
@@ -148,8 +163,9 @@ pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data, ready: A
             if #[cfg(feature = "fusotao")] {
                 use crate::fusotao;
                 let (tx, rx) = std::sync::mpsc::channel();
-                fusotao::init(rx).unwrap();
-                let prover = fusotao::Prover::new(tx);
+                let proved_event_id = Arc::new(AtomicU64::new(0));
+                let prover = fusotao::Prover::new(tx, proved_event_id.clone());
+                fusotao::init(rx, proved_event_id).unwrap();
             }
         }
         ready.store(true, Ordering::Relaxed);
@@ -160,7 +176,13 @@ pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data, ready: A
                 sequence::Fusion::R(watch) => {
                     let (s, r) = (watch.session, watch.req_id);
                     if let Ok(inspection) = watch.try_into() {
-                        do_inspect(inspection, &data).unwrap();
+                        cfg_if! {
+                            if #[cfg(feature = "fusotao")] {
+                                do_inspect(inspection, &data, &prover).unwrap();
+                            }else {
+                                do_inspect(inspection, &data).unwrap();
+                            }
+                        }
                     } else {
                         server::publish(server::Message::with_payload(s, r, vec![]));
                     }
@@ -404,6 +426,9 @@ fn handle_event(
                     cmd.quote_scale,
                     cmd.taker_fee,
                     cmd.maker_fee,
+                    cmd.base_taker_fee,
+                    cmd.base_maker_fee,
+                    cmd.fee_times,
                     cmd.min_amount,
                     cmd.min_vol,
                     cmd.enable_market_order,
@@ -416,6 +441,9 @@ fn handle_event(
                 orderbook.quote_scale = cmd.quote_scale;
                 orderbook.taker_fee = cmd.taker_fee;
                 orderbook.maker_fee = cmd.maker_fee;
+                orderbook.base_maker_fee = cmd.base_maker_fee;
+                orderbook.base_taker_fee = cmd.base_taker_fee;
+                orderbook.fee_times = cmd.fee_times;
                 orderbook.min_amount = cmd.min_amount;
                 orderbook.min_vol = cmd.min_vol;
                 orderbook.enable_market_order = cmd.enable_market_order;
@@ -427,10 +455,56 @@ fn handle_event(
             snapshot::dump(id, time, data);
             Ok(())
         }
+        #[cfg(feature = "fusotao")]
+        Event::ProvingPerfIndexCheck(id, _) => {
+            let current_proved_event = prover.proved_event_id.load(Ordering::Relaxed);
+            if current_proved_event != 0 {
+                let delta = if id > current_proved_event { id - current_proved_event } else { current_proved_event - id };
+                update_exchange_fee(delta, data);
+            }
+            Ok(())
+        }
     }
 }
 
-fn do_inspect(inspection: Inspection, data: &Data) -> EventExecutionResult {
+fn gen_adjust_fee_cmds(delta: u64, feeAdjustThreshold: u64, data: &Data) -> Vec<Command> {
+    let mut times: u32 = (delta / feeAdjustThreshold) as u32;
+    times = if times > 0 { times } else { 1 };
+    data.orderbooks
+        .iter()
+        .filter(|(_, v)| times != v.fee_times)
+        .map(|(k, v)| {
+            let mut cmd = Command::default();
+            cmd.cmd = UPDATE_SYMBOL;
+            cmd.base = Some(k.0);
+            cmd.quote = Some(k.1);
+            cmd.open = Some(v.open);
+            cmd.enable_market_order = Some(v.enable_market_order);
+            cmd.fee_times = Some(times);
+            cmd.base_taker_fee = Some(v.base_taker_fee);
+            cmd.base_maker_fee = Some(v.base_maker_fee);
+            cmd.maker_fee = Some(v.base_maker_fee * Decimal::from(times));
+            cmd.taker_fee = Some(v.base_taker_fee * Decimal::from(times));
+            cmd.min_amount = Some(v.min_amount);
+            cmd.min_vol = Some(v.min_vol);
+            cmd.quote_scale = Some(v.quote_scale);
+            cmd.base_scale = Some(v.base_scale);
+            cmd
+        }).collect::<Vec<_>>()
+}
+
+#[cfg(feature = "fusotao")]
+fn update_exchange_fee(delta: u64, data: &Data) {
+    let cmds = gen_adjust_fee_cmds(delta, C.fusotao.as_ref().unwrap().fee_adjust_threshold, data);
+    if !cmds.is_empty() {
+        let _ = sequence::insert_sequences(&cmds);
+    }
+}
+
+fn do_inspect(inspection: Inspection,
+              data: &Data,
+              #[cfg(feature = "fusotao")] prover: &crate::fusotao::Prover,
+) -> EventExecutionResult {
     match inspection {
         Inspection::QueryOrder(symbol, order_id, session, req_id) => {
             let v = match data.orderbooks.get(&symbol) {
@@ -462,12 +536,38 @@ fn do_inspect(inspection: Inspection, data: &Data) -> EventExecutionResult {
         Inspection::ConfirmAll(from, exclude) => {
             sequence::confirm(from, exclude).map_err(|_| EventsError::Interrupted)?;
         }
+        #[cfg(feature = "fusotao")]
+        Inspection::QueryProvingPerfIndex(session, req_id) => {
+            let current_proved_event = prover.proved_event_id.load(Ordering::Relaxed);
+            let mut v: HashMap<String, u64> = HashMap::new();
+            v.insert(String::from("current_proved_event"), current_proved_event);
+            let v = serde_json::to_vec(&v).unwrap_or_default();
+            server::publish(server::Message::with_payload(session, req_id, v));
+        }
+        Inspection::QueryExchangeFee(symbol, session, req_id) => {
+            let mut v: HashMap<String, Fee> = HashMap::new();
+            let orderbook = data.orderbooks.get(&symbol);
+            match orderbook {
+                Some(book) => {
+                    v.insert(String::from("maker_fee"), book.maker_fee);
+                    v.insert(String::from("taker_fee"), book.taker_fee);
+                }
+                _ => {
+                    v.insert(String::from("maker_fee"), Decimal::new(0, 0));
+                    v.insert(String::from("taker_fee"), Decimal::new(0, 0));
+                }
+            }
+            let v = serde_json::to_vec(&v).unwrap_or_default();
+            server::publish(server::Message::with_payload(session, req_id, v));
+        }
     }
     Ok(())
 }
 
 #[test]
 pub fn test_serialize() {
+    use rust_decimal_macros::dec;
+
     assert_eq!("{}", serde_json::to_string(&Accounts::new()).unwrap());
     let mut account = Account::default();
     account.insert(
@@ -487,6 +587,27 @@ pub fn test_serialize() {
             available: Amount::new(0, 0),
             frozen: Amount::new(0, 0),
         })
-        .unwrap()
+            .unwrap()
     );
+
+    let mut data = Data::new();
+    let orderbook = OrderBook::new(8,
+                                   8,
+                                   dec!(0.001),
+                                   dec!(0.001),
+                                   dec!(0.001),
+                                   dec!(0.001),
+                                   1,
+                                   dec!(0.1),
+                                   dec!(0.1),
+                                   true,
+                                   true);
+    data.orderbooks.insert((0, 1), orderbook);
+    let cmd = gen_adjust_fee_cmds(5000, 1000, &data);
+    assert_eq!(1, cmd.len());
+    assert_eq!(5, cmd[0].fee_times.unwrap());
+    assert_eq!(dec!(0.005), cmd[0].maker_fee.unwrap());
+    assert_eq!(dec!(0.005), cmd[0].taker_fee.unwrap());
+    assert_eq!(dec!(0.001), cmd[0].base_maker_fee.unwrap());
+    assert_eq!(dec!(0.001), cmd[0].base_taker_fee.unwrap());
 }

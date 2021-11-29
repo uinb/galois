@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::core::{Amount, Fee, OrderId, Price, Symbol, UserId};
+use std::collections::{{BTreeMap, HashMap}, btree_map::OccupiedEntry};
+
 use linked_hash_map::LinkedHashMap;
 use rust_decimal::{Decimal, prelude::Zero};
 use serde::{Deserialize, Serialize};
-use std::collections::{btree_map::OccupiedEntry, {BTreeMap, HashMap}};
+
+use crate::core::{Amount, Fee, OrderId, Price, Symbol, UserId};
 
 const DEFAULT_PAGE_SIZE: usize = 256;
 
@@ -157,6 +159,9 @@ pub struct OrderBook {
     pub quote_scale: u32,
     pub taker_fee: Fee,
     pub maker_fee: Fee,
+    pub base_taker_fee: Fee,
+    pub base_maker_fee: Fee,
+    pub fee_times: u32,
     pub min_amount: Amount,
     pub min_vol: Amount,
     pub enable_market_order: bool,
@@ -178,6 +183,9 @@ impl OrderBook {
         quote_scale: u32,
         taker_fee: Fee,
         maker_fee: Fee,
+        base_taker_fee: Fee,
+        base_maker_fee: Fee,
+        fee_times: u32,
         min_amount: Amount,
         min_vol: Amount,
         enable_market_order: bool,
@@ -191,6 +199,9 @@ impl OrderBook {
             quote_scale,
             taker_fee,
             maker_fee,
+            base_taker_fee,
+            base_maker_fee,
+            fee_times,
             min_amount,
             min_vol,
             enable_market_order,
@@ -351,6 +362,9 @@ pub fn test_orderbook() {
         quote_scale,
         taker_fee,
         maker_fee,
+        taker_fee,
+        maker_fee,
+        1,
         min_amount,
         min_vol,
         true,

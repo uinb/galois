@@ -12,20 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::*;
-use crate::{assets::Balance, core::*, event::*, matcher::*, orderbook::AskOrBid, output::Output};
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::mpsc::Sender;
+
+use sha2::{Digest, Sha256};
+
+use crate::{assets::Balance, core::*, matcher::*, orderbook::AskOrBid, output::Output};
+
+use super::*;
 
 const ACCOUNT_KEY: u8 = 0x00;
 const ORDERBOOK_KEY: u8 = 0x01;
 
-pub struct Prover(Sender<Proof>);
+pub struct Prover {
+    pub sender: Sender<Proof>,
+    pub proved_event_id: Arc<AtomicU64>,
+}
 
 impl Prover {
-    pub fn new(tx: Sender<Proof>) -> Self {
-        Self(tx)
+    pub fn new(tx: Sender<Proof>, proved_event_id: Arc<AtomicU64>) -> Self {
+        Self {
+            sender: tx,
+            proved_event_id: proved_event_id,
+        }
     }
 
     pub fn prove_trade_cmd(
@@ -181,7 +190,7 @@ impl Prover {
             new_taker_qf,
         ));
         let (pr0, pr1) = gen_proofs(&mut data.merkle_tree, &leaves);
-        self.0
+        self.sender
             .send(Proof {
                 event_id: event_id,
                 user_id: user_id,
@@ -220,7 +229,7 @@ impl Prover {
             new_frozen,
         )];
         let (pr0, pr1) = gen_proofs(merkle_tree, &leaves);
-        self.0
+        self.sender
             .send(Proof {
                 event_id: event_id,
                 user_id: cmd.user_id,
@@ -257,7 +266,7 @@ impl Prover {
         let old_root = merkle_tree.root().clone();
         let (pr0, pr1) = gen_proofs(merkle_tree, &leaves);
         if &old_root != merkle_tree.root() {
-            self.0
+            self.sender
                 .send(Proof {
                     event_id: event_id,
                     user_id: cmd.user_id,
@@ -342,10 +351,14 @@ fn new_orderbook_merkle_leaf(
 
 #[cfg(test)]
 mod test {
-    use crate::{assets, clearing, core::*, fusotao::*, matcher, orderbook::*};
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicU64;
+
     use rust_decimal_macros::dec;
     use sha2::{Digest, Sha256};
-    use smt::{sha256::Sha256Hasher, CompiledMerkleProof, H256};
+    use smt::{CompiledMerkleProof, H256, sha256::Sha256Hasher};
+
+    use crate::{assets, clearing, core::*, fusotao::*, matcher, orderbook::*};
 
     fn split_h256(v: &[u8; 32]) -> ([u8; 16], [u8; 16]) {
         (v[..16].try_into().unwrap(), v[16..].try_into().unwrap())
@@ -373,6 +386,9 @@ mod test {
             quote_scale,
             taker_fee,
             maker_fee,
+            taker_fee,
+            maker_fee,
+            1,
             min_amount,
             min_vol,
             true,
@@ -385,7 +401,7 @@ mod test {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let mut merkle_tree = GlobalStates::default();
-            let pp = Prover::new(tx);
+            let pp = Prover::new(tx, Arc::new(AtomicU64::new(0)));
             let mut all = Accounts::new();
             let cmd0 = AssetsCmd {
                 user_id: UserId::from_low_u64_be(1),
@@ -466,7 +482,7 @@ mod test {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let mut merkle_tree = GlobalStates::default();
-            let pp = Prover::new(tx);
+            let pp = Prover::new(tx, Arc::new(AtomicU64::new(0)));
             let mut all = Accounts::new();
             let orderbook = construct_pair();
             let cmd0 = AssetsCmd {

@@ -12,25 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod prover;
-
-pub use prover::Prover;
-
-use crate::{config::C, core::*, event::*, sequence};
-use anyhow::anyhow;
-use async_std::task::block_on;
-use futures::future::try_join_all;
-use memmap::MmapMut;
-use parity_scale_codec::{Compact, Decode, Encode, WrapperTypeEncode};
-use rust_decimal::{prelude::*, Decimal};
-use serde::{Deserialize, Serialize};
-use smt::{default_store::DefaultStore, sha256::Sha256Hasher, SparseMerkleTree, H256};
-use sp_core::sr25519::{Pair as Sr25519, Public};
-use sp_runtime::{
-    generic::{Block, Header},
-    traits::BlakeTwo256,
-    MultiAddress, OpaqueExtrinsic,
-};
 use std::{
     convert::{TryFrom, TryInto},
     fs::OpenOptions,
@@ -38,13 +19,36 @@ use std::{
     sync::mpsc::Receiver,
     time::Duration,
 };
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use anyhow::anyhow;
+use async_std::task::block_on;
+use futures::future::try_join_all;
+use memmap::MmapMut;
+use parity_scale_codec::{Compact, Decode, Encode, WrapperTypeEncode};
+use rust_decimal::{Decimal, prelude::*};
+use serde::{Deserialize, Serialize};
+use smt::{default_store::DefaultStore, H256, sha256::Sha256Hasher, SparseMerkleTree};
+use sp_core::sr25519::{Pair as Sr25519, Public};
+use sp_runtime::{
+    generic::{Block, Header},
+    MultiAddress,
+    OpaqueExtrinsic, traits::BlakeTwo256,
+};
 use sub_api::{
+    Api,
     rpc::{
         ws_client::{EventsDecoder, RuntimeEvent},
         WsRpcClient,
-    },
-    Api, SignedBlock, UncheckedExtrinsicV4, XtStatus,
+    }, SignedBlock, UncheckedExtrinsicV4, XtStatus,
 };
+
+pub use prover::Prover;
+
+use crate::{config::C, core::*, event::*, sequence};
+
+mod prover;
 
 pub type GlobalStates = SparseMerkleTree<Sha256Hasher, H256, DefaultStore<H256>>;
 pub type FusoAccountId = Public;
@@ -131,7 +135,7 @@ fn new_api(signer: Sr25519) -> anyhow::Result<FusoApi> {
         })
 }
 
-fn start_submitting(api: FusoApi, rx: Receiver<Proof>) -> anyhow::Result<()> {
+fn start_submitting(api: FusoApi, rx: Receiver<Proof>, proved_event_id: Arc<AtomicU64>) -> anyhow::Result<()> {
     use sp_core::Pair;
     let path: PathBuf = [&C.sequence.coredump_dir, "fusotao.seq"].iter().collect();
     let finalized_file = OpenOptions::new()
@@ -162,6 +166,7 @@ fn start_submitting(api: FusoApi, rx: Receiver<Proof>) -> anyhow::Result<()> {
                 // TODO scan block and revert status once chain fork
                 seq.copy_from_slice(&cur.to_le_bytes()[..]);
                 seq.flush().unwrap();
+                proved_event_id.store(cur, Ordering::Relaxed);
                 log::info!("proofs of sequence {:?} has been submitted", cur);
             }
             Err(e) => log::error!("submitting proofs failed, {:?}", e),
@@ -224,7 +229,7 @@ fn start_listening(api: FusoApi, who: Public) -> anyhow::Result<()> {
 /// AccountId of chain = MultiAddress<sp_runtime::AccountId32, ()>::Id = GenericAddress::Id
 /// 1. from_ss58check() or from_ss58check_with_version()
 /// 2. new or from public
-pub fn init(rx: Receiver<Proof>) -> anyhow::Result<()> {
+pub fn init(rx: Receiver<Proof>, proved_event_id: Arc<AtomicU64>) -> anyhow::Result<()> {
     use sp_core::Pair;
     let signer = Sr25519::from_string(
         &C.fusotao
@@ -233,9 +238,9 @@ pub fn init(rx: Receiver<Proof>) -> anyhow::Result<()> {
             .key_seed,
         None,
     )
-    .map_err(|_| anyhow!("Invalid fusotao config"))?;
+        .map_err(|_| anyhow!("Invalid fusotao config"))?;
     let api = new_api(signer.clone())?;
-    start_submitting(api.clone(), rx)?;
+    start_submitting(api.clone(), rx, proved_event_id)?;
     start_listening(api, signer.public())?;
     log::info!("fusotao prover initialized");
     Ok(())
@@ -480,8 +485,9 @@ fn u128le_to_h256(a0: u128, a1: u128) -> [u8; 32] {
 
 #[cfg(test)]
 pub mod test {
-    use super::*;
     use rust_decimal_macros::dec;
+
+    use super::*;
 
     #[test]
     pub fn test_numeric() {

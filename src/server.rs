@@ -12,10 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{
-    config::C,
-    sequence::{Command, Fusion, Watch},
+use std::borrow::BorrowMut;
+use std::net::Shutdown;
+use std::str;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+    mpsc::Sender,
 };
+
 use async_std::{
     net::{TcpListener, TcpStream, ToSocketAddrs},
     prelude::*,
@@ -25,13 +30,10 @@ use chashmap::CHashMap;
 use futures::channel::mpsc;
 use futures::sink::SinkExt;
 use lazy_static::lazy_static;
-use std::borrow::BorrowMut;
-use std::net::Shutdown;
-use std::str;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    mpsc::Sender,
-    Arc,
+
+use crate::{
+    config::C,
+    sequence::{Command, Fusion, Watch},
 };
 
 pub const MAX_FRAME_SIZE: usize = 64 * 1024;
