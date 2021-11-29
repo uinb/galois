@@ -38,6 +38,7 @@ pub const UPDATE_DEPTH: u32 = 18;
 pub const CONFIRM_ALL: u32 = 19;
 pub const SYSTEM_BUSY_CHECK: u32 = 20;
 pub const QUERY_EXCHANGE_FEE: u32 = 21;
+pub const QUERY_SYSTEM_BUSY: U32 = 22;
 
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
 pub struct Sequence {
@@ -256,6 +257,7 @@ impl TryInto<Inspection> for Watch {
                 self.session,
                 self.req_id
             )),
+            QUERY_SYSTEM_BUSY => Ok(Inspection::QuerySystemBusy(self.session, self.req_id)),
             _ => Err(anyhow!("Invalid Inspection")),
         }
     }
@@ -359,7 +361,7 @@ impl Command {
 
     #[must_use]
     pub const fn is_read(&self) -> bool {
-        matches!(self.cmd, QUERY_ACCOUNTS | QUERY_BALANCE | QUERY_ORDER)
+        matches!(self.cmd, QUERY_ACCOUNTS | QUERY_BALANCE | QUERY_ORDER | QUERY_EXCHANGE_FEE | QUERY_SYSTEM_BUSY)
     }
 }
 
