@@ -1,3 +1,7 @@
+# v0.2.3
+
+- Proving Performance Index
+
 # v0.2.2
 
 - ignore unchanged merkle root
