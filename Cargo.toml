@@ -1,6 +1,6 @@
 [package]
 name = "galois"
-version = "0.1.2"
+version = "0.2.5.dev"
 authors = ["UINB Technologies"]
 edition = "2018"
 license = "Apache-2.0"

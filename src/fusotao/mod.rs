@@ -12,36 +12,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{
-    convert::{TryFrom, TryInto},
-    fs::OpenOptions,
-    path::PathBuf,
-    sync::mpsc::Receiver,
-    time::Duration,
-};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use anyhow::anyhow;
 use async_std::task::block_on;
 use futures::future::try_join_all;
 use memmap::MmapMut;
 use parity_scale_codec::{Compact, Decode, Encode, WrapperTypeEncode};
-use rust_decimal::{Decimal, prelude::*};
+use rust_decimal::{prelude::*, Decimal};
 use serde::{Deserialize, Serialize};
-use smt::{default_store::DefaultStore, H256, sha256::Sha256Hasher, SparseMerkleTree};
+use smt::{default_store::DefaultStore, sha256::Sha256Hasher, SparseMerkleTree, H256};
 use sp_core::sr25519::{Pair as Sr25519, Public};
 use sp_runtime::{
     generic::{Block, Header},
-    MultiAddress,
-    OpaqueExtrinsic, traits::BlakeTwo256,
+    traits::BlakeTwo256,
+    MultiAddress, OpaqueExtrinsic,
+};
+use std::{
+    convert::{TryFrom, TryInto},
+    fs::OpenOptions,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        mpsc::{Receiver, RecvTimeoutError},
+        Arc,
+    },
+    time::Duration,
 };
 use sub_api::{
-    Api,
     rpc::{
         ws_client::{EventsDecoder, RuntimeEvent},
         WsRpcClient,
-    }, SignedBlock, UncheckedExtrinsicV4, XtStatus,
+    },
+    Api, SignedBlock, UncheckedExtrinsicV4, XtStatus,
 };
 
 pub use prover::Prover;
@@ -61,6 +62,7 @@ const ONE_ONCHAIN: u128 = 1_000_000_000_000_000_000;
 const MILL: u32 = 1_000_000;
 const BILL: u32 = 1_000_000_000;
 const QUINTILL: u64 = 1_000_000_000_000_000_000;
+const MAX_EXTRINSIC_BYTES: usize = 1_000_000;
 
 #[derive(Clone, Debug, Serialize, Deserialize, Encode)]
 pub struct MerkleLeaf {
@@ -135,8 +137,11 @@ fn new_api(signer: Sr25519) -> anyhow::Result<FusoApi> {
         })
 }
 
-fn start_submitting(api: FusoApi, rx: Receiver<Proof>, proved_event_id: Arc<AtomicU64>) -> anyhow::Result<()> {
-    use sp_core::Pair;
+fn start_submitting(
+    api: FusoApi,
+    rx: Receiver<Proof>,
+    proved_event_id: Arc<AtomicU64>,
+) -> anyhow::Result<()> {
     let path: PathBuf = [&C.sequence.coredump_dir, "fusotao.seq"].iter().collect();
     let finalized_file = OpenOptions::new()
         .read(true)
@@ -144,35 +149,87 @@ fn start_submitting(api: FusoApi, rx: Receiver<Proof>, proved_event_id: Arc<Atom
         .create(true)
         .open(&path)?;
     finalized_file.set_len(8)?;
-    let mut seq = unsafe { MmapMut::map_mut(&finalized_file)? };
-    let mut cur = u64::from_le_bytes(seq.as_ref().try_into()?);
-    if cur == 0 && !C.sequence.enable_from_genesis {
+    let mut seq_mmap = unsafe { MmapMut::map_mut(&finalized_file)? };
+    let mut max_proof_id = u64::from_le_bytes(seq_mmap[..].try_into()?);
+    let mut buf_len = 0usize;
+    let mut batch = vec![];
+    if max_proof_id == 0 && !C.sequence.enable_from_genesis {
         panic!(
             "couldn't load seq memmap file, set `enable_from_genesis` to force start from genesis"
         );
     }
-    log::info!("initiate proving at sequence {:?}", cur);
+    log::info!("initiate proving from sequence {:?}", max_proof_id);
     std::thread::spawn(move || loop {
-        let proof = rx.recv().unwrap();
-        if cur >= proof.event_id {
+        let proof = match rx.recv_timeout(Duration::from_millis(60_000)) {
+            Ok(p) => Some(p),
+            Err(RecvTimeoutError::Timeout) => None,
+            Err(RecvTimeoutError::Disconnected) => break,
+        };
+        if proof.is_none() && !batch.is_empty() {
+            max_proof_id = submit_batch(api.clone(), &mut batch).unwrap();
+            (&mut seq_mmap[..]).copy_from_slice(&max_proof_id.to_le_bytes()[..]);
+            seq_mmap.flush().unwrap();
+            proved_event_id.store(max_proof_id, Ordering::Relaxed);
+            buf_len = 0;
             continue;
         }
-        cur = proof.event_id;
-        log::debug!("proofs of sequence {:?}: {:?}", cur, proof);
-        let xt: UncheckedExtrinsicV4<_> =
-            sub_api::compose_extrinsic!(api.clone(), "Receipts", "verify", proof);
-        match api.send_extrinsic(xt.hex_encode(), XtStatus::InBlock) {
-            Ok(_) => {
-                // TODO scan block and revert status once chain fork
-                seq.copy_from_slice(&cur.to_le_bytes()[..]);
-                seq.flush().unwrap();
-                proved_event_id.store(cur, Ordering::Relaxed);
-                log::info!("proofs of sequence {:?} has been submitted", cur);
-            }
-            Err(e) => log::error!("submitting proofs failed, {:?}", e),
+        let proof = proof.unwrap();
+        if max_proof_id >= proof.event_id {
+            continue;
         }
+        log::debug!("proof of sequence => {:?}", proof);
+        let size = proof.size_hint();
+        if size + buf_len > MAX_EXTRINSIC_BYTES {
+            if batch.is_empty() {
+                // FIXME the proof is too long to put into a single block, e.g. too many makers
+                // this a known bug, simply deleting the command would work. we'll add a constraint to fix it in the future
+                panic!("proof size too big, delete the command and reboot");
+            }
+            max_proof_id = submit_batch(api.clone(), &mut batch).unwrap();
+            (&mut seq_mmap[..]).copy_from_slice(&max_proof_id.to_le_bytes()[..]);
+            seq_mmap.flush().unwrap();
+            proved_event_id.store(max_proof_id, Ordering::Relaxed);
+            buf_len = 0;
+        }
+        batch.push(proof);
+        buf_len += size;
     });
     Ok(())
+}
+
+fn submit_batch(api: FusoApi, batch: &mut Vec<Proof>) -> anyhow::Result<u64> {
+    use sp_core::Pair;
+    if batch.is_empty() {
+        return Err(anyhow::anyhow!("Empty proofs"));
+    }
+    let last_submitted_id = batch.last().unwrap().event_id;
+    for i in 0..=3 {
+        let xt: UncheckedExtrinsicV4<_> =
+            sub_api::compose_extrinsic!(api, "Receipts", "verify", batch.clone());
+        match api.send_extrinsic(xt.hex_encode(), XtStatus::InBlock) {
+            Ok(_) => {
+                // FIXME scan block and revert status once chain fork
+                log::info!(
+                    "proof of sequence until {:?} have been submitted",
+                    last_submitted_id
+                );
+                batch.clear();
+                return Ok(last_submitted_id);
+            }
+            Err(e) => {
+                log::error!(
+                    "submit proof failed, remain {:?} times retrying, error => {:?}",
+                    3 - i,
+                    e
+                );
+                std::thread::sleep(Duration::from_millis(i * 15000));
+            }
+        }
+    }
+    return Err(anyhow::anyhow!(
+        "fail to submit proofs after 3 times retrying, {}",
+        last_submitted_id
+    ));
 }
 
 fn start_listening(api: FusoApi, who: Public) -> anyhow::Result<()> {
@@ -211,7 +268,7 @@ fn start_listening(api: FusoApi, who: Public) -> anyhow::Result<()> {
                         blk[..].copy_from_slice(&sync.to_le_bytes()[..]);
                         // FIXME commit manually after memmap flush ok
                         blk.flush().unwrap();
-                        log::info!("all events before before block {} synchronized", sync);
+                        log::info!("all events until block {} synchronized", sync);
                     }
                     Err(_) => log::warn!("save sequences from block {} failed", cur),
                 }
@@ -238,7 +295,7 @@ pub fn init(rx: Receiver<Proof>, proved_event_id: Arc<AtomicU64>) -> anyhow::Res
             .key_seed,
         None,
     )
-        .map_err(|_| anyhow!("Invalid fusotao config"))?;
+    .map_err(|_| anyhow!("Invalid fusotao config"))?;
     let api = new_api(signer.clone())?;
     start_submitting(api.clone(), rx, proved_event_id)?;
     start_listening(api, signer.public())?;
