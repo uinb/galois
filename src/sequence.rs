@@ -146,17 +146,15 @@ impl TryInto<Event> for Sequence {
                     base_maker_fee: self.cmd
                         .base_maker_fee
                         .filter(|f| f.is_sign_positive())
-                        .unwrap_or(self.cmd
-                            .maker_fee
-                            .filter(|f| f.is_sign_positive())
-                            .unwrap()),
+                        .or(self.cmd.maker_fee)
+                        .filter(|f| f.is_sign_positive())
+                        .ok_or(anyhow!(""))?,
                     base_taker_fee: self.cmd
                         .base_taker_fee
                         .filter(|f| f.is_sign_positive())
-                        .unwrap_or(self.cmd
-                            .taker_fee
-                            .filter(|f| f.is_sign_positive())
-                            .unwrap()),
+                        .or(self.cmd.taker_fee)
+                        .filter(|f| f.is_sign_positive())
+                        .ok_or(anyhow!(""))?,
                     fee_times: self.cmd
                         .fee_times
                         .unwrap_or(1),
@@ -178,9 +176,6 @@ impl TryInto<Event> for Sequence {
                 self.cmd.symbol().ok_or(anyhow!(""))?,
                 self.timestamp,
             )),
-            DUMP => Ok(Event::Dump(self.id, self.timestamp)),
-            #[cfg(feature = "fusotao")]
-            PROVING_PERF_INDEX_CHECK => Ok(Event::ProvingPerfIndexCheck(self.id, self.timestamp)),
             _ => Err(anyhow!("Unsupported Command")),
         }
     }
@@ -190,28 +185,6 @@ impl Sequence {
     #[must_use]
     pub const fn rejected(&self) -> bool {
         self.status == ERROR
-    }
-
-    pub fn new_dump_sequence(at: u64, timestamp: u64) -> Self {
-        let mut cmd = Command::default();
-        cmd.cmd = DUMP;
-        Self {
-            id: at,
-            cmd: cmd,
-            status: 0,
-            timestamp,
-        }
-    }
-
-    pub fn new_system_busy_check(at: u64) -> Self {
-        let mut cmd = Command::default();
-        cmd.cmd = PROVING_PERF_INDEX_CHECK;
-        Self {
-            id: at,
-            cmd: cmd,
-            status: 0,
-            timestamp: 0,
-        }
     }
 }
 
@@ -254,7 +227,16 @@ impl TryInto<Inspection> for Watch {
                 self.session,
                 self.req_id,
             )),
+            #[cfg(feature = "fusotao")]
             QUERY_PROVING_PERF_INDEX => Ok(Inspection::QueryProvingPerfIndex(self.session, self.req_id)),
+            DUMP => Ok(Inspection::Dump(
+                self.cmd.event_id.ok_or(anyhow!(""))?,
+                self.cmd.timestamp.ok_or(anyhow!(""))?,
+            )),
+            #[cfg(feature = "fusotao")]
+            PROVING_PERF_INDEX_CHECK => Ok(Inspection::ProvingPerfIndexCheck(
+                self.cmd.event_id.ok_or(anyhow!(""))?,
+            )),
             _ => Err(anyhow!("Invalid Inspection")),
         }
     }
@@ -264,6 +246,29 @@ impl Watch {
     pub fn new_update_depth_watch() -> Self {
         let mut cmd = Command::default();
         cmd.cmd = UPDATE_DEPTH;
+        Self {
+            session: 0,
+            req_id: 0,
+            cmd: cmd,
+        }
+    }
+
+    pub fn new_dump_watch(at: u64, time: u64) -> Self {
+        let mut cmd = Command::default();
+        cmd.cmd = DUMP;
+        cmd.event_id = Some(at);
+        cmd.timestamp = Some(time);
+        Self {
+            session: 0,
+            req_id: 0,
+            cmd: cmd,
+        }
+    }
+
+    pub fn new_proving_perf_check_watch(at: u64) -> Self {
+        let mut cmd = Command::default();
+        cmd.cmd = PROVING_PERF_INDEX_CHECK;
+        cmd.event_id = Some(at);
         Self {
             session: 0,
             req_id: 0,
@@ -337,6 +342,10 @@ pub struct Command {
     pub from: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exclude: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
@@ -358,7 +367,13 @@ impl Command {
 
     #[must_use]
     pub const fn is_read(&self) -> bool {
-        matches!(self.cmd, QUERY_ACCOUNTS | QUERY_BALANCE | QUERY_ORDER | QUERY_EXCHANGE_FEE | QUERY_PROVING_PERF_INDEX)
+        matches!(self.cmd, QUERY_ACCOUNTS
+                         | QUERY_BALANCE
+                         | QUERY_ORDER
+                         | DUMP
+                         | QUERY_EXCHANGE_FEE
+                         | QUERY_PROVING_PERF_INDEX
+                         | PROVING_PERF_INDEX_CHECK)
     }
 }
 
@@ -404,13 +419,13 @@ pub fn init(sender: Sender<Fusion>, id: u64, startup: Arc<AtomicBool>) {
                         .unwrap()
                         .as_secs();
                     event_sender
-                        .send(Fusion::W(Sequence::new_dump_sequence(id, t)))
+                        .send(Fusion::R(Watch::new_dump_watch(id, t)))
                         .unwrap();
                 }
                 //check system busy
                 if counter != 0 && counter % 1000 == 0 {
                     event_sender
-                        .send(Fusion::W(Sequence::new_system_busy_check(id))).unwrap();
+                        .send(Fusion::R(Watch::new_proving_perf_check_watch(id))).unwrap();
                 }
                 id += 1;
             }

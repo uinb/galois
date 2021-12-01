@@ -24,6 +24,7 @@ use std::sync::atomic::AtomicU64;
 use anyhow::anyhow;
 use cfg_if::cfg_if;
 use rust_decimal::Decimal;
+use rust_decimal::prelude::FromStr;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -40,10 +41,28 @@ pub enum Event {
     UpdateSymbol(EventId, SymbolCmd, Timestamp),
     #[cfg(not(feature = "fusotao"))]
     CancelAll(EventId, Symbol, Timestamp),
-    // special: `EventId` means dump at `EventId`
-    Dump(EventId, Timestamp),
-    #[cfg(feature = "fusotao")]
-    ProvingPerfIndexCheck(EventId, Timestamp),
+}
+
+impl Event {
+    pub fn is_trading_cmd(&self) -> bool {
+        matches!(self, Event::Limit(_, _, _)) || matches!(self, Event::Cancel(_, _, _))
+    }
+
+    pub fn is_assets_cmd(&self) -> bool {
+        matches!(self, Event::TransferIn(_, _, _)) || matches!(self, Event::TransferOut(_, _, _))
+    }
+
+    pub fn get_id(&self) -> u64 {
+        match self {
+            Event::Limit(id, _, _) => *id,
+            Event::Cancel(id, _, _) => *id,
+            Event::TransferOut(id, _, _) => *id,
+            Event::TransferIn(id, _, _) => *id,
+            Event::UpdateSymbol(id, _, _) => *id,
+            #[cfg(not(feature = "fusotao"))]
+            Event::CancelAll(id, _, _) => *id,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -117,16 +136,6 @@ pub struct SymbolCmd {
     pub enable_market_order: bool,
 }
 
-impl Event {
-    pub fn is_trading_cmd(&self) -> bool {
-        matches!(self, Event::Limit(_, _, _)) || matches!(self, Event::Cancel(_, _, _))
-    }
-
-    pub fn is_assets_cmd(&self) -> bool {
-        matches!(self, Event::TransferIn(_, _, _)) || matches!(self, Event::TransferOut(_, _, _))
-    }
-}
-
 #[derive(Debug, Eq, PartialEq, Clone, Deserialize, Serialize, Copy)]
 pub enum Inspection {
     ConfirmAll(u64, u64),
@@ -137,6 +146,10 @@ pub enum Inspection {
     #[cfg(feature = "fusotao")]
     QueryProvingPerfIndex(u64, u64),
     QueryExchangeFee(Symbol, u64, u64),
+    // special: `EventId` means dump at `EventId`
+    Dump(EventId, Timestamp),
+    #[cfg(feature = "fusotao")]
+    ProvingPerfIndexCheck(EventId),
 }
 
 impl Default for Inspection {
@@ -226,6 +239,7 @@ fn handle_event(
     sender: &OutputChannel,
     #[cfg(feature = "fusotao")] prover: &crate::fusotao::Prover,
 ) -> EventExecutionResult {
+    data.current_event_id = event.get_id();
     match event {
         Event::Limit(id, cmd, time) => {
             let orderbook = data
@@ -451,24 +465,11 @@ fn handle_event(
             }
             Ok(())
         }
-        Event::Dump(id, time) => {
-            snapshot::dump(id, time, data);
-            Ok(())
-        }
-        #[cfg(feature = "fusotao")]
-        Event::ProvingPerfIndexCheck(id, _) => {
-            let current_proved_event = prover.proved_event_id.load(Ordering::Relaxed);
-            if current_proved_event != 0 {
-                let delta = if id > current_proved_event { id - current_proved_event } else { current_proved_event - id };
-                update_exchange_fee(delta, data);
-            }
-            Ok(())
-        }
     }
 }
 
-fn gen_adjust_fee_cmds(delta: u64, feeAdjustThreshold: u64, data: &Data) -> Vec<Command> {
-    let mut times: u32 = (delta / feeAdjustThreshold) as u32;
+fn gen_adjust_fee_cmds(delta: u64, fee_adjust_threshold: u64, data: &Data) -> Vec<Command> {
+    let mut times: u32 = (delta / fee_adjust_threshold) as u32;
     times = if times > 0 { times } else { 1 };
     data.orderbooks
         .iter()
@@ -483,8 +484,13 @@ fn gen_adjust_fee_cmds(delta: u64, feeAdjustThreshold: u64, data: &Data) -> Vec<
             cmd.fee_times = Some(times);
             cmd.base_taker_fee = Some(v.base_taker_fee);
             cmd.base_maker_fee = Some(v.base_maker_fee);
-            cmd.maker_fee = Some(v.base_maker_fee * Decimal::from(times));
-            cmd.taker_fee = Some(v.base_taker_fee * Decimal::from(times));
+            let fee_rate_limit = Decimal::from_str("0.02").unwrap();
+            let maker_fee = v.base_maker_fee * Decimal::from(times);
+            let maker_fee = if maker_fee > fee_rate_limit { fee_rate_limit } else { maker_fee };
+            let taker_fee = v.base_taker_fee * Decimal::from(times);
+            let taker_fee = if taker_fee > fee_rate_limit { fee_rate_limit } else { taker_fee };
+            cmd.maker_fee = Some(maker_fee);
+            cmd.taker_fee = Some(taker_fee);
             cmd.min_amount = Some(v.min_amount);
             cmd.min_vol = Some(v.min_vol);
             cmd.quote_scale = Some(v.quote_scale);
@@ -540,7 +546,13 @@ fn do_inspect(inspection: Inspection,
         Inspection::QueryProvingPerfIndex(session, req_id) => {
             let current_proved_event = prover.proved_event_id.load(Ordering::Relaxed);
             let mut v: HashMap<String, u64> = HashMap::new();
-            v.insert(String::from("current_proved_event"), current_proved_event);
+
+            let ppi = if data.current_event_id > current_proved_event {
+                data.current_event_id - current_proved_event
+            } else {
+                current_proved_event - data.current_event_id
+            };
+            v.insert(String::from("proving_perf_index"), ppi);
             let v = serde_json::to_vec(&v).unwrap_or_default();
             server::publish(server::Message::with_payload(session, req_id, v));
         }
@@ -559,6 +571,17 @@ fn do_inspect(inspection: Inspection,
             }
             let v = serde_json::to_vec(&v).unwrap_or_default();
             server::publish(server::Message::with_payload(session, req_id, v));
+        }
+        Inspection::Dump(id, time) => {
+            snapshot::dump(id, time, data);
+        }
+        #[cfg(feature = "fusotao")]
+        Inspection::ProvingPerfIndexCheck(id) => {
+            let current_proved_event = prover.proved_event_id.load(Ordering::Relaxed);
+            if current_proved_event != 0 {
+                let delta = if id > current_proved_event { id - current_proved_event } else { current_proved_event - id };
+                update_exchange_fee(delta, data);
+            }
         }
     }
     Ok(())

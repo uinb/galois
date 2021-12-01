@@ -153,6 +153,7 @@ pub struct Data {
     pub accounts: Accounts,
     #[cfg(feature = "fusotao")]
     pub merkle_tree: GlobalStates,
+    pub current_event_id: u64,
 }
 
 unsafe impl Sync for Data {}
@@ -164,6 +165,7 @@ impl Data {
             accounts: HashMap::new(),
             #[cfg(feature = "fusotao")]
             merkle_tree: GlobalStates::default(),
+            current_event_id: 0,
         }
     }
 

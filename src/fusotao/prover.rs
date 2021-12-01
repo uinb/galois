@@ -523,6 +523,7 @@ mod test {
                 orderbooks: orderbooks,
                 accounts: all,
                 merkle_tree: merkle_tree,
+                current_event_id: 0,
             };
 
             let size = data.orderbooks.get(&(1, 0)).unwrap().size();
