@@ -146,17 +146,15 @@ impl TryInto<Event> for Sequence {
                     base_maker_fee: self.cmd
                         .base_maker_fee
                         .filter(|f| f.is_sign_positive())
-                        .unwrap_or(self.cmd
-                            .maker_fee
-                            .filter(|f| f.is_sign_positive())
-                            .unwrap()),
+                        .or(self.cmd.maker_fee)
+                        .filter(|f| f.is_sign_positive())
+                        .ok_or(anyhow!(""))?,
                     base_taker_fee: self.cmd
                         .base_taker_fee
                         .filter(|f| f.is_sign_positive())
-                        .unwrap_or(self.cmd
-                            .taker_fee
-                            .filter(|f| f.is_sign_positive())
-                            .unwrap()),
+                        .or(self.cmd.taker_fee)
+                        .filter(|f| f.is_sign_positive())
+                        .ok_or(anyhow!(""))?,
                     fee_times: self.cmd
                         .fee_times
                         .unwrap_or(1),
