@@ -1,3 +1,7 @@
+# v0.2.4
+
+- MaxFee Constraint of increasing fee
+
 # v0.2.3
 
 - Proving Performance Index
