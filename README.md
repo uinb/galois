@@ -1,11 +1,11 @@
 # Galois
+
+<p align="center">Granted by<br><img src="https://cryptologos.cc/logos/near-protocol-near-logo.png?v=014" alt="NEAR Grants Program" width="80" height="80"></p>
+
 [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg)](#LICENSE)
 [![GitHub Workflow Status (branch)](https://img.shields.io/github/workflow/status/uinb/galois/Rust%20CI/master)](https://github.com/uinb/galois/actions?query=branch%3Amaster)
 
-
-#### 免责声明
-Galois是一款在Apache2许可协议下发布的开源软件。根据中国2021年9月24日发布的政策文件，任何组织或个人，不得向中国大陆境内公民提供虚拟货币交易服务，任何私自使用Galois向中国大陆境内公民提供数字货币交易及相关服务的，面临的法律风险由使用者自行承担。
-
+  
 ## Introduction
 
 Galois is an extremely high performance matching engine written in Rust.
