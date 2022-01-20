@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{{BTreeMap, HashMap}, btree_map::OccupiedEntry};
-
-use linked_hash_map::LinkedHashMap;
-use rust_decimal::{Decimal, prelude::Zero};
-use serde::{Deserialize, Serialize};
-
 use crate::core::{Amount, Fee, OrderId, Price, Symbol, UserId};
+use linked_hash_map::LinkedHashMap;
+use rust_decimal::{prelude::Zero, Decimal};
+use serde::{Deserialize, Serialize};
+use std::collections::{
+    btree_map::OccupiedEntry,
+    {BTreeMap, HashMap},
+};
 
 const DEFAULT_PAGE_SIZE: usize = 256;
 
@@ -295,6 +296,11 @@ impl OrderBook {
         removed
     }
 
+    fn get_from(tape: &Tape, price: &Price) -> Option<(Amount, u32)> {
+        tape.get(price)
+            .map(|page| (page.amount, page.orders.len() as u32))
+    }
+
     pub fn get_best_if_match(
         &mut self,
         ask_or_bid: AskOrBid,
@@ -314,6 +320,32 @@ impl OrderBook {
         self.bids.last_key_value().map(|(price, _)| *price)
     }
 
+    pub fn get_page(&self, price: &Price) -> Option<(Amount, u32)> {
+        match (self.get_best_ask(), self.get_best_bid()) {
+            (Some(best_ask), Some(_)) => {
+                if price >= &best_ask {
+                    Self::get_from(&self.asks, price)
+                } else {
+                    Self::get_from(&self.bids, price)
+                }
+            }
+            (None, Some(_)) => Self::get_from(&self.bids, price),
+            (Some(_), None) => Self::get_from(&self.asks, price),
+            _ => None,
+        }
+    }
+
+    pub fn get_best(&self) -> (Option<(Price, Amount, u32)>, Option<(Price, Amount, u32)>) {
+        (
+            self.asks
+                .first_key_value()
+                .map(|(price, v)| (*price, v.amount, v.orders.len() as u32)),
+            self.bids
+                .last_key_value()
+                .map(|(price, v)| (*price, v.amount, v.orders.len() as u32)),
+        )
+    }
+
     pub fn find_order(&self, order_id: OrderId) -> Option<&Order> {
         let price = self.indices.get(&order_id)?;
         match (self.get_best_ask(), self.get_best_bid()) {
@@ -331,8 +363,11 @@ impl OrderBook {
     }
 
     pub fn should_accept(&self, price: Price, amount: Amount, id: OrderId) -> bool {
-        self.open && id > self.max_id && amount >= self.min_amount
-            && price.scale() <= self.quote_scale && amount.scale() <= self.base_scale
+        self.open
+            && id > self.max_id
+            && amount >= self.min_amount
+            && price.scale() <= self.quote_scale
+            && amount.scale() <= self.base_scale
     }
 }
 

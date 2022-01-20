@@ -14,23 +14,22 @@
 
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::sync::atomic::AtomicU64;
 use std::sync::{
-    Arc,
     atomic::{AtomicBool, Ordering},
     mpsc::{Receiver, Sender},
+    Arc,
 };
-use std::sync::atomic::AtomicU64;
 
 use anyhow::anyhow;
 use cfg_if::cfg_if;
-use rust_decimal::Decimal;
-use rust_decimal::prelude::FromStr;
+use rust_decimal::{prelude::*, Decimal};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{assets, clearing, core::*, matcher, orderbook::*, output, sequence, server, snapshot};
 use crate::config::C;
 use crate::sequence::{Command, UPDATE_SYMBOL};
+use crate::{assets, clearing, core::*, matcher, orderbook::*, output, sequence, server, snapshot};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum Event {
@@ -254,7 +253,8 @@ fn handle_event(
             cfg_if! {
                 if #[cfg(feature = "fusotao")] {
                     log::info!("predicate root={:02x?} before applying {}", data.merkle_tree.root(), id);
-                    let size = orderbook.size();
+                    let (ask_size, bid_size) = orderbook.size();
+                    let (best_ask_before, best_bid_before) = orderbook.get_best();
                     let taker_base_before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.0);
                     let taker_quote_before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.1);
                 }
@@ -287,8 +287,10 @@ fn handle_event(
                         cmd.nonce,
                         cmd.signature.clone(),
                         (cmd, maker_fee, taker_fee).into(),
-                        size.0,
-                        size.1,
+                        ask_size,
+                        bid_size,
+                        best_ask_before.unwrap_or((Decimal::zero(), Decimal::zero(), 0)),
+                        best_bid_before.unwrap_or((Decimal::zero(), Decimal::zero(), 0)),
                         &taker_base_before,
                         &taker_quote_before,
                         &out,
@@ -316,6 +318,7 @@ fn handle_event(
                 if #[cfg(feature = "fusotao")] {
                     log::info!("predicate root={:02x?} before applying {}", data.merkle_tree.root(), id);
                     let size = orderbook.size();
+                    let (best_ask_before, best_bid_before) = orderbook.get_best();
                     let taker_base_before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.0);
                     let taker_quote_before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.1);
                 }
@@ -340,6 +343,8 @@ fn handle_event(
                         cmd.into(),
                         size.0,
                         size.1,
+                        best_ask_before.unwrap_or((Decimal::zero(), Decimal::zero(), 0)),
+                        best_bid_before.unwrap_or((Decimal::zero(), Decimal::zero(), 0)),
                         &taker_base_before,
                         &taker_quote_before,
                         &out,
@@ -486,9 +491,17 @@ fn gen_adjust_fee_cmds(delta: u64, fee_adjust_threshold: u64, data: &Data) -> Ve
             cmd.base_maker_fee = Some(v.base_maker_fee);
             let fee_rate_limit = Decimal::from_str("0.02").unwrap();
             let maker_fee = v.base_maker_fee * Decimal::from(times);
-            let maker_fee = if maker_fee > fee_rate_limit { fee_rate_limit } else { maker_fee };
+            let maker_fee = if maker_fee > fee_rate_limit {
+                fee_rate_limit
+            } else {
+                maker_fee
+            };
             let taker_fee = v.base_taker_fee * Decimal::from(times);
-            let taker_fee = if taker_fee > fee_rate_limit { fee_rate_limit } else { taker_fee };
+            let taker_fee = if taker_fee > fee_rate_limit {
+                fee_rate_limit
+            } else {
+                taker_fee
+            };
             cmd.maker_fee = Some(maker_fee);
             cmd.taker_fee = Some(taker_fee);
             cmd.min_amount = Some(v.min_amount);
@@ -496,20 +509,26 @@ fn gen_adjust_fee_cmds(delta: u64, fee_adjust_threshold: u64, data: &Data) -> Ve
             cmd.quote_scale = Some(v.quote_scale);
             cmd.base_scale = Some(v.base_scale);
             cmd
-        }).collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>()
 }
 
 #[cfg(feature = "fusotao")]
 fn update_exchange_fee(delta: u64, data: &Data) {
-    let cmds = gen_adjust_fee_cmds(delta, C.fusotao.as_ref().unwrap().fee_adjust_threshold, data);
+    let cmds = gen_adjust_fee_cmds(
+        delta,
+        C.fusotao.as_ref().unwrap().fee_adjust_threshold,
+        data,
+    );
     if !cmds.is_empty() {
         let _ = sequence::insert_sequences(&cmds);
     }
 }
 
-fn do_inspect(inspection: Inspection,
-              data: &Data,
-              #[cfg(feature = "fusotao")] prover: &crate::fusotao::Prover,
+fn do_inspect(
+    inspection: Inspection,
+    data: &Data,
+    #[cfg(feature = "fusotao")] prover: &crate::fusotao::Prover,
 ) -> EventExecutionResult {
     match inspection {
         Inspection::QueryOrder(symbol, order_id, session, req_id) => {
@@ -579,7 +598,11 @@ fn do_inspect(inspection: Inspection,
         Inspection::ProvingPerfIndexCheck(id) => {
             let current_proved_event = prover.proved_event_id.load(Ordering::Relaxed);
             if current_proved_event != 0 {
-                let delta = if id > current_proved_event { id - current_proved_event } else { current_proved_event - id };
+                let delta = if id > current_proved_event {
+                    id - current_proved_event
+                } else {
+                    current_proved_event - id
+                };
                 update_exchange_fee(delta, data);
             }
         }
@@ -610,21 +633,23 @@ pub fn test_serialize() {
             available: Amount::new(0, 0),
             frozen: Amount::new(0, 0),
         })
-            .unwrap()
+        .unwrap()
     );
 
     let mut data = Data::new();
-    let orderbook = OrderBook::new(8,
-                                   8,
-                                   dec!(0.001),
-                                   dec!(0.001),
-                                   dec!(0.001),
-                                   dec!(0.001),
-                                   1,
-                                   dec!(0.1),
-                                   dec!(0.1),
-                                   true,
-                                   true);
+    let orderbook = OrderBook::new(
+        8,
+        8,
+        dec!(0.001),
+        dec!(0.001),
+        dec!(0.001),
+        dec!(0.001),
+        1,
+        dec!(0.1),
+        dec!(0.1),
+        true,
+        true,
+    );
     data.orderbooks.insert((0, 1), orderbook);
     let cmd = gen_adjust_fee_cmds(5000, 1000, &data);
     assert_eq!(1, cmd.len());

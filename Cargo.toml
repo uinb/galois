@@ -102,6 +102,9 @@ version = "0.4"
 version = "0.7"
 optional = true
 
+[dependencies.rocksdb]
+version = "0.17"
+
 [dependencies.smt]
 version = "0.5.2"
 git = "https://github.com/uinb/sparse-merkle-tree"
