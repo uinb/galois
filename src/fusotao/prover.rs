@@ -78,14 +78,6 @@ impl Prover {
             new_ask_size,
             new_bid_size,
         ));
-        let (best_ask, best_bid) = orderbook.get_best();
-        leaves.push(new_bestprice_merkle_leaf(
-            symbol,
-            best_ask_before.0.to_amount(),
-            best_bid_before.0.to_amount(),
-            best_ask.map(|a| a.0).unwrap_or(Amount::zero()).to_amount(),
-            best_bid.map(|b| b.0).unwrap_or(Amount::zero()).to_amount(),
-        ));
         let mut makers = HashMap::<UserId, Output>::new();
         let mut pages = HashMap::<Price, (Amount, u32, Amount, u32)>::new();
         outputs
@@ -119,50 +111,6 @@ impl Prover {
                             .unwrap_or((Amount::zero(), 0, Amount::zero(), 0))
                     });
             });
-        if taker.state == State::PartialFilled || taker.state == State::Submitted {
-            // MUST BE
-            let page = orderbook.get_page(&taker.price).unwrap();
-            let (old_amount, old_count) = (
-                page.0 - (taker.base_frozen - taker_base_before.frozen),
-                page.1 - 1,
-            );
-            leaves.push(new_orderpage_merkle_leaf(
-                symbol,
-                taker.price.to_amount(),
-                old_amount.to_amount(),
-                old_count,
-                page.0.to_amount(),
-                page.1,
-            ));
-        } else if taker.state == State::Canceled {
-            let page = orderbook
-                .get_page(&taker.price)
-                .unwrap_or((Amount::zero(), 0));
-            let (old_amount, old_count) = (
-                page.0 + (taker_base_before.frozen - taker.base_frozen),
-                page.1 + 1,
-            );
-            leaves.push(new_orderpage_merkle_leaf(
-                symbol,
-                taker.price.to_amount(),
-                old_amount.to_amount(),
-                old_count,
-                page.0.to_amount(),
-                page.1,
-            ));
-        } else {
-            // Filled, ConditionalCanceled
-        }
-        pages.iter().for_each(|(k, v)| {
-            leaves.push(new_orderpage_merkle_leaf(
-                symbol,
-                k.to_amount(),
-                v.0.to_amount(),
-                v.1,
-                v.2.to_amount(),
-                v.3,
-            ));
-        });
         makers.into_values().for_each(|r| {
             log::debug!("{:?}", r);
             let (ba, bf, qa, qf) = match r.ask_or_bid {
@@ -256,6 +204,58 @@ impl Prover {
             new_taker_qa,
             new_taker_qf,
         ));
+        let (best_ask, best_bid) = orderbook.get_best();
+        leaves.push(new_bestprice_merkle_leaf(
+            symbol,
+            best_ask_before.0.to_amount(),
+            best_bid_before.0.to_amount(),
+            best_ask.map(|a| a.0).unwrap_or(Amount::zero()).to_amount(),
+            best_bid.map(|b| b.0).unwrap_or(Amount::zero()).to_amount(),
+        ));
+        pages.iter().for_each(|(k, v)| {
+            leaves.push(new_orderpage_merkle_leaf(
+                symbol,
+                k.to_amount(),
+                v.0.to_amount(),
+                v.1,
+                v.2.to_amount(),
+                v.3,
+            ));
+        });
+        if taker.state == State::PartialFilled || taker.state == State::Submitted {
+            // MUST BE
+            let page = orderbook.get_page(&taker.price).unwrap();
+            let (old_amount, old_count) = (
+                page.0 - (taker.base_frozen - taker_base_before.frozen),
+                page.1 - 1,
+            );
+            leaves.push(new_orderpage_merkle_leaf(
+                symbol,
+                taker.price.to_amount(),
+                old_amount.to_amount(),
+                old_count,
+                page.0.to_amount(),
+                page.1,
+            ));
+        } else if taker.state == State::Canceled {
+            let page = orderbook
+                .get_page(&taker.price)
+                .unwrap_or((Amount::zero(), 0));
+            let (old_amount, old_count) = (
+                page.0 + (taker_base_before.frozen - taker.base_frozen),
+                page.1 + 1,
+            );
+            leaves.push(new_orderpage_merkle_leaf(
+                symbol,
+                taker.price.to_amount(),
+                old_amount.to_amount(),
+                old_count,
+                page.0.to_amount(),
+                page.1,
+            ));
+        } else {
+            // Filled, ConditionalCanceled
+        }
         let (pr0, pr1) = gen_proofs(&mut data.merkle_tree, &leaves);
         self.sender
             .send(Proof {
@@ -640,6 +640,8 @@ mod test {
                 nonce: 1,
                 signature: vec![0],
             };
+            let (best_ask_before, best_bid_before) =
+                data.orderbooks.get(&(1, 0)).unwrap().get_best();
             let taker_base_before =
                 assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.0);
             let taker_quote_before =
@@ -663,6 +665,8 @@ mod test {
                 (cmd2, mf, tf).into(),
                 size.0,
                 size.1,
+                best_ask_before.unwrap_or((Decimal::zero(), Decimal::zero(), 0)),
+                best_bid_before.unwrap_or((Decimal::zero(), Decimal::zero(), 0)),
                 &taker_base_before,
                 &taker_quote_before,
                 &cr,
@@ -679,6 +683,8 @@ mod test {
                 nonce: 1,
                 signature: vec![0],
             };
+            let (best_ask_before, best_bid_before) =
+                data.orderbooks.get(&(1, 0)).unwrap().get_best();
             let taker_base_before =
                 assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.0);
             let taker_quote_before =
@@ -702,6 +708,8 @@ mod test {
                 (cmd2, mf, tf).into(),
                 size.0,
                 size.1,
+                best_ask_before.unwrap_or((Decimal::zero(), Decimal::zero(), 0)),
+                best_bid_before.unwrap_or((Decimal::zero(), Decimal::zero(), 0)),
                 &taker_base_before,
                 &taker_quote_before,
                 &cr,
@@ -718,6 +726,8 @@ mod test {
                 nonce: 1,
                 signature: vec![0],
             };
+            let (best_ask_before, best_bid_before) =
+                data.orderbooks.get(&(1, 0)).unwrap().get_best();
             let taker_base_before =
                 assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.0);
             let taker_quote_before =
@@ -741,6 +751,8 @@ mod test {
                 (cmd2, mf, tf).into(),
                 size.0,
                 size.1,
+                best_ask_before.unwrap_or((Decimal::zero(), Decimal::zero(), 0)),
+                best_bid_before.unwrap_or((Decimal::zero(), Decimal::zero(), 0)),
                 &taker_base_before,
                 &taker_quote_before,
                 &cr,
@@ -757,6 +769,8 @@ mod test {
                 nonce: 1,
                 signature: vec![0],
             };
+            let (best_ask_before, best_bid_before) =
+                data.orderbooks.get(&(1, 0)).unwrap().get_best();
             let taker_base_before =
                 assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.0);
             let taker_quote_before =
@@ -780,6 +794,8 @@ mod test {
                 (cmd2, mf, tf).into(),
                 size.0,
                 size.1,
+                best_ask_before.unwrap_or((Decimal::zero(), Decimal::zero(), 0)),
+                best_bid_before.unwrap_or((Decimal::zero(), Decimal::zero(), 0)),
                 &taker_base_before,
                 &taker_quote_before,
                 &cr,
@@ -797,6 +813,8 @@ mod test {
                 nonce: 1,
                 signature: vec![0],
             };
+            let (best_ask_before, best_bid_before) =
+                data.orderbooks.get(&(1, 0)).unwrap().get_best();
             let taker_base_before =
                 assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.0);
             let taker_quote_before =
@@ -820,6 +838,8 @@ mod test {
                 (cmd2, mf, tf).into(),
                 size.0,
                 size.1,
+                best_ask_before.unwrap_or((Decimal::zero(), Decimal::zero(), 0)),
+                best_bid_before.unwrap_or((Decimal::zero(), Decimal::zero(), 0)),
                 &taker_base_before,
                 &taker_quote_before,
                 &cr,
