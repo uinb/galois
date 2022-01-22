@@ -12,18 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{collections::HashMap, fs::File, io::{BufReader, BufWriter}};
+use std::{
+    collections::HashMap,
+    fs::File,
+    io::{BufReader, BufWriter},
+};
 
-use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
+use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-use crate::{assets::Balance, orderbook::OrderBook};
 pub use crate::event::InOrOut;
 #[cfg(feature = "fusotao")]
 use crate::fusotao::GlobalStates;
 pub use crate::matcher::{Role, State as OrderState};
 pub use crate::orderbook::AskOrBid;
+use crate::{assets::Balance, orderbook::OrderBook};
 
 pub type Base = u32;
 pub type Quote = u32;

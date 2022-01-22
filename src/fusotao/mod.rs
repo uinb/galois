@@ -21,11 +21,11 @@ use rust_decimal::{prelude::*, Decimal};
 use serde::{Deserialize, Serialize};
 use smt::{default_store::DefaultStore, sha256::Sha256Hasher, SparseMerkleTree, H256};
 use sp_core::sr25519::{Pair as Sr25519, Public};
-use sp_runtime::{
-    generic::{Block, Header},
-    traits::BlakeTwo256,
-    MultiAddress, OpaqueExtrinsic,
-};
+// use sp_runtime::{
+//     generic::{Block, Header},
+//     traits::BlakeTwo256,
+//     MultiAddress, OpaqueExtrinsic,
+// };
 use std::{
     convert::{TryFrom, TryInto},
     fs::OpenOptions,
@@ -37,27 +37,28 @@ use std::{
     },
     time::Duration,
 };
-use sub_api::{
-    rpc::{
-        ws_client::{EventsDecoder, RuntimeEvent},
-        WsRpcClient,
-    },
-    Api, SignedBlock, UncheckedExtrinsicV4, XtStatus,
-};
+// use sub_api::{
+//     rpc::{
+//         ws_client::{EventsDecoder, RuntimeEvent},
+//         WsRpcClient,
+//     },
+//     Api, SignedBlock, UncheckedExtrinsicV4, XtStatus,
+// };
 
 pub use prover::Prover;
 
 use crate::{config::C, core::*, event::*, sequence};
 
 //mod connector;
+//mod client;
 mod prover;
 
 pub type GlobalStates = SparseMerkleTree<Sha256Hasher, H256, DefaultStore<H256>>;
 pub type FusoAccountId = Public;
-pub type FusoAddress = MultiAddress<FusoAccountId, ()>;
-pub type FusoHeader = Header<u32, BlakeTwo256>;
-pub type FusoBlock = Block<FusoHeader, OpaqueExtrinsic>;
-pub type FusoApi = Api<Sr25519, WsRpcClient>;
+// pub type FusoAddress = MultiAddress<FusoAccountId, ()>;
+// pub type FusoHeader = Header<u32, BlakeTwo256>;
+// pub type FusoBlock = Block<FusoHeader, OpaqueExtrinsic>;
+// pub type FusoApi = Api<Sr25519, WsRpcClient>;
 
 const ONE_ONCHAIN: u128 = 1_000_000_000_000_000_000;
 const MILL: u32 = 1_000_000;
@@ -65,12 +66,16 @@ const BILL: u32 = 1_000_000_000;
 const QUINTILL: u64 = 1_000_000_000_000_000_000;
 const MAX_EXTRINSIC_BYTES: usize = 1_000_000;
 
-pub trait ProofStorage {
-    fn save(&self, proof: Proof) -> anyhow::Result<()>;
+// pub trait ProofStorage {
+//     fn save(&self, proof: Proof) -> anyhow::Result<()>;
 
-    fn save_batch(&self, proofs: Vec<Proof>) -> anyhow::Result<()>;
+//     fn save_batch(&self, proofs: Vec<Proof>) -> anyhow::Result<()>;
 
-    fn get_indicator(&self) -> (u64, usize);
+//     fn get_indicator(&self) -> (u64, usize);
+// }
+
+pub trait Connector {
+    fn submit_and_wait(&self);
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Encode)]

@@ -267,7 +267,6 @@ impl Prover {
                 leaves: leaves,
                 proof_of_exists: pr0,
                 proof_of_cmd: pr1,
-                // TODO redundant clone because &H256 doesn't implement Into<[u8; 32]>
                 root: data.merkle_tree.root().clone().into(),
             })
             .unwrap();
