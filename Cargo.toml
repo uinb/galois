@@ -12,10 +12,6 @@ readme = "README.md"
 name = "galois"
 path = "bin/galois.rs"
 
-[[bin]]
-name = "client"
-path = "src/fusotao/client.rs"
-
 [features]
 default = []
 fusotao = ["sub-api", "parity-scale-codec", "smt", "memmap", "sp-core", "sp-runtime"]
@@ -117,9 +113,10 @@ features = ["serde-rs", "sha256"]
 optional = true
 
 [dependencies.sub-api]
-git = "https://github.com/uinb/fusotao-rust-client.git"
+# git = "https://github.com/uinb/fusotao-rust-client.git"
+path = "../substrate-api-client"
 package = "fusotao-rust-client"
-branch = "polkadot-v0.9.12"
+# branch = "polkadot-v0.9.12"
 optional = true
 
 [dependencies.parity-scale-codec]

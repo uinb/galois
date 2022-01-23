@@ -12,54 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{config::C, core::*, event::*, fusotao::*, sequence};
+use crate::{config::C, fusotao::*, sequence};
 use anyhow::anyhow;
-use async_std::task::block_on;
-use futures::future::try_join_all;
 use memmap::MmapMut;
-use parity_scale_codec::{Compact, Decode, Encode, WrapperTypeEncode};
-use rocksdb::{DBWithThreadMode, MultiThreaded, Options as RocksOptions};
-use rust_decimal::{prelude::*, Decimal};
-use serde::{Deserialize, Serialize};
-use smt::{default_store::DefaultStore, sha256::Sha256Hasher, SparseMerkleTree, H256};
-use sp_core::sr25519::{Pair as Sr25519, Public};
-use sp_runtime::{
-    generic::{Block, Header},
-    traits::BlakeTwo256,
-    MultiAddress, OpaqueExtrinsic,
-};
+use parity_scale_codec::Decode;
+use sp_core::Pair;
 use std::{
-    convert::{TryFrom, TryInto},
+    convert::TryInto,
     fs::OpenOptions,
     path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
-        mpsc::{Receiver, RecvTimeoutError},
         Arc,
     },
     time::Duration,
 };
-use sub_api::{
-    rpc::{
-        ws_client::{EventsDecoder, RuntimeEvent},
-        WsRpcClient,
-    },
-    Api, SignedBlock, UncheckedExtrinsicV4, XtStatus,
-};
-
-pub type Rocks = DBWithThreadMode<MultiThreaded>;
+use sub_api::events::{EventsDecoder, Raw};
 
 pub struct FusoConnector {
     api: FusoApi,
-    signer: Sr25519,
-    rocks: Arc<Rocks>,
+    signer: Sr25519Key,
     proved_event_id: Arc<AtomicU64>,
 }
 
 impl FusoConnector {
-    pub fn new(rocks: Arc<Rocks>, proved_event_id: Arc<AtomicU64>) -> anyhow::Result<Self> {
-        use sp_core::Pair;
-        let signer = Sr25519::from_string(
+    pub fn new(proved_event_id: Arc<AtomicU64>) -> anyhow::Result<Self> {
+        let signer = Sr25519Key::from_string(
             &C.fusotao
                 .as_ref()
                 .ok_or(anyhow!("Invalid fusotao config"))?
@@ -67,158 +45,108 @@ impl FusoConnector {
             None,
         )
         .map_err(|_| anyhow!("Invalid fusotao config"))?;
-        let client = WsRpcClient::new(
+        let client = sub_api::rpc::WsRpcClient::new(
             &C.fusotao
                 .as_ref()
                 .ok_or(anyhow!("Invalid fusotao config"))?
                 .node_url,
         );
-        let api = Api::new(client)
-            .map(|api| api.set_signer(signer))
+        let api = FusoApi::new(client)
+            .map(|api| api.set_signer(signer.clone()))
             .map_err(|e| {
                 log::error!("{:?}", e);
                 anyhow!("Fusotao node not available or runtime metadata check failed")
             })?;
+        // TODO
         Ok(Self {
             api: api,
             signer: signer,
-            rocks: rocks,
             proved_event_id: proved_event_id,
         })
     }
 
-    fn start_submitting(&self) -> anyhow::Result<()> {
-        let path: PathBuf = [&C.sequence.coredump_dir, "fusotao.seq"].iter().collect();
+    // TODO
+    fn sync_proving_progress(&self, finalized: bool) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    pub fn start_submitting(&self) -> anyhow::Result<()> {
+        let api = self.api.clone();
+        let proved_event_id = self.proved_event_id.clone();
+        std::thread::spawn(move || loop {
+            let proofs = persistence::fetch_raw_after(proved_event_id.load(Ordering::Relaxed));
+            if proofs.is_empty() {
+                continue;
+            }
+            let in_block = proofs.last().unwrap().0;
+            let proofs = proofs.into_iter().map(|p| p.1).collect::<Vec<_>>();
+            // FIXME the proof is too long to put into a single block, e.g. too many makers
+            // this a known bug, simply deleting the command would work. we'll add a constraint to fix it in the future
+            match Self::submit_batch(&api, proofs) {
+                Ok(()) => proved_event_id.store(in_block, Ordering::Relaxed),
+                Err(_) => {}
+            }
+        });
+        Ok(())
+    }
+
+    fn submit_batch(api: &FusoApi, batch: Vec<RawParameter>) -> anyhow::Result<()> {
+        let xt: sub_api::UncheckedExtrinsicV4<_> =
+            sub_api::compose_extrinsic!(api, "Receipts", "verify", batch);
+        // TODO
+        api.send_extrinsic(xt.hex_encode(), sub_api::XtStatus::InBlock)
+            .map_err(|e| anyhow::anyhow!("submit proofs failed, {:?}", e))
+            .map(|_| ())
+    }
+
+    pub fn start_scanning(&self) -> anyhow::Result<()> {
+        let api = self.api.clone();
+        let who = self.signer.public().clone();
+        let path: PathBuf = [&C.sequence.coredump_dir, "fusotao.blk"].iter().collect();
         let finalized_file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .open(&path)?;
-        finalized_file.set_len(8)?;
-        let mut seq_mmap = unsafe { MmapMut::map_mut(&finalized_file)? };
-        let mut max_proof_id = u64::from_le_bytes(seq_mmap[..].try_into()?);
-        let mut buf_len = 0usize;
-        let mut batch = vec![];
-        if max_proof_id == 0 && !C.sequence.enable_from_genesis {
-            panic!(
-                "couldn't load seq memmap file, set `enable_from_genesis` to force start from genesis"
-            );
-        }
-        log::info!("initiate proving from sequence {:?}", max_proof_id);
-        std::thread::spawn(move || loop {
-            let proof = match rx.recv_timeout(Duration::from_millis(60_000)) {
-                Ok(p) => Some(p),
-                Err(RecvTimeoutError::Timeout) => None,
-                Err(RecvTimeoutError::Disconnected) => break,
-            };
-            if proof.is_none() && !batch.is_empty() {
-                max_proof_id = submit_batch(api.clone(), &mut batch).unwrap();
-                (&mut seq_mmap[..]).copy_from_slice(&max_proof_id.to_le_bytes()[..]);
-                seq_mmap.flush().unwrap();
-                proved_event_id.store(max_proof_id, Ordering::Relaxed);
-                buf_len = 0;
-                continue;
-            }
-            let proof = proof.unwrap();
-            if max_proof_id >= proof.event_id {
-                continue;
-            }
-            log::debug!("proof of sequence => {:?}", proof);
-            let size = proof.size_hint();
-            if size + buf_len > MAX_EXTRINSIC_BYTES {
-                if batch.is_empty() {
-                    // FIXME the proof is too long to put into a single block, e.g. too many makers
-                    // this a known bug, simply deleting the command would work. we'll add a constraint to fix it in the future
-                    panic!("proof size too big, delete the command and reboot");
-                }
-                max_proof_id = submit_batch(api.clone(), &mut batch).unwrap();
-                (&mut seq_mmap[..]).copy_from_slice(&max_proof_id.to_le_bytes()[..]);
-                seq_mmap.flush().unwrap();
-                proved_event_id.store(max_proof_id, Ordering::Relaxed);
-                buf_len = 0;
-            }
-            batch.push(proof);
-            buf_len += size;
-        });
-        Ok(())
-    }
-
-    fn submit_batch(api: FusoApi, batch: &mut Vec<Proof>) -> anyhow::Result<u64> {
-        use sp_core::Pair;
-        if batch.is_empty() {
-            return Err(anyhow::anyhow!("Empty proofs"));
-        }
-        let last_submitted_id = batch.last().unwrap().event_id;
-        for i in 0..=3 {
-            let xt: UncheckedExtrinsicV4<_> =
-                sub_api::compose_extrinsic!(api, "Receipts", "verify", batch.clone());
-            match api.send_extrinsic(xt.hex_encode(), XtStatus::InBlock) {
-                Ok(_) => {
-                    // FIXME scan block and revert status once chain fork
-                    log::info!(
-                        "proof of sequence until {:?} have been submitted",
-                        last_submitted_id
-                    );
-                    batch.clear();
-                    return Ok(last_submitted_id);
-                }
-                Err(e) => {
-                    log::error!(
-                        "submit proof failed, remain {:?} times retrying, error => {:?}",
-                        3 - i,
-                        e
-                    );
-                    std::thread::sleep(Duration::from_millis(i * 15000));
-                }
-            }
-        }
-        return Err(anyhow::anyhow!(
-            "fail to submit proofs after 3 times retrying, {}",
-            last_submitted_id
-        ));
-    }
-
-    fn start_scanning(&self) -> anyhow::Result<()> {
-        let mut from_block_number = u32::from_le_bytes(
-            // TODO don't use ascii keys
-            self.rocks
-                .get_pinned(b"block_number")?
-                .unwrap_or(vec![0; 4]),
-        );
+        finalized_file.set_len(4)?;
+        let mut blk = unsafe { MmapMut::map_mut(&finalized_file)? };
+        let mut from_block_number = u32::from_le_bytes(blk.as_ref().try_into()?);
         if from_block_number == 0 {
             if !C.sequence.enable_from_genesis {
-                panic!("couldn't load block number from rocksdb storage, add `-g` to force start from genesis");
+                panic!(
+                    "couldn't load block number from mmap, add `-g` to force start from genesis"
+                );
             } else {
                 let at = C.fusotao.as_ref().unwrap().claim_block;
-                self.rocks.put(b"block_number", at.to_le_bytes())?;
                 from_block_number = at;
             }
         }
-        let decoder = EventsDecoder::try_from(api.metadata.clone())?;
+        let decoder = EventsDecoder::new(api.metadata.clone());
         log::info!("start synchronizing from block {}", from_block_number);
-        // TODO
         std::thread::spawn(move || loop {
-            match sync_finalized_blocks(cur, 10, &api, &who, &decoder) {
-                Ok((cmds, sync, last)) => {
+            match Self::sync_blocks_or_wait(from_block_number, &api, &who, &decoder) {
+                Ok((cmds, sync)) => {
                     if !cmds.is_empty() {
                         log::info!(
                             "prepare handle {} events before block {:?}",
                             cmds.len(),
                             sync
                         );
-                    }
-                    match sequence::insert_sequences(&cmds) {
-                        Ok(()) => {
-                            blk[..].copy_from_slice(&sync.to_le_bytes()[..]);
-                            // FIXME commit manually after memmap flush ok
-                            blk.flush().unwrap();
-                            log::info!("all events until block {} synchronized", sync);
+                        match sequence::insert_sequences(&cmds) {
+                            Ok(()) => {
+                                from_block_number = sync;
+                                blk[..].copy_from_slice(&sync.to_le_bytes()[..]);
+                                // FIXME commit manually after memmap flush ok
+                                blk.flush().unwrap();
+                                log::info!("all events before block {} synchronized", sync);
+                            }
+                            Err(_) => {
+                                log::warn!("save sequences from block {} failed", from_block_number)
+                            }
                         }
-                        Err(_) => log::warn!("save sequences from block {} failed", cur),
-                    }
-                    cur = sync;
-                    if cur >= last {
-                        std::thread::sleep(Duration::from_millis(7000));
+                    } else {
+                        log::info!("no interested events found before block {:?}", sync);
+                        from_block_number = sync;
                     }
                 }
                 Err(e) => log::error!("sync blocks failed, {:?}", e),
@@ -229,102 +157,106 @@ impl FusoConnector {
 
     async fn resolve_block(
         api: &FusoApi,
-        signer: &Public,
-        at: u32,
+        signer: &FusoAccountId,
+        at: Option<u32>,
         decoder: &EventsDecoder,
     ) -> anyhow::Result<Vec<sequence::Command>> {
-        let hash = 
-            .api
-            .get_block_hash(at)?
-            .ok_or(anyhow!("block {} is not born", at))?;
-        let e = api.get_opaque_storage_by_key_hash(
-            sub_api::utils::storage_key("System", "Events"),
-            Some(hash),
-        )?;
-        if e.is_none() {
-            log::warn!("no events in block {}", at);
+        use sub_api::utils::FromHexString;
+        let hash = api.get_block_hash(at)?;
+        let event_str = api
+            .get_storage_value("System", "Events", hash);
+        log::info!("wtf -> {:?}", event_str);
+        let event_str = event_str.unwrap()
+            .unwrap_or(String::new());
+        if event_str.is_empty() || event_str == "\u{0}" {
+            log::info!("hit empty!");
             return Ok(vec![]);
         }
-        let e = e.unwrap();
-        let raw_events = decoder.decode_events(&mut e.as_slice()).map_err(|e| {
-            log::error!("{:?}", e);
-            anyhow::anyhow!("decode events error")
-        })?;
+        log::info!("{:?} >> {:?}", hash, event_str);
+        let slice = Vec::from_hex(event_str)?;
+        log::info!("string to hex: {:?}", slice);
+        let events = decoder.decode_events(&mut slice.as_slice());
         let mut cmds = vec![];
-        for (_, event) in raw_events.into_iter() {
-            match event {
-                RuntimeEvent::Raw(raw) if raw.module == "Receipts" => match raw.variant.as_ref() {
-                    "CoinHosted" => {
-                        let decoded = CoinHostedEvent::decode(&mut &raw.data[..]).unwrap();
-                        if &decoded.dominator == signer {
-                            let mut cmd = sequence::Command::default();
-                            cmd.cmd = sequence::TRANSFER_IN;
-                            cmd.currency = Some(0);
-                            cmd.amount = Some(to_decimal_represent(decoded.amount));
-                            cmd.user_id = Some(format!("{}", decoded.fund_owner));
-                            cmd.block_number = Some(at);
-                            cmd.extrinsic_hash = Some(hex::encode(hash));
-                            cmds.push(cmd);
-                        }
+        match events {
+            Ok(raw_events) => {
+                for (_, event) in raw_events.into_iter() {
+                    match event {
+                        Raw::Event(raw) if raw.pallet == "Receipts" => match raw.variant.as_ref() {
+                            "CoinHosted" => {
+                                let decoded = CoinHostedEvent::decode(&mut &raw.data[..]).unwrap();
+                                if &decoded.dominator == signer {
+                                    let mut cmd = sequence::Command::default();
+                                    cmd.cmd = sequence::TRANSFER_IN;
+                                    cmd.currency = Some(0);
+                                    cmd.amount = Some(to_decimal_represent(decoded.amount));
+                                    cmd.user_id = Some(format!("{}", decoded.fund_owner));
+                                    cmd.block_number = at.or(Some(0));
+                                    cmd.extrinsic_hash = None;
+                                    cmds.push(cmd);
+                                }
+                            }
+                            "TokenHosted" => {
+                                let decoded = TokenHostedEvent::decode(&mut &raw.data[..]).unwrap();
+                                if &decoded.dominator == signer {
+                                    let mut cmd = sequence::Command::default();
+                                    cmd.cmd = sequence::TRANSFER_IN;
+                                    cmd.currency = Some(decoded.token_id);
+                                    cmd.amount = Some(to_decimal_represent(decoded.amount));
+                                    cmd.user_id = Some(format!("{}", decoded.fund_owner));
+                                    cmd.block_number = at.or(Some(0));
+                                    cmd.extrinsic_hash = None;
+                                    cmds.push(cmd);
+                                }
+                            }
+                            "CoinRevoked" => {
+                                let decoded = CoinRevokedEvent::decode(&mut &raw.data[..]).unwrap();
+                                if &decoded.dominator == signer {
+                                    let mut cmd = sequence::Command::default();
+                                    cmd.cmd = sequence::TRANSFER_OUT;
+                                    cmd.currency = Some(0);
+                                    cmd.amount = Some(to_decimal_represent(decoded.amount));
+                                    cmd.user_id = Some(format!("{}", decoded.fund_owner));
+                                    cmd.block_number = at.or(Some(0));
+                                    cmd.extrinsic_hash = None;
+                                    cmds.push(cmd);
+                                }
+                            }
+                            "TokenRevoked" => {
+                                let decoded =
+                                    TokenRevokedEvent::decode(&mut &raw.data[..]).unwrap();
+                                if &decoded.dominator == signer {
+                                    let mut cmd = sequence::Command::default();
+                                    cmd.cmd = sequence::TRANSFER_OUT;
+                                    cmd.currency = Some(decoded.token_id);
+                                    cmd.amount = Some(to_decimal_represent(decoded.amount));
+                                    cmd.user_id = Some(format!("{}", decoded.fund_owner));
+                                    cmd.block_number = at.or(Some(0));
+                                    cmd.extrinsic_hash = None;
+                                    cmds.push(cmd);
+                                }
+                            }
+                            _ => {}
+                        },
+                        Raw::Event(event) => log::debug!("other event: {:?}", event),
+                        Raw::Error(error) => log::debug!("runtime error: {:?}", error),
                     }
-                    "TokenHosted" => {
-                        let decoded = TokenHostedEvent::decode(&mut &raw.data[..]).unwrap();
-                        if &decoded.dominator == signer {
-                            let mut cmd = sequence::Command::default();
-                            cmd.cmd = sequence::TRANSFER_IN;
-                            cmd.currency = Some(decoded.token_id);
-                            cmd.amount = Some(to_decimal_represent(decoded.amount));
-                            cmd.user_id = Some(format!("{}", decoded.fund_owner));
-                            cmd.block_number = Some(at);
-                            cmd.extrinsic_hash = Some(hex::encode(hash));
-                            cmds.push(cmd);
-                        }
-                    }
-                    "CoinRevoked" => {
-                        let decoded = CoinRevokedEvent::decode(&mut &raw.data[..]).unwrap();
-                        if &decoded.dominator == signer {
-                            let mut cmd = sequence::Command::default();
-                            cmd.cmd = sequence::TRANSFER_OUT;
-                            cmd.currency = Some(0);
-                            cmd.amount = Some(to_decimal_represent(decoded.amount));
-                            cmd.user_id = Some(format!("{}", decoded.fund_owner));
-                            cmd.block_number = Some(at);
-                            cmd.extrinsic_hash = Some(hex::encode(hash));
-                            cmds.push(cmd);
-                        }
-                    }
-                    "TokenRevoked" => {
-                        let decoded = TokenRevokedEvent::decode(&mut &raw.data[..]).unwrap();
-                        if &decoded.dominator == signer {
-                            let mut cmd = sequence::Command::default();
-                            cmd.cmd = sequence::TRANSFER_OUT;
-                            cmd.currency = Some(decoded.token_id);
-                            cmd.amount = Some(to_decimal_represent(decoded.amount));
-                            cmd.user_id = Some(format!("{}", decoded.fund_owner));
-                            cmd.block_number = Some(at);
-                            cmd.extrinsic_hash = Some(hex::encode(hash));
-                            cmds.push(cmd);
-                        }
-                    }
-                    _ => {}
-                },
-                _ => {}
+                }
             }
+            Err(error) => log::error!("couldn't decode event record list: {:?}", error),
         }
         Ok(cmds)
     }
 
-    fn sync_finalized_blocks(
-        api: &FusoApi,
+    fn sync_blocks_or_wait(
         from_block_included: u32,
-        limit: u32,
+        api: &FusoApi,
+        who: &FusoAccountId,
         decoder: &EventsDecoder,
-    ) -> anyhow::Result<(Vec<sequence::Command>, u32, u32)> {
+    ) -> anyhow::Result<(Vec<sequence::Command>, u32)> {
         let finalized_block_hash = api
             .get_finalized_head()?
             .ok_or(anyhow!("finalized heads couldn't be found"))?;
-        let finalized_block: SignedBlock<FusoBlock> = 
-            .api
+        let finalized_block: sub_api::SignedBlock<FusoBlock> = api
             .get_signed_block(Some(finalized_block_hash))?
             .ok_or(anyhow!(
                 "signed block {} couldn't be found",
@@ -337,13 +269,28 @@ impl FusoConnector {
             finalized_block_number,
             finalized_block_hash,
         );
+        if from_block_included > finalized_block_number {
+            std::thread::sleep(Duration::from_millis(7000));
+            return Ok((vec![], from_block_included));
+        }
         let mut f = vec![];
         let mut i = 0;
-        while from_block_included + i <= finalized_block_number && i < limit {
-            f.push(Self::resolve_block(api, from_block_included + i, signer, decoder));
+        while from_block_included + i <= finalized_block_number {
+            f.push(Self::resolve_block(
+                api,
+                who,
+                Some(from_block_included + i),
+                decoder,
+            ));
             i += 1;
+            if f.len() == 10 {
+                break;
+            }
         }
-        let r = block_on(try_join_all(f))?.into_iter().flatten().collect();
-        Ok((r, from_block_included + i, finalized_block_number))
+        let r = async_std::task::block_on(futures::future::try_join_all(f))?
+            .into_iter()
+            .flatten()
+            .collect();
+        Ok((r, from_block_included + i))
     }
 }

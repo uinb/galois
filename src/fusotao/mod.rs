@@ -12,70 +12,54 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
-use async_std::task::block_on;
-use futures::future::try_join_all;
-use memmap::MmapMut;
 use parity_scale_codec::{Compact, Decode, Encode, WrapperTypeEncode};
 use rust_decimal::{prelude::*, Decimal};
 use serde::{Deserialize, Serialize};
 use smt::{default_store::DefaultStore, sha256::Sha256Hasher, SparseMerkleTree, H256};
-use sp_core::sr25519::{Pair as Sr25519, Public};
-// use sp_runtime::{
-//     generic::{Block, Header},
-//     traits::BlakeTwo256,
-//     MultiAddress, OpaqueExtrinsic,
-// };
 use std::{
-    convert::{TryFrom, TryInto},
-    fs::OpenOptions,
-    path::PathBuf,
+    convert::TryInto,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::AtomicU64,
         mpsc::{Receiver, RecvTimeoutError},
         Arc,
     },
-    time::Duration,
 };
-// use sub_api::{
-//     rpc::{
-//         ws_client::{EventsDecoder, RuntimeEvent},
-//         WsRpcClient,
-//     },
-//     Api, SignedBlock, UncheckedExtrinsicV4, XtStatus,
-// };
 
 pub use prover::Prover;
 
-use crate::{config::C, core::*, event::*, sequence};
+use crate::{config::C, core::*, event::*};
 
-//mod connector;
-//mod client;
+mod connector;
+mod persistence;
 mod prover;
 
 pub type GlobalStates = SparseMerkleTree<Sha256Hasher, H256, DefaultStore<H256>>;
-pub type FusoAccountId = Public;
-// pub type FusoAddress = MultiAddress<FusoAccountId, ()>;
-// pub type FusoHeader = Header<u32, BlakeTwo256>;
-// pub type FusoBlock = Block<FusoHeader, OpaqueExtrinsic>;
-// pub type FusoApi = Api<Sr25519, WsRpcClient>;
+pub type Sr25519Key = sp_core::sr25519::Pair;
+pub type FusoAccountId = <Sr25519Key as sp_core::Pair>::Public;
+pub type FusoAddress = sp_runtime::MultiAddress<FusoAccountId, ()>;
+pub type FusoHash = sp_runtime::traits::BlakeTwo256;
+pub type BlockNumber = u32;
+pub type FusoHeader = sp_runtime::generic::Header<BlockNumber, FusoHash>;
+pub type FusoExtrinsic = sp_runtime::OpaqueExtrinsic;
+pub type FusoBlock = sp_runtime::generic::Block<FusoHeader, FusoExtrinsic>;
+pub type FusoApi = sub_api::Api<Sr25519Key, sub_api::rpc::WsRpcClient>;
 
 const ONE_ONCHAIN: u128 = 1_000_000_000_000_000_000;
 const MILL: u32 = 1_000_000;
 const BILL: u32 = 1_000_000_000;
 const QUINTILL: u64 = 1_000_000_000_000_000_000;
+#[allow(dead_code)]
 const MAX_EXTRINSIC_BYTES: usize = 1_000_000;
+#[allow(dead_code)]
+const MAX_EXTRINSIC_WEIGHT: u128 = 1_000_000_000_000_000_000;
 
-// pub trait ProofStorage {
-//     fn save(&self, proof: Proof) -> anyhow::Result<()>;
+#[derive(Clone, Debug)]
+pub struct RawParameter(pub Vec<u8>);
 
-//     fn save_batch(&self, proofs: Vec<Proof>) -> anyhow::Result<()>;
-
-//     fn get_indicator(&self) -> (u64, usize);
-// }
-
-pub trait Connector {
-    fn submit_and_wait(&self);
+impl Encode for RawParameter {
+    fn encode(&self) -> Vec<u8> {
+        self.0.to_owned()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Encode)]
@@ -93,6 +77,9 @@ pub struct Proof {
     pub signature: Vec<u8>,
     pub cmd: FusoCommand,
     pub leaves: Vec<MerkleLeaf>,
+    // TODO add max_makers
+    // pub maker_page_delta: u8,
+    // pub maker_account_delta: u8,
     pub proof_of_exists: Vec<u8>,
     pub proof_of_cmd: Vec<u8>,
     pub root: [u8; 32],
@@ -140,19 +127,11 @@ impl WrapperTypeEncode for UserId {}
 /// 1. from_ss58check() or from_ss58check_with_version()
 /// 2. new or from public
 pub fn init(rx: Receiver<Proof>, proved_event_id: Arc<AtomicU64>) -> anyhow::Result<()> {
-    // use sp_core::Pair;
-    // let signer = Sr25519::from_string(
-    //     &C.fusotao
-    //         .as_ref()
-    //         .ok_or(anyhow!("Invalid fusotao config"))?
-    //         .key_seed,
-    //     None,
-    // )
-    // .map_err(|_| anyhow!("Invalid fusotao config"))?;
-    // let api = new_api(signer.clone())?;
-    // start_submitting(api.clone(), rx, proved_event_id)?;
-    // start_listening(api, signer.public())?;
-    // log::info!("fusotao prover initialized");
+    persistence::init(rx);
+    let connector = connector::FusoConnector::new(proved_event_id)?;
+    connector.start_submitting()?;
+    connector.start_scanning()?;
+    log::info!("fusotao prover initialized");
     Ok(())
 }
 

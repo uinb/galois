@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::*;
-use crate::{assets::Balance, core::*, matcher::*, orderbook::AskOrBid, output::Output};
+use crate::{assets::Balance, matcher::*, orderbook::AskOrBid, output::Output};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::mpsc::Sender;
