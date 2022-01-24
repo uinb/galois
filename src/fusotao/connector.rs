@@ -145,8 +145,10 @@ impl FusoConnector {
                             }
                         }
                     } else {
-                        log::info!("no interested events found before block {:?}", sync);
                         from_block_number = sync;
+                        blk[..].copy_from_slice(&sync.to_le_bytes()[..]);
+                        blk.flush().unwrap();
+                        log::info!("no interested events found before block {:?}", sync);
                     }
                 }
                 Err(e) => log::error!("sync blocks failed, {:?}", e),
@@ -161,88 +163,70 @@ impl FusoConnector {
         at: Option<u32>,
         decoder: &EventsDecoder,
     ) -> anyhow::Result<Vec<sequence::Command>> {
-        use sub_api::utils::FromHexString;
         let hash = api.get_block_hash(at)?;
-        let event_str = api
-            .get_storage_value("System", "Events", hash);
-        log::info!("wtf -> {:?}", event_str);
-        let event_str = event_str.unwrap()
-            .unwrap_or(String::new());
-        if event_str.is_empty() || event_str == "\u{0}" {
-            log::info!("hit empty!");
-            return Ok(vec![]);
-        }
-        log::info!("{:?} >> {:?}", hash, event_str);
-        let slice = Vec::from_hex(event_str)?;
-        log::info!("string to hex: {:?}", slice);
-        let events = decoder.decode_events(&mut slice.as_slice());
+        let slices: Option<Vec<u8>> = api.get_storage_value("System", "Events", hash)?;
+        let events = decoder.decode_events(&mut slices.unwrap_or(vec![]).as_slice()).unwrap_or(vec![]);
         let mut cmds = vec![];
-        match events {
-            Ok(raw_events) => {
-                for (_, event) in raw_events.into_iter() {
-                    match event {
-                        Raw::Event(raw) if raw.pallet == "Receipts" => match raw.variant.as_ref() {
-                            "CoinHosted" => {
-                                let decoded = CoinHostedEvent::decode(&mut &raw.data[..]).unwrap();
-                                if &decoded.dominator == signer {
-                                    let mut cmd = sequence::Command::default();
-                                    cmd.cmd = sequence::TRANSFER_IN;
-                                    cmd.currency = Some(0);
-                                    cmd.amount = Some(to_decimal_represent(decoded.amount));
-                                    cmd.user_id = Some(format!("{}", decoded.fund_owner));
-                                    cmd.block_number = at.or(Some(0));
-                                    cmd.extrinsic_hash = None;
-                                    cmds.push(cmd);
-                                }
-                            }
-                            "TokenHosted" => {
-                                let decoded = TokenHostedEvent::decode(&mut &raw.data[..]).unwrap();
-                                if &decoded.dominator == signer {
-                                    let mut cmd = sequence::Command::default();
-                                    cmd.cmd = sequence::TRANSFER_IN;
-                                    cmd.currency = Some(decoded.token_id);
-                                    cmd.amount = Some(to_decimal_represent(decoded.amount));
-                                    cmd.user_id = Some(format!("{}", decoded.fund_owner));
-                                    cmd.block_number = at.or(Some(0));
-                                    cmd.extrinsic_hash = None;
-                                    cmds.push(cmd);
-                                }
-                            }
-                            "CoinRevoked" => {
-                                let decoded = CoinRevokedEvent::decode(&mut &raw.data[..]).unwrap();
-                                if &decoded.dominator == signer {
-                                    let mut cmd = sequence::Command::default();
-                                    cmd.cmd = sequence::TRANSFER_OUT;
-                                    cmd.currency = Some(0);
-                                    cmd.amount = Some(to_decimal_represent(decoded.amount));
-                                    cmd.user_id = Some(format!("{}", decoded.fund_owner));
-                                    cmd.block_number = at.or(Some(0));
-                                    cmd.extrinsic_hash = None;
-                                    cmds.push(cmd);
-                                }
-                            }
-                            "TokenRevoked" => {
-                                let decoded =
-                                    TokenRevokedEvent::decode(&mut &raw.data[..]).unwrap();
-                                if &decoded.dominator == signer {
-                                    let mut cmd = sequence::Command::default();
-                                    cmd.cmd = sequence::TRANSFER_OUT;
-                                    cmd.currency = Some(decoded.token_id);
-                                    cmd.amount = Some(to_decimal_represent(decoded.amount));
-                                    cmd.user_id = Some(format!("{}", decoded.fund_owner));
-                                    cmd.block_number = at.or(Some(0));
-                                    cmd.extrinsic_hash = None;
-                                    cmds.push(cmd);
-                                }
-                            }
-                            _ => {}
-                        },
-                        Raw::Event(event) => log::debug!("other event: {:?}", event),
-                        Raw::Error(error) => log::debug!("runtime error: {:?}", error),
+        for (_, event) in events.into_iter() {
+            match event {
+                Raw::Event(raw) if raw.pallet == "Receipts" => match raw.variant.as_ref() {
+                    "CoinHosted" => {
+                        let decoded = CoinHostedEvent::decode(&mut &raw.data[..]).unwrap();
+                        if &decoded.dominator == signer {
+                            let mut cmd = sequence::Command::default();
+                            cmd.cmd = sequence::TRANSFER_IN;
+                            cmd.currency = Some(0);
+                            cmd.amount = Some(to_decimal_represent(decoded.amount));
+                            cmd.user_id = Some(format!("{}", decoded.fund_owner));
+                            cmd.block_number = at.or(Some(0));
+                            cmd.extrinsic_hash = None;
+                            cmds.push(cmd);
+                        }
                     }
-                }
+                    "TokenHosted" => {
+                        let decoded = TokenHostedEvent::decode(&mut &raw.data[..]).unwrap();
+                        if &decoded.dominator == signer {
+                            let mut cmd = sequence::Command::default();
+                            cmd.cmd = sequence::TRANSFER_IN;
+                            cmd.currency = Some(decoded.token_id);
+                            cmd.amount = Some(to_decimal_represent(decoded.amount));
+                            cmd.user_id = Some(format!("{}", decoded.fund_owner));
+                            cmd.block_number = at.or(Some(0));
+                            cmd.extrinsic_hash = None;
+                            cmds.push(cmd);
+                        }
+                    }
+                    "CoinRevoked" => {
+                        let decoded = CoinRevokedEvent::decode(&mut &raw.data[..]).unwrap();
+                        if &decoded.dominator == signer {
+                            let mut cmd = sequence::Command::default();
+                            cmd.cmd = sequence::TRANSFER_OUT;
+                            cmd.currency = Some(0);
+                            cmd.amount = Some(to_decimal_represent(decoded.amount));
+                            cmd.user_id = Some(format!("{}", decoded.fund_owner));
+                            cmd.block_number = at.or(Some(0));
+                            cmd.extrinsic_hash = None;
+                            cmds.push(cmd);
+                        }
+                    }
+                    "TokenRevoked" => {
+                        let decoded = TokenRevokedEvent::decode(&mut &raw.data[..]).unwrap();
+                        if &decoded.dominator == signer {
+                            let mut cmd = sequence::Command::default();
+                            cmd.cmd = sequence::TRANSFER_OUT;
+                            cmd.currency = Some(decoded.token_id);
+                            cmd.amount = Some(to_decimal_represent(decoded.amount));
+                            cmd.user_id = Some(format!("{}", decoded.fund_owner));
+                            cmd.block_number = at.or(Some(0));
+                            cmd.extrinsic_hash = None;
+                            cmds.push(cmd);
+                        }
+                    }
+                    _ => {}
+                },
+                Raw::Event(event) => log::debug!("other event: {:?}", event),
+                Raw::Error(error) => log::debug!("runtime error: {:?}", error),
             }
-            Err(error) => log::error!("couldn't decode event record list: {:?}", error),
         }
         Ok(cmds)
     }
