@@ -113,10 +113,9 @@ features = ["serde-rs", "sha256"]
 optional = true
 
 [dependencies.sub-api]
-# git = "https://github.com/uinb/fusotao-rust-client.git"
-path = "../substrate-api-client"
+git = "https://github.com/uinb/fusotao-rust-client.git"
 package = "fusotao-rust-client"
-# branch = "polkadot-v0.9.12"
+branch = "polkadot-v0.9.12"
 optional = true
 
 [dependencies.parity-scale-codec]
