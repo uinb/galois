@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::core::*;
-use crate::orderbook::{AskOrBid, Order, OrderBook, OrderPage};
+use crate::{
+    core::*,
+    orderbook::{AskOrBid, Order, OrderBook, OrderPage},
+};
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum State {
@@ -68,7 +70,7 @@ impl Taker {
             order_id: order.id,
             price: order.price,
             unfilled: order.unfilled,
-            ask_or_bid: ask_or_bid,
+            ask_or_bid,
             state,
         }
     }

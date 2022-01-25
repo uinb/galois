@@ -27,8 +27,7 @@ use crate::{
     core::*,
     db::{DB, REDIS},
     matcher::*,
-    orderbook::AskOrBid,
-    orderbook::Depth,
+    orderbook::{AskOrBid, Depth},
 };
 
 #[derive(Debug, Clone)]

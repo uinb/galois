@@ -319,10 +319,7 @@ pub mod test {
     use rust_decimal::{prelude::Zero, Decimal};
     use rust_decimal_macros::dec;
 
-    use crate::assets;
-    use crate::core::*;
-    use crate::matcher::*;
-    use crate::orderbook::*;
+    use crate::{assets, core::*, matcher::*, orderbook::*};
 
     impl UserId {
         // adapt to legacy code

@@ -15,8 +15,7 @@
 use super::*;
 use crate::{assets::Balance, matcher::*, orderbook::AskOrBid, output::Output};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
-use std::sync::mpsc::Sender;
+use std::{collections::HashMap, sync::mpsc::Sender};
 
 const ACCOUNT_KEY: u8 = 0x00;
 const ORDERBOOK_KEY: u8 = 0x01;
@@ -32,7 +31,7 @@ impl Prover {
     pub fn new(tx: Sender<Proof>, proved_event_id: Arc<AtomicU64>) -> Self {
         Self {
             sender: tx,
-            proved_event_id: proved_event_id,
+            proved_event_id,
         }
     }
 
@@ -259,12 +258,12 @@ impl Prover {
         let (pr0, pr1) = gen_proofs(&mut data.merkle_tree, &leaves);
         self.sender
             .send(Proof {
-                event_id: event_id,
-                user_id: user_id,
-                nonce: nonce,
-                signature: signature,
+                event_id,
+                user_id,
+                nonce,
+                signature,
                 cmd: encoded_cmd,
-                leaves: leaves,
+                leaves,
                 maker_page_delta: maker_pages.len() as u8,
                 maker_account_delta: maker_accounts.len() as u8,
                 proof_of_exists: pr0,
@@ -299,12 +298,12 @@ impl Prover {
         let (pr0, pr1) = gen_proofs(merkle_tree, &leaves);
         self.sender
             .send(Proof {
-                event_id: event_id,
+                event_id,
                 user_id: cmd.user_id,
                 nonce: cmd.block_number,
                 signature: cmd.extrinsic_hash.clone(),
                 cmd: cmd.into(),
-                leaves: leaves,
+                leaves,
                 maker_page_delta: 0,
                 maker_account_delta: 0,
                 proof_of_exists: pr0,
@@ -338,12 +337,12 @@ impl Prover {
         if &old_root != merkle_tree.root() {
             self.sender
                 .send(Proof {
-                    event_id: event_id,
+                    event_id,
                     user_id: cmd.user_id,
                     nonce: cmd.block_number,
                     signature: cmd.extrinsic_hash.clone(),
                     cmd: cmd.into(),
-                    leaves: leaves,
+                    leaves,
                     maker_page_delta: 0,
                     maker_account_delta: 0,
                     proof_of_exists: pr0,
@@ -398,7 +397,7 @@ fn new_account_merkle_leaf(
     key[1..33].copy_from_slice(<B256 as AsRef<[u8]>>::as_ref(user_id));
     key[33..].copy_from_slice(&currency.to_le_bytes()[..]);
     MerkleLeaf {
-        key: key,
+        key,
         old_v: u128le_to_h256(old_available, old_frozen),
         new_v: u128le_to_h256(new_available, new_frozen),
     }
@@ -415,7 +414,7 @@ fn new_orderbook_merkle_leaf(
     key[1..5].copy_from_slice(&symbol.0.to_le_bytes()[..]);
     key[5..].copy_from_slice(&symbol.1.to_le_bytes()[..]);
     MerkleLeaf {
-        key: key,
+        key,
         old_v: u128le_to_h256(old_ask_size, old_bid_size),
         new_v: u128le_to_h256(new_ask_size, new_bid_size),
     }
@@ -432,7 +431,7 @@ fn new_bestprice_merkle_leaf(
     key[1..5].copy_from_slice(&symbol.0.to_le_bytes()[..]);
     key[5..].copy_from_slice(&symbol.1.to_le_bytes()[..]);
     MerkleLeaf {
-        key: key,
+        key,
         old_v: u128le_to_h256(old_best_ask, old_best_bid),
         new_v: u128le_to_h256(new_best_ask, new_best_bid),
     }
@@ -451,7 +450,7 @@ fn new_orderpage_merkle_leaf(
     key[5..9].copy_from_slice(&symbol.1.to_le_bytes()[..]);
     key[9..].copy_from_slice(&price.to_le_bytes()[..]);
     MerkleLeaf {
-        key: key,
+        key,
         old_v: u128le_to_h256(old_count.into(), old_amount),
         new_v: u128le_to_h256(new_count.into(), new_amount),
     }
@@ -459,8 +458,7 @@ fn new_orderpage_merkle_leaf(
 
 #[cfg(test)]
 mod test {
-    use std::sync::atomic::AtomicU64;
-    use std::sync::Arc;
+    use std::sync::{atomic::AtomicU64, Arc};
 
     use rust_decimal_macros::dec;
     use sha2::{Digest, Sha256};
@@ -628,9 +626,9 @@ mod test {
             let (mf, tf) = (orderbook.maker_fee, orderbook.taker_fee);
             orderbooks.insert((1, 0), orderbook);
             let mut data = Data {
-                orderbooks: orderbooks,
+                orderbooks,
                 accounts: all,
-                merkle_tree: merkle_tree,
+                merkle_tree,
                 current_event_id: 0,
             };
 

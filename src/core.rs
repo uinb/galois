@@ -22,12 +22,14 @@ use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-pub use crate::event::InOrOut;
 #[cfg(feature = "fusotao")]
 use crate::fusotao::GlobalStates;
-pub use crate::matcher::{Role, State as OrderState};
-pub use crate::orderbook::AskOrBid;
 use crate::{assets::Balance, orderbook::OrderBook};
+pub use crate::{
+    event::InOrOut,
+    matcher::{Role, State as OrderState},
+    orderbook::AskOrBid,
+};
 
 pub type Base = u32;
 pub type Quote = u32;

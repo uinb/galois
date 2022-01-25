@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-use std::convert::TryInto;
-use std::sync::atomic::AtomicU64;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    mpsc::{Receiver, Sender},
-    Arc,
+use std::{
+    collections::HashMap,
+    convert::TryInto,
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        mpsc::{Receiver, Sender},
+        Arc,
+    },
 };
 
 use anyhow::anyhow;
@@ -27,9 +28,16 @@ use rust_decimal::{prelude::*, Decimal};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::config::C;
-use crate::sequence::{Command, UPDATE_SYMBOL};
-use crate::{assets, clearing, core::*, matcher, orderbook::*, output, sequence, server, snapshot};
+use crate::{
+    assets, clearing,
+    config::C,
+    core::*,
+    matcher,
+    orderbook::*,
+    output, sequence,
+    sequence::{Command, UPDATE_SYMBOL},
+    server, snapshot,
+};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum Event {

@@ -59,9 +59,9 @@ impl FusoConnector {
             })?;
         // TODO
         Ok(Self {
-            api: api,
-            signer: signer,
-            proved_event_id: proved_event_id,
+            api,
+            signer,
+            proved_event_id,
         })
     }
 

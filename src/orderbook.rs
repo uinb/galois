@@ -16,10 +16,7 @@ use crate::core::{Amount, Fee, OrderId, Price, Symbol, UserId};
 use linked_hash_map::LinkedHashMap;
 use rust_decimal::{prelude::Zero, Decimal};
 use serde::{Deserialize, Serialize};
-use std::collections::{
-    btree_map::OccupiedEntry,
-    {BTreeMap, HashMap},
-};
+use std::collections::{btree_map::OccupiedEntry, BTreeMap, HashMap};
 
 const DEFAULT_PAGE_SIZE: usize = 256;
 
@@ -206,7 +203,7 @@ impl OrderBook {
             min_amount,
             min_vol,
             enable_market_order,
-            open: open,
+            open,
             max_id: 0,
         }
     }

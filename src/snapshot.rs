@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::{Duration, UNIX_EPOCH};
-use std::{fs, path, thread};
+use std::{
+    fs, path, thread,
+    time::{Duration, UNIX_EPOCH},
+};
 
-use chrono::prelude::DateTime;
-use chrono::Utc;
+use chrono::{prelude::DateTime, Utc};
 
 use crate::{config, core};
 
@@ -79,11 +80,12 @@ pub fn load() -> anyhow::Result<(u64, core::Data)> {
 
 #[cfg(test)]
 mod test {
-    use std::path::Path;
-    use std::time::{Duration, UNIX_EPOCH};
+    use std::{
+        path::Path,
+        time::{Duration, UNIX_EPOCH},
+    };
 
-    use chrono::prelude::DateTime;
-    use chrono::Utc;
+    use chrono::{prelude::DateTime, Utc};
 
     #[test]
     pub fn test_syspath() {
