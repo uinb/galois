@@ -76,12 +76,11 @@ impl FusoConnector {
         std::thread::spawn(move || loop {
             let proofs = persistence::fetch_raw_after(proved_event_id.load(Ordering::Relaxed));
             if proofs.is_empty() {
+                std::thread::sleep(Duration::from_millis(1000));
                 continue;
             }
             let in_block = proofs.last().unwrap().0;
             let proofs = proofs.into_iter().map(|p| p.1).collect::<Vec<_>>();
-            // FIXME the proof is too long to put into a single block, e.g. too many makers
-            // this a known bug, simply deleting the command would work. we'll add a constraint to fix it in the future
             match Self::submit_batch(&api, proofs) {
                 Ok(()) => proved_event_id.store(in_block, Ordering::Relaxed),
                 Err(_) => {}
@@ -165,7 +164,9 @@ impl FusoConnector {
     ) -> anyhow::Result<Vec<sequence::Command>> {
         let hash = api.get_block_hash(at)?;
         let slices: Option<Vec<u8>> = api.get_storage_value("System", "Events", hash)?;
-        let events = decoder.decode_events(&mut slices.unwrap_or(vec![]).as_slice()).unwrap_or(vec![]);
+        let events = decoder
+            .decode_events(&mut slices.unwrap_or(vec![]).as_slice())
+            .unwrap_or(vec![]);
         let mut cmds = vec![];
         for (_, event) in events.into_iter() {
             match event {

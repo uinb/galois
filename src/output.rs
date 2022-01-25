@@ -20,7 +20,7 @@ use std::{
     time::Duration,
 };
 
-use mysql::{*, prelude::*};
+use mysql::{prelude::*, *};
 use redis::Commands;
 
 use crate::{

@@ -16,9 +16,9 @@ use std::borrow::BorrowMut;
 use std::net::Shutdown;
 use std::str;
 use std::sync::{
-    Arc,
     atomic::{AtomicBool, Ordering},
     mpsc::Sender,
+    Arc,
 };
 
 use async_std::{

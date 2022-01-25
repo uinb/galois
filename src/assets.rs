@@ -204,7 +204,7 @@ mod test {
                 cmd.currency.unwrap(),
                 cmd.amount.unwrap(),
             )
-                .unwrap();
+            .unwrap();
         }
     }
 
@@ -231,10 +231,10 @@ mod test {
                 &UserId::from_str(
                     "0x0000000000000000000000000000000000000000000000000000000000000002"
                 )
-                    .unwrap(),
+                .unwrap(),
                 101,
             )
-                .available,
+            .available,
             dec!(9996.02)
         );
     }

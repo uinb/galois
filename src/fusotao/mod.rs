@@ -77,9 +77,8 @@ pub struct Proof {
     pub signature: Vec<u8>,
     pub cmd: FusoCommand,
     pub leaves: Vec<MerkleLeaf>,
-    // TODO add max_makers
-    // pub maker_page_delta: u8,
-    // pub maker_account_delta: u8,
+    pub maker_page_delta: u8,
+    pub maker_account_delta: u8,
     pub proof_of_exists: Vec<u8>,
     pub proof_of_cmd: Vec<u8>,
     pub root: [u8; 32],

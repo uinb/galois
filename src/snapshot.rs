@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fs, path, thread};
 use std::time::{Duration, UNIX_EPOCH};
+use std::{fs, path, thread};
 
 use chrono::prelude::DateTime;
 use chrono::Utc;

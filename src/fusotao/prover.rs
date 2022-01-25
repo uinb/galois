@@ -78,13 +78,13 @@ impl Prover {
             new_ask_size,
             new_bid_size,
         ));
-        let mut makers = HashMap::<UserId, Output>::new();
-        let mut pages = HashMap::<Price, (Amount, u32, Amount, u32)>::new();
+        let mut maker_accounts = HashMap::<UserId, Output>::new();
+        let mut maker_pages = HashMap::<Price, (Amount, u32, Amount, u32)>::new();
         outputs
             .iter()
             .take_while(|o| o.role == Role::Maker)
             .for_each(|r| {
-                makers
+                maker_accounts
                     .entry(r.user_id.clone())
                     .and_modify(|out| {
                         out.quote_charge = out.quote_charge + r.quote_charge;
@@ -97,7 +97,7 @@ impl Prover {
                         out.base_frozen = r.base_frozen;
                     })
                     .or_insert_with(|| r.clone());
-                pages
+                maker_pages
                     .entry(r.price)
                     .and_modify(|page| {
                         // FIXME? also need to handle fee?
@@ -111,7 +111,7 @@ impl Prover {
                             .unwrap_or((Amount::zero(), 0, Amount::zero(), 0))
                     });
             });
-        makers.into_values().for_each(|r| {
+        maker_accounts.values().for_each(|r| {
             log::debug!("{:?}", r);
             let (ba, bf, qa, qf) = match r.ask_or_bid {
                 // -base_frozen, +quote_available
@@ -212,7 +212,7 @@ impl Prover {
             best_ask.map(|a| a.0).unwrap_or(Amount::zero()).to_amount(),
             best_bid.map(|b| b.0).unwrap_or(Amount::zero()).to_amount(),
         ));
-        pages.iter().for_each(|(k, v)| {
+        maker_pages.iter().for_each(|(k, v)| {
             leaves.push(new_orderpage_merkle_leaf(
                 symbol,
                 k.to_amount(),
@@ -265,6 +265,8 @@ impl Prover {
                 signature: signature,
                 cmd: encoded_cmd,
                 leaves: leaves,
+                maker_page_delta: maker_pages.len() as u8,
+                maker_account_delta: maker_accounts.len() as u8,
                 proof_of_exists: pr0,
                 proof_of_cmd: pr1,
                 root: data.merkle_tree.root().clone().into(),
@@ -303,6 +305,8 @@ impl Prover {
                 signature: cmd.extrinsic_hash.clone(),
                 cmd: cmd.into(),
                 leaves: leaves,
+                maker_page_delta: 0,
+                maker_account_delta: 0,
                 proof_of_exists: pr0,
                 proof_of_cmd: pr1,
                 root: merkle_tree.root().clone().into(),
@@ -340,6 +344,8 @@ impl Prover {
                     signature: cmd.extrinsic_hash.clone(),
                     cmd: cmd.into(),
                     leaves: leaves,
+                    maker_page_delta: 0,
+                    maker_account_delta: 0,
                     proof_of_exists: pr0,
                     proof_of_cmd: pr1,
                     root: merkle_tree.root().clone().into(),

@@ -181,6 +181,11 @@ pub fn execute_limit(
 ) -> Match {
     let mut makers = Vec::<Maker>::new();
     let mut order = Order::new(order_id, user_id, price, amount);
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "fusotao")] {
+            let mut max_makers = 20u32;
+        }
+    }
     loop {
         if order.is_filled() {
             return Match {
@@ -190,7 +195,12 @@ pub fn execute_limit(
         }
         if let Some(mut best) = book.get_best_if_match(ask_or_bid, &order.price) {
             let page = best.get_mut();
-            let (mut traded, self_traded) = take(page, &mut order);
+            let (mut traded, interrupted) = take(
+                page,
+                &mut order,
+                #[cfg(feature = "fusotao")]
+                &mut max_makers,
+            );
             if page.is_empty() {
                 best.remove();
             }
@@ -200,7 +210,7 @@ pub fn execute_limit(
                 }
             });
             makers.append(&mut traded);
-            if self_traded {
+            if interrupted {
                 return Match {
                     taker: Taker::taker(order, ask_or_bid, State::ConditionalCanceled),
                     maker: makers,
@@ -219,9 +229,20 @@ pub fn execute_limit(
     }
 }
 
-fn take(page: &mut OrderPage, taker: &mut Order) -> (Vec<Maker>, bool) {
+fn take(
+    page: &mut OrderPage,
+    taker: &mut Order,
+    #[cfg(feature = "fusotao")] limit: &mut u32,
+) -> (Vec<Maker>, bool) {
     let mut matches = Vec::<Maker>::new();
     while !taker.is_filled() && !page.is_empty() {
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "fusotao")] {
+                if *limit == 0u32 {
+                    return (matches, true);
+                }
+            }
+        }
         let mut oldest = page.orders.entries().next().unwrap();
         if oldest.get().user == taker.user {
             return (matches, true);
@@ -237,6 +258,11 @@ fn take(page: &mut OrderPage, taker: &mut Order) -> (Vec<Maker>, bool) {
         };
         taker.fill(m.filled);
         page.decr_size(&m.filled);
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "fusotao")] {
+                *limit -= 1;
+            }
+        }
         matches.push(m);
     }
     (matches, false)
