@@ -293,9 +293,8 @@ impl OrderBook {
         removed
     }
 
-    fn get_from(tape: &Tape, price: &Price) -> Option<(Amount, u32)> {
-        tape.get(price)
-            .map(|page| (page.amount, page.orders.len() as u32))
+    fn get_size_from(tape: &Tape, price: &Price) -> Option<Amount> {
+        tape.get(price).map(|page| page.amount)
     }
 
     pub fn get_best_if_match(
@@ -317,29 +316,29 @@ impl OrderBook {
         self.bids.last_key_value().map(|(price, _)| *price)
     }
 
-    pub fn get_page(&self, price: &Price) -> Option<(Amount, u32)> {
+    pub fn get_page_size(&self, price: &Price) -> Option<Amount> {
         match (self.get_best_ask(), self.get_best_bid()) {
             (Some(best_ask), Some(_)) => {
                 if price >= &best_ask {
-                    Self::get_from(&self.asks, price)
+                    Self::get_size_from(&self.asks, price)
                 } else {
-                    Self::get_from(&self.bids, price)
+                    Self::get_size_from(&self.bids, price)
                 }
             }
-            (None, Some(_)) => Self::get_from(&self.bids, price),
-            (Some(_), None) => Self::get_from(&self.asks, price),
+            (None, Some(_)) => Self::get_size_from(&self.bids, price),
+            (Some(_), None) => Self::get_size_from(&self.asks, price),
             _ => None,
         }
     }
 
-    pub fn get_best(&self) -> (Option<(Price, Amount, u32)>, Option<(Price, Amount, u32)>) {
+    pub fn get_size_of_best(&self) -> (Option<(Price, Amount)>, Option<(Price, Amount)>) {
         (
             self.asks
                 .first_key_value()
-                .map(|(price, v)| (*price, v.amount, v.orders.len() as u32)),
+                .map(|(price, v)| (*price, v.amount)),
             self.bids
                 .last_key_value()
-                .map(|(price, v)| (*price, v.amount, v.orders.len() as u32)),
+                .map(|(price, v)| (*price, v.amount)),
         )
     }
 

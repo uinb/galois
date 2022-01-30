@@ -15,7 +15,10 @@
 use super::*;
 use crate::{assets::Balance, matcher::*, orderbook::AskOrBid, output::Output};
 use sha2::{Digest, Sha256};
-use std::{collections::HashMap, sync::mpsc::Sender};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::mpsc::Sender,
+};
 
 const ACCOUNT_KEY: u8 = 0x00;
 const ORDERBOOK_KEY: u8 = 0x01;
@@ -43,8 +46,8 @@ impl Prover {
         encoded_cmd: FusoCommand,
         ask_size_before: Amount,
         bid_size_before: Amount,
-        best_ask_before: (Price, Amount, u32),
-        best_bid_before: (Price, Amount, u32),
+        best_ask_before: (Price, Amount),
+        best_bid_before: (Price, Amount),
         taker_base_before: &Balance,
         taker_quote_before: &Balance,
         outputs: &[Output],
@@ -78,7 +81,7 @@ impl Prover {
             new_bid_size,
         ));
         let mut maker_accounts = HashMap::<UserId, Output>::new();
-        let mut maker_pages = HashMap::<Price, (Amount, u32, Amount, u32)>::new();
+        let mut maker_pages = BTreeMap::<Price, (Amount, Amount)>::new();
         outputs
             .iter()
             .take_while(|o| o.role == Role::Maker)
@@ -86,12 +89,12 @@ impl Prover {
                 maker_accounts
                     .entry(r.user_id.clone())
                     .and_modify(|out| {
-                        out.quote_charge = out.quote_charge + r.quote_charge;
-                        out.quote_delta = out.quote_delta + r.quote_delta;
+                        out.quote_charge += r.quote_charge;
+                        out.quote_delta += r.quote_delta;
                         out.quote_available = r.quote_available;
                         out.quote_frozen = r.quote_frozen;
-                        out.base_charge = out.base_charge + r.base_charge;
-                        out.base_delta = out.base_delta + r.base_delta;
+                        out.base_charge += r.base_charge;
+                        out.base_delta += r.base_delta;
                         out.base_available = r.base_available;
                         out.base_frozen = r.base_frozen;
                     })
@@ -101,13 +104,12 @@ impl Prover {
                     .and_modify(|page| {
                         // FIXME? also need to handle fee?
                         page.0 += r.base_delta.abs();
-                        page.1 += 1;
                     })
                     .or_insert_with(|| {
                         orderbook
-                            .get_page(&r.price)
-                            .map(|p| (p.0, p.1, p.0, p.1))
-                            .unwrap_or((Amount::zero(), 0, Amount::zero(), 0))
+                            .get_page_size(&r.price)
+                            .map(|s| (r.base_delta.abs() + s, s))
+                            .unwrap_or((r.base_delta.abs(), Amount::zero()))
                     });
             });
         maker_accounts.values().for_each(|r| {
@@ -203,7 +205,7 @@ impl Prover {
             new_taker_qa,
             new_taker_qf,
         ));
-        let (best_ask, best_bid) = orderbook.get_best();
+        let (best_ask, best_bid) = orderbook.get_size_of_best();
         leaves.push(new_bestprice_merkle_leaf(
             symbol,
             best_ask_before.0.to_amount(),
@@ -211,49 +213,44 @@ impl Prover {
             best_ask.map(|a| a.0).unwrap_or(Amount::zero()).to_amount(),
             best_bid.map(|b| b.0).unwrap_or(Amount::zero()).to_amount(),
         ));
-        maker_pages.iter().for_each(|(k, v)| {
-            leaves.push(new_orderpage_merkle_leaf(
-                symbol,
-                k.to_amount(),
-                v.0.to_amount(),
-                v.1,
-                v.2.to_amount(),
-                v.3,
-            ));
-        });
-        if taker.state == State::PartialFilled || taker.state == State::Submitted {
+        let mut pages = maker_pages
+            .iter()
+            .map(|(k, v)| {
+                new_orderpage_merkle_leaf(symbol, k.to_amount(), v.1.to_amount(), v.1.to_amount())
+            })
+            .collect::<Vec<_>>();
+        if taker.ask_or_bid == AskOrBid::Bid {
+            pages.reverse();
+        }
+        leaves.append(&mut pages);
+        if taker.state == State::Submitted {
             // MUST BE
-            let page = orderbook.get_page(&taker.price).unwrap();
-            let (old_amount, old_count) = (
-                page.0 - (taker.base_frozen - taker_base_before.frozen),
-                page.1 - 1,
-            );
+            let page_size = orderbook.get_page_size(&taker.price).unwrap();
+            let size_before = page_size - (taker.base_frozen - taker_base_before.frozen);
             leaves.push(new_orderpage_merkle_leaf(
                 symbol,
                 taker.price.to_amount(),
-                old_amount.to_amount(),
-                old_count,
-                page.0.to_amount(),
-                page.1,
+                size_before.to_amount(),
+                page_size.to_amount(),
             ));
         } else if taker.state == State::Canceled {
-            let page = orderbook
-                .get_page(&taker.price)
-                .unwrap_or((Amount::zero(), 0));
-            let (old_amount, old_count) = (
-                page.0 + (taker_base_before.frozen - taker.base_frozen),
-                page.1 + 1,
-            );
+            let page_size = orderbook
+                .get_page_size(&taker.price)
+                .unwrap_or(Amount::zero());
+            let size_before = page_size + (taker_base_before.frozen - taker.base_frozen);
             leaves.push(new_orderpage_merkle_leaf(
                 symbol,
                 taker.price.to_amount(),
-                old_amount.to_amount(),
-                old_count,
-                page.0.to_amount(),
-                page.1,
+                size_before.to_amount(),
+                page_size.to_amount(),
             ));
-        } else {
-            // Filled, ConditionalCanceled
+        } else if taker.state == State::Filled {
+            // taker_pages.get(&taker.price).unwrap();
+            // leaves.push(new_orderpage_merkle_leaf(
+            //     symbol,
+            //     taker.price.to_amount(),
+            // ));
+        } else if taker.state == State::ConditionalCanceled {
         }
         let (pr0, pr1) = gen_proofs(&mut data.merkle_tree, &leaves);
         self.sender
@@ -440,10 +437,8 @@ fn new_bestprice_merkle_leaf(
 fn new_orderpage_merkle_leaf(
     symbol: Symbol,
     price: u128,
-    old_amount: u128,
-    old_count: u32,
-    new_amount: u128,
-    new_count: u32,
+    old_size: u128,
+    new_size: u128,
 ) -> MerkleLeaf {
     let mut key = vec![ORDERPAGE_KEY; 25];
     key[1..5].copy_from_slice(&symbol.0.to_le_bytes()[..]);
@@ -451,8 +446,8 @@ fn new_orderpage_merkle_leaf(
     key[9..].copy_from_slice(&price.to_le_bytes()[..]);
     MerkleLeaf {
         key,
-        old_v: u128le_to_h256(old_count.into(), old_amount),
-        new_v: u128le_to_h256(new_count.into(), new_amount),
+        old_v: u128le_to_h256(0, old_size),
+        new_v: u128le_to_h256(0, new_size),
     }
 }
 

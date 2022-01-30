@@ -262,7 +262,7 @@ fn handle_event(
                 if #[cfg(feature = "fusotao")] {
                     log::info!("predicate root={:02x?} before applying {}", data.merkle_tree.root(), id);
                     let (ask_size, bid_size) = orderbook.size();
-                    let (best_ask_before, best_bid_before) = orderbook.get_best();
+                    let (best_ask_before, best_bid_before) = orderbook.get_size_of_best();
                     let taker_base_before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.0);
                     let taker_quote_before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.1);
                 }
@@ -297,8 +297,8 @@ fn handle_event(
                         (cmd, maker_fee, taker_fee).into(),
                         ask_size,
                         bid_size,
-                        best_ask_before.unwrap_or((Decimal::zero(), Decimal::zero(), 0)),
-                        best_bid_before.unwrap_or((Decimal::zero(), Decimal::zero(), 0)),
+                        best_ask_before.unwrap_or((Decimal::zero(), Decimal::zero())),
+                        best_bid_before.unwrap_or((Decimal::zero(), Decimal::zero())),
                         &taker_base_before,
                         &taker_quote_before,
                         &out,
@@ -326,7 +326,7 @@ fn handle_event(
                 if #[cfg(feature = "fusotao")] {
                     log::info!("predicate root={:02x?} before applying {}", data.merkle_tree.root(), id);
                     let size = orderbook.size();
-                    let (best_ask_before, best_bid_before) = orderbook.get_best();
+                    let (best_ask_before, best_bid_before) = orderbook.get_size_of_best();
                     let taker_base_before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.0);
                     let taker_quote_before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.1);
                 }
@@ -351,8 +351,8 @@ fn handle_event(
                         cmd.into(),
                         size.0,
                         size.1,
-                        best_ask_before.unwrap_or((Decimal::zero(), Decimal::zero(), 0)),
-                        best_bid_before.unwrap_or((Decimal::zero(), Decimal::zero(), 0)),
+                        best_ask_before.unwrap_or((Decimal::zero(), Decimal::zero())),
+                        best_bid_before.unwrap_or((Decimal::zero(), Decimal::zero())),
                         &taker_base_before,
                         &taker_quote_before,
                         &out,
