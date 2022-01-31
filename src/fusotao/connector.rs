@@ -91,7 +91,7 @@ impl FusoConnector {
 
     fn submit_batch(api: &FusoApi, batch: Vec<RawParameter>) -> anyhow::Result<()> {
         let xt: sub_api::UncheckedExtrinsicV4<_> =
-            sub_api::compose_extrinsic!(api, "Receipts", "verify", batch);
+            sub_api::compose_extrinsic!(api, "Verifier", "verify", batch);
         // TODO
         api.send_extrinsic(xt.hex_encode(), sub_api::XtStatus::InBlock)
             .map_err(|e| anyhow::anyhow!("submit proofs failed, {:?}", e))
@@ -162,28 +162,17 @@ impl FusoConnector {
         at: Option<u32>,
         decoder: &EventsDecoder,
     ) -> anyhow::Result<Vec<sequence::Command>> {
+        use hex::ToHex;
         let hash = api.get_block_hash(at)?;
-        let slices: Option<Vec<u8>> = api.get_storage_value("System", "Events", hash)?;
+        let key = api.metadata.storage_value_key("System", "Events")?;
+        let payload = api.get_opaque_storage_by_key_hash(key, hash)?;
         let events = decoder
-            .decode_events(&mut slices.unwrap_or(vec![]).as_slice())
+            .decode_events(&mut payload.unwrap_or(vec![]).as_slice())
             .unwrap_or(vec![]);
         let mut cmds = vec![];
         for (_, event) in events.into_iter() {
             match event {
-                Raw::Event(raw) if raw.pallet == "Receipts" => match raw.variant.as_ref() {
-                    "CoinHosted" => {
-                        let decoded = CoinHostedEvent::decode(&mut &raw.data[..]).unwrap();
-                        if &decoded.dominator == signer {
-                            let mut cmd = sequence::Command::default();
-                            cmd.cmd = sequence::TRANSFER_IN;
-                            cmd.currency = Some(0);
-                            cmd.amount = Some(to_decimal_represent(decoded.amount));
-                            cmd.user_id = Some(format!("{}", decoded.fund_owner));
-                            cmd.block_number = at.or(Some(0));
-                            cmd.extrinsic_hash = None;
-                            cmds.push(cmd);
-                        }
-                    }
+                Raw::Event(raw) if raw.pallet == "Verifier" => match raw.variant.as_ref() {
                     "TokenHosted" => {
                         let decoded = TokenHostedEvent::decode(&mut &raw.data[..]).unwrap();
                         if &decoded.dominator == signer {
@@ -193,20 +182,8 @@ impl FusoConnector {
                             cmd.amount = Some(to_decimal_represent(decoded.amount));
                             cmd.user_id = Some(format!("{}", decoded.fund_owner));
                             cmd.block_number = at.or(Some(0));
-                            cmd.extrinsic_hash = None;
-                            cmds.push(cmd);
-                        }
-                    }
-                    "CoinRevoked" => {
-                        let decoded = CoinRevokedEvent::decode(&mut &raw.data[..]).unwrap();
-                        if &decoded.dominator == signer {
-                            let mut cmd = sequence::Command::default();
-                            cmd.cmd = sequence::TRANSFER_OUT;
-                            cmd.currency = Some(0);
-                            cmd.amount = Some(to_decimal_represent(decoded.amount));
-                            cmd.user_id = Some(format!("{}", decoded.fund_owner));
-                            cmd.block_number = at.or(Some(0));
-                            cmd.extrinsic_hash = None;
+                            cmd.extrinsic_hash =
+                                hash.map(|h| h.encode_hex()).or(Some("abcdef".to_string()));
                             cmds.push(cmd);
                         }
                     }
@@ -219,7 +196,8 @@ impl FusoConnector {
                             cmd.amount = Some(to_decimal_represent(decoded.amount));
                             cmd.user_id = Some(format!("{}", decoded.fund_owner));
                             cmd.block_number = at.or(Some(0));
-                            cmd.extrinsic_hash = None;
+                            cmd.extrinsic_hash =
+                                hash.map(|h| h.encode_hex()).or(Some("abcdef".to_string()));
                             cmds.push(cmd);
                         }
                     }
