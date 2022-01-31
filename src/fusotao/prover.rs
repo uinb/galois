@@ -639,7 +639,7 @@ mod test {
                 signature: vec![0],
             };
             let (best_ask_before, best_bid_before) =
-                data.orderbooks.get(&(1, 0)).unwrap().get_best();
+                data.orderbooks.get(&(1, 0)).unwrap().get_size_of_best();
             let taker_base_before =
                 assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.0);
             let taker_quote_before =
@@ -682,7 +682,7 @@ mod test {
                 signature: vec![0],
             };
             let (best_ask_before, best_bid_before) =
-                data.orderbooks.get(&(1, 0)).unwrap().get_best();
+                data.orderbooks.get(&(1, 0)).unwrap().get_size_of_best();
             let taker_base_before =
                 assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.0);
             let taker_quote_before =
@@ -725,7 +725,7 @@ mod test {
                 signature: vec![0],
             };
             let (best_ask_before, best_bid_before) =
-                data.orderbooks.get(&(1, 0)).unwrap().get_best();
+                data.orderbooks.get(&(1, 0)).unwrap().get_size_of_best();
             let taker_base_before =
                 assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.0);
             let taker_quote_before =
@@ -768,7 +768,7 @@ mod test {
                 signature: vec![0],
             };
             let (best_ask_before, best_bid_before) =
-                data.orderbooks.get(&(1, 0)).unwrap().get_best();
+                data.orderbooks.get(&(1, 0)).unwrap().get_size_of_best();
             let taker_base_before =
                 assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.0);
             let taker_quote_before =
@@ -812,7 +812,7 @@ mod test {
                 signature: vec![0],
             };
             let (best_ask_before, best_bid_before) =
-                data.orderbooks.get(&(1, 0)).unwrap().get_best();
+                data.orderbooks.get(&(1, 0)).unwrap().get_size_of_best();
             let taker_base_before =
                 assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.0);
             let taker_quote_before =
