@@ -1336,7 +1336,7 @@ mod test {
             let (base, quote) = (0, 1);
             let leaves_count = (4u8 + maker_accounts + pages) as usize;
             assert!(proof.leaves.len() == leaves_count);
-            aseert!(maker_accounts % 2 == 0);
+            assert!(maker_accounts % 2 == 0);
             let price = dec!(9.9).to_amount();
             let amount = dec!(0.5).to_amount();
             let base_charged = dec!(0.0001).to_amount();
