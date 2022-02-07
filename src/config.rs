@@ -139,9 +139,9 @@ fn init_config(toml: &str) -> anyhow::Result<Config> {
         .entry("ws".to_string())
         .or_insert_with(|| Logger::builder().build("ws".to_string(), log::LevelFilter::Error));
     loggers
-        .entry("fusotao_client".to_string())
+        .entry("fusotao_rust_client".to_string())
         .or_insert_with(|| {
-            Logger::builder().build("fusotao_client".to_string(), log::LevelFilter::Error)
+            Logger::builder().build("fusotao_rust_client".to_string(), log::LevelFilter::Error)
         });
     let log = log4rs::Config::builder()
         .loggers::<Vec<_>>(loggers.into_values().collect())

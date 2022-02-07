@@ -242,7 +242,9 @@ pub fn execute_limit(
             cfg_if::cfg_if! {
                 if #[cfg(feature = "fusotao")] {
                     let size_before = book.get_page_size(&order.price).unwrap_or(Amount::zero());
-                    page_delta.insert(order.price, (size_before, size_before + order.unfilled));
+                    page_delta.entry(order.price)
+                        .and_modify(|v| v.1 += order.unfilled)
+                        .or_insert((size_before, size_before + order.unfilled));
                 }
             }
             book.insert(order.clone(), ask_or_bid);

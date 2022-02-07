@@ -16,7 +16,7 @@ use std::{
     collections::HashMap,
     convert::TryInto,
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, Ordering},
         mpsc::{Receiver, Sender},
         Arc,
     },
@@ -183,9 +183,8 @@ pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data, ready: A
             if #[cfg(feature = "fusotao")] {
                 use crate::fusotao;
                 let (tx, rx) = std::sync::mpsc::channel();
-                let proved_event_id = Arc::new(AtomicU64::new(0));
-                let prover = fusotao::Prover::new(tx, proved_event_id.clone());
-                fusotao::init(rx, proved_event_id).unwrap();
+                let proved_event_id = fusotao::init(rx).unwrap();
+                let prover = fusotao::Prover::new(tx, proved_event_id);
             }
         }
         ready.store(true, Ordering::Relaxed);

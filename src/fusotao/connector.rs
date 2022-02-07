@@ -35,8 +35,18 @@ pub struct FusoConnector {
     proved_event_id: Arc<AtomicU64>,
 }
 
+#[derive(Clone, Decode, Debug, Default)]
+pub struct Dominator {
+    pub staked: u128,
+    pub stablecoins: Vec<u32>,
+    pub merkle_root: [u8; 32],
+    pub start_from: u32,
+    pub sequence: (u64, u32),
+    pub active: bool,
+}
+
 impl FusoConnector {
-    pub fn new(proved_event_id: Arc<AtomicU64>) -> anyhow::Result<Self> {
+    pub fn new() -> anyhow::Result<Self> {
         let signer = Sr25519Key::from_string(
             &C.fusotao
                 .as_ref()
@@ -57,17 +67,24 @@ impl FusoConnector {
                 log::error!("{:?}", e);
                 anyhow!("Fusotao node not available or runtime metadata check failed")
             })?;
-        // TODO
         Ok(Self {
             api,
             signer,
-            proved_event_id,
+            proved_event_id: Arc::new(AtomicU64::new(0)),
         })
     }
 
-    // TODO
-    fn sync_proving_progress(&self, finalized: bool) -> anyhow::Result<()> {
-        Ok(())
+    pub fn sync_proving_progress(&self) -> anyhow::Result<Arc<AtomicU64>> {
+        let who = self.signer.public();
+        let key = self
+            .api
+            .metadata
+            .storage_map_key::<FusoAccountId, Option<Dominator>>("Verifier", "Dominators", who)?;
+        let payload = self.api.get_opaque_storage_by_key_hash(key, None)?.unwrap();
+        let result = Dominator::decode(&mut payload.as_slice()).unwrap();
+        self.proved_event_id
+            .store(result.sequence.0, Ordering::Relaxed);
+        Ok(self.proved_event_id.clone())
     }
 
     pub fn start_submitting(&self) -> anyhow::Result<()> {
@@ -83,7 +100,7 @@ impl FusoConnector {
             let proofs = proofs.into_iter().map(|p| p.1).collect::<Vec<_>>();
             match Self::submit_batch(&api, proofs) {
                 Ok(()) => proved_event_id.store(in_block, Ordering::Relaxed),
-                Err(_) => {}
+                Err(e) => log::error!("{:?}", e),
             }
         });
         Ok(())
@@ -92,10 +109,9 @@ impl FusoConnector {
     fn submit_batch(api: &FusoApi, batch: Vec<RawParameter>) -> anyhow::Result<()> {
         let xt: sub_api::UncheckedExtrinsicV4<_> =
             sub_api::compose_extrinsic!(api, "Verifier", "verify", batch);
-        // TODO
         api.send_extrinsic(xt.hex_encode(), sub_api::XtStatus::Broadcast)
             .map_err(|e| anyhow::anyhow!("submit proofs failed, {:?}", e))
-            .map(|_| ())
+            .map(|_| log::info!("submitting proofs ok"))
     }
 
     pub fn start_scanning(&self) -> anyhow::Result<()> {

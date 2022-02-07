@@ -125,20 +125,21 @@ impl WrapperTypeEncode for UserId {}
 /// AccountId of chain = MultiAddress<sp_runtime::AccountId32, ()>::Id = GenericAddress::Id
 /// 1. from_ss58check() or from_ss58check_with_version()
 /// 2. new or from public
-pub fn init(rx: Receiver<Proof>, proved_event_id: Arc<AtomicU64>) -> anyhow::Result<()> {
+pub fn init(rx: Receiver<Proof>) -> anyhow::Result<Arc<AtomicU64>> {
     persistence::init(rx);
-    let connector = connector::FusoConnector::new(proved_event_id)?;
+    let connector = connector::FusoConnector::new()?;
+    let proved = connector.sync_proving_progress()?;
     connector.start_submitting()?;
     connector.start_scanning()?;
     log::info!("fusotao prover initialized");
-    Ok(())
+    Ok(proved)
 }
 
 #[derive(Clone, Encode, Decode, Eq, PartialEq, Debug)]
 pub enum FusoCommand {
     // price, amounnt, maker_fee, taker_fee, base, quote
     AskLimit(
-        (Compact<u64>, Compact<u64>),
+        Compact<u128>,
         Compact<u128>,
         Compact<u32>,
         Compact<u32>,
@@ -146,7 +147,7 @@ pub enum FusoCommand {
         Compact<u32>,
     ),
     BidLimit(
-        (Compact<u64>, Compact<u64>),
+        Compact<u128>,
         Compact<u128>,
         Compact<u32>,
         Compact<u32>,
@@ -160,10 +161,9 @@ pub enum FusoCommand {
 
 impl Into<FusoCommand> for (LimitCmd, Fee, Fee) {
     fn into(self) -> FusoCommand {
-        let (n, f) = self.0.price.to_price();
         match self.0.ask_or_bid {
             AskOrBid::Ask => FusoCommand::AskLimit(
-                (n.into(), f.into()),
+                self.0.price.to_amount().into(),
                 self.0.amount.to_amount().into(),
                 self.1.to_fee().into(),
                 self.2.to_fee().into(),
@@ -171,7 +171,7 @@ impl Into<FusoCommand> for (LimitCmd, Fee, Fee) {
                 self.0.symbol.1.into(),
             ),
             AskOrBid::Bid => FusoCommand::BidLimit(
-                (n.into(), f.into()),
+                self.0.price.to_amount().into(),
                 self.0.amount.to_amount().into(),
                 self.1.to_fee().into(),
                 self.2.to_fee().into(),
