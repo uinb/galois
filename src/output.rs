@@ -20,15 +20,14 @@ use std::{
     time::Duration,
 };
 
-use mysql::{*, prelude::*};
+use mysql::{prelude::*, *};
 use redis::Commands;
 
 use crate::{
     core::*,
     db::{DB, REDIS},
     matcher::*,
-    orderbook::AskOrBid,
-    orderbook::Depth,
+    orderbook::{AskOrBid, Depth},
 };
 
 #[derive(Debug, Clone)]

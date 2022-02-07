@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::BorrowMut;
-use std::net::Shutdown;
-use std::str;
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-    mpsc::Sender,
+use std::{
+    borrow::BorrowMut,
+    net::Shutdown,
+    str,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::Sender,
+        Arc,
+    },
 };
 
 use async_std::{
@@ -27,8 +29,7 @@ use async_std::{
     task,
 };
 use chashmap::CHashMap;
-use futures::channel::mpsc;
-use futures::sink::SinkExt;
+use futures::{channel::mpsc, sink::SinkExt};
 use lazy_static::lazy_static;
 
 use crate::{

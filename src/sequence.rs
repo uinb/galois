@@ -76,8 +76,8 @@ impl TryInto<Event> for Sequence {
                     symbol: self.cmd.symbol().ok_or(anyhow!(""))?,
                     user_id: UserId::from_str(self.cmd.user_id.as_ref().ok_or(anyhow!(""))?)?,
                     order_id: self.cmd.order_id.ok_or(anyhow!(""))?,
-                    price: price,
-                    amount: amount,
+                    price,
+                    amount,
                     ask_or_bid: AskOrBid::try_from(self.cmd.cmd)?,
                     #[cfg(feature = "fusotao")]
                     nonce: self.cmd.nonce.ok_or(anyhow!(""))?,
@@ -267,7 +267,7 @@ impl Watch {
         Self {
             session: 0,
             req_id: 0,
-            cmd: cmd,
+            cmd,
         }
     }
 
@@ -279,7 +279,7 @@ impl Watch {
         Self {
             session: 0,
             req_id: 0,
-            cmd: cmd,
+            cmd,
         }
     }
 
@@ -290,7 +290,7 @@ impl Watch {
         Self {
             session: 0,
             req_id: 0,
-            cmd: cmd,
+            cmd,
         }
     }
 
@@ -302,7 +302,7 @@ impl Watch {
         Self {
             session: 0,
             req_id: 0,
-            cmd: cmd,
+            cmd,
         }
     }
 }

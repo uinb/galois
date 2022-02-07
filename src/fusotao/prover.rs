@@ -12,17 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-use std::sync::mpsc::Sender;
-
-use sha2::{Digest, Sha256};
-
-use crate::{assets::Balance, core::*, matcher::*, orderbook::AskOrBid, output::Output};
-
 use super::*;
+use crate::{assets::Balance, matcher::*, orderbook::AskOrBid, output::Output};
+use sha2::{Digest, Sha256};
+use std::{collections::HashMap, sync::mpsc::Sender};
 
 const ACCOUNT_KEY: u8 = 0x00;
 const ORDERBOOK_KEY: u8 = 0x01;
+const BESTPRICE_KEY: u8 = 0x02;
+const ORDERPAGE_KEY: u8 = 0x03;
 
 pub struct Prover {
     pub sender: Sender<Proof>,
@@ -33,7 +31,7 @@ impl Prover {
     pub fn new(tx: Sender<Proof>, proved_event_id: Arc<AtomicU64>) -> Self {
         Self {
             sender: tx,
-            proved_event_id: proved_event_id,
+            proved_event_id,
         }
     }
 
@@ -45,9 +43,12 @@ impl Prover {
         encoded_cmd: FusoCommand,
         ask_size_before: Amount,
         bid_size_before: Amount,
+        best_ask_before: (Price, Amount),
+        best_bid_before: (Price, Amount),
         taker_base_before: &Balance,
         taker_quote_before: &Balance,
         outputs: &[Output],
+        matches: &Match,
     ) {
         let mut leaves = vec![];
         let taker = outputs.last().unwrap();
@@ -77,26 +78,26 @@ impl Prover {
             new_ask_size,
             new_bid_size,
         ));
-        let mut makers = HashMap::<UserId, Output>::new();
+        let mut maker_accounts = HashMap::<UserId, Output>::new();
         outputs
             .iter()
             .take_while(|o| o.role == Role::Maker)
             .for_each(|r| {
-                makers
+                maker_accounts
                     .entry(r.user_id.clone())
                     .and_modify(|out| {
-                        out.quote_charge = out.quote_charge + r.quote_charge;
-                        out.quote_delta = out.quote_delta + r.quote_delta;
+                        out.quote_charge += r.quote_charge;
+                        out.quote_delta += r.quote_delta;
                         out.quote_available = r.quote_available;
                         out.quote_frozen = r.quote_frozen;
-                        out.base_charge = out.base_charge + r.base_charge;
-                        out.base_delta = out.base_delta + r.base_delta;
+                        out.base_charge += r.base_charge;
+                        out.base_delta += r.base_delta;
                         out.base_available = r.base_available;
                         out.base_frozen = r.base_frozen;
                     })
                     .or_insert_with(|| r.clone());
             });
-        makers.into_values().for_each(|r| {
+        maker_accounts.values().for_each(|r| {
             log::debug!("{:?}", r);
             let (ba, bf, qa, qf) = match r.ask_or_bid {
                 // -base_frozen, +quote_available
@@ -189,18 +190,38 @@ impl Prover {
             new_taker_qa,
             new_taker_qf,
         ));
+        let (best_ask, best_bid) = orderbook.get_size_of_best();
+        leaves.push(new_bestprice_merkle_leaf(
+            symbol,
+            best_ask_before.0.to_amount(),
+            best_bid_before.0.to_amount(),
+            best_ask.map(|a| a.0).unwrap_or(Amount::zero()).to_amount(),
+            best_bid.map(|b| b.0).unwrap_or(Amount::zero()).to_amount(),
+        ));
+        let mut pages = matches
+            .page_delta
+            .iter()
+            .map(|(k, v)| {
+                new_orderpage_merkle_leaf(symbol, k.to_amount(), v.0.to_amount(), v.1.to_amount())
+            })
+            .collect::<Vec<_>>();
+        if taker.ask_or_bid == AskOrBid::Bid && !pages.is_empty() {
+            pages.reverse();
+        }
+        leaves.append(&mut pages);
         let (pr0, pr1) = gen_proofs(&mut data.merkle_tree, &leaves);
         self.sender
             .send(Proof {
-                event_id: event_id,
-                user_id: user_id,
-                nonce: nonce,
-                signature: signature,
+                event_id,
+                user_id,
+                nonce,
+                signature,
                 cmd: encoded_cmd,
-                leaves: leaves,
+                leaves,
+                maker_page_delta: matches.page_delta.len() as u8,
+                maker_account_delta: maker_accounts.len() as u8,
                 proof_of_exists: pr0,
                 proof_of_cmd: pr1,
-                // TODO redundant clone because &H256 doesn't implement Into<[u8; 32]>
                 root: data.merkle_tree.root().clone().into(),
             })
             .unwrap();
@@ -231,12 +252,14 @@ impl Prover {
         let (pr0, pr1) = gen_proofs(merkle_tree, &leaves);
         self.sender
             .send(Proof {
-                event_id: event_id,
+                event_id,
                 user_id: cmd.user_id,
                 nonce: cmd.block_number,
                 signature: cmd.extrinsic_hash.clone(),
                 cmd: cmd.into(),
-                leaves: leaves,
+                leaves,
+                maker_page_delta: 0,
+                maker_account_delta: 0,
                 proof_of_exists: pr0,
                 proof_of_cmd: pr1,
                 root: merkle_tree.root().clone().into(),
@@ -268,12 +291,14 @@ impl Prover {
         if &old_root != merkle_tree.root() {
             self.sender
                 .send(Proof {
-                    event_id: event_id,
+                    event_id,
                     user_id: cmd.user_id,
                     nonce: cmd.block_number,
                     signature: cmd.extrinsic_hash.clone(),
                     cmd: cmd.into(),
-                    leaves: leaves,
+                    leaves,
+                    maker_page_delta: 0,
+                    maker_account_delta: 0,
                     proof_of_exists: pr0,
                     proof_of_cmd: pr1,
                     root: merkle_tree.root().clone().into(),
@@ -326,7 +351,7 @@ fn new_account_merkle_leaf(
     key[1..33].copy_from_slice(<B256 as AsRef<[u8]>>::as_ref(user_id));
     key[33..].copy_from_slice(&currency.to_le_bytes()[..]);
     MerkleLeaf {
-        key: key,
+        key,
         old_v: u128le_to_h256(old_available, old_frozen),
         new_v: u128le_to_h256(new_available, new_frozen),
     }
@@ -343,20 +368,62 @@ fn new_orderbook_merkle_leaf(
     key[1..5].copy_from_slice(&symbol.0.to_le_bytes()[..]);
     key[5..].copy_from_slice(&symbol.1.to_le_bytes()[..]);
     MerkleLeaf {
-        key: key,
+        key,
         old_v: u128le_to_h256(old_ask_size, old_bid_size),
         new_v: u128le_to_h256(new_ask_size, new_bid_size),
     }
 }
 
+fn new_bestprice_merkle_leaf(
+    symbol: Symbol,
+    old_best_ask: u128,
+    old_best_bid: u128,
+    new_best_ask: u128,
+    new_best_bid: u128,
+) -> MerkleLeaf {
+    let mut key = vec![BESTPRICE_KEY; 9];
+    key[1..5].copy_from_slice(&symbol.0.to_le_bytes()[..]);
+    key[5..].copy_from_slice(&symbol.1.to_le_bytes()[..]);
+    MerkleLeaf {
+        key,
+        old_v: u128le_to_h256(old_best_ask, old_best_bid),
+        new_v: u128le_to_h256(new_best_ask, new_best_bid),
+    }
+}
+
+fn new_orderpage_merkle_leaf(
+    symbol: Symbol,
+    price: u128,
+    old_size: u128,
+    new_size: u128,
+) -> MerkleLeaf {
+    let mut key = vec![ORDERPAGE_KEY; 25];
+    key[1..5].copy_from_slice(&symbol.0.to_le_bytes()[..]);
+    key[5..9].copy_from_slice(&symbol.1.to_le_bytes()[..]);
+    key[9..].copy_from_slice(&price.to_le_bytes()[..]);
+    MerkleLeaf {
+        key,
+        old_v: u128le_to_h256(0, old_size),
+        new_v: u128le_to_h256(0, new_size),
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
-    use std::sync::atomic::AtomicU64;
+    use std::sync::{atomic::AtomicU64, Arc};
 
     use rust_decimal_macros::dec;
     use sha2::{Digest, Sha256};
-    use smt::{CompiledMerkleProof, H256, sha256::Sha256Hasher};
+    use smt::{sha256::Sha256Hasher, CompiledMerkleProof, H256};
+
+    impl UserId {
+        // adapt to legacy code
+        pub fn from_low_u64_be(x: u64) -> Self {
+            let mut s = [0u8; 32];
+            s[24..].copy_from_slice(&x.to_be_bytes());
+            Self::new(s)
+        }
+    }
 
     use crate::{assets, clearing, core::*, fusotao::*, matcher, orderbook::*};
 
@@ -520,9 +587,9 @@ mod test {
             let (mf, tf) = (orderbook.maker_fee, orderbook.taker_fee);
             orderbooks.insert((1, 0), orderbook);
             let mut data = Data {
-                orderbooks: orderbooks,
+                orderbooks,
                 accounts: all,
-                merkle_tree: merkle_tree,
+                merkle_tree,
                 current_event_id: 0,
             };
 
@@ -537,6 +604,8 @@ mod test {
                 nonce: 1,
                 signature: vec![0],
             };
+            let (best_ask_before, best_bid_before) =
+                data.orderbooks.get(&(1, 0)).unwrap().get_size_of_best();
             let taker_base_before =
                 assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.0);
             let taker_quote_before =
@@ -560,9 +629,12 @@ mod test {
                 (cmd2, mf, tf).into(),
                 size.0,
                 size.1,
+                best_ask_before.unwrap_or((Decimal::zero(), Decimal::zero())),
+                best_bid_before.unwrap_or((Decimal::zero(), Decimal::zero())),
                 &taker_base_before,
                 &taker_quote_before,
                 &cr,
+                &mr,
             );
 
             let size = data.orderbooks.get(&(1, 0)).unwrap().size();
@@ -576,6 +648,8 @@ mod test {
                 nonce: 1,
                 signature: vec![0],
             };
+            let (best_ask_before, best_bid_before) =
+                data.orderbooks.get(&(1, 0)).unwrap().get_size_of_best();
             let taker_base_before =
                 assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.0);
             let taker_quote_before =
@@ -599,9 +673,12 @@ mod test {
                 (cmd2, mf, tf).into(),
                 size.0,
                 size.1,
+                best_ask_before.unwrap_or((Decimal::zero(), Decimal::zero())),
+                best_bid_before.unwrap_or((Decimal::zero(), Decimal::zero())),
                 &taker_base_before,
                 &taker_quote_before,
                 &cr,
+                &mr,
             );
 
             let size = data.orderbooks.get(&(1, 0)).unwrap().size();
@@ -615,6 +692,8 @@ mod test {
                 nonce: 1,
                 signature: vec![0],
             };
+            let (best_ask_before, best_bid_before) =
+                data.orderbooks.get(&(1, 0)).unwrap().get_size_of_best();
             let taker_base_before =
                 assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.0);
             let taker_quote_before =
@@ -638,9 +717,12 @@ mod test {
                 (cmd2, mf, tf).into(),
                 size.0,
                 size.1,
+                best_ask_before.unwrap_or((Decimal::zero(), Decimal::zero())),
+                best_bid_before.unwrap_or((Decimal::zero(), Decimal::zero())),
                 &taker_base_before,
                 &taker_quote_before,
                 &cr,
+                &mr,
             );
 
             let size = data.orderbooks.get(&(1, 0)).unwrap().size();
@@ -654,6 +736,8 @@ mod test {
                 nonce: 1,
                 signature: vec![0],
             };
+            let (best_ask_before, best_bid_before) =
+                data.orderbooks.get(&(1, 0)).unwrap().get_size_of_best();
             let taker_base_before =
                 assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.0);
             let taker_quote_before =
@@ -677,9 +761,12 @@ mod test {
                 (cmd2, mf, tf).into(),
                 size.0,
                 size.1,
+                best_ask_before.unwrap_or((Decimal::zero(), Decimal::zero())),
+                best_bid_before.unwrap_or((Decimal::zero(), Decimal::zero())),
                 &taker_base_before,
                 &taker_quote_before,
                 &cr,
+                &mr,
             );
             println!("{:?}", cr.last().unwrap());
 
@@ -694,6 +781,8 @@ mod test {
                 nonce: 1,
                 signature: vec![0],
             };
+            let (best_ask_before, best_bid_before) =
+                data.orderbooks.get(&(1, 0)).unwrap().get_size_of_best();
             let taker_base_before =
                 assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.0);
             let taker_quote_before =
@@ -717,9 +806,12 @@ mod test {
                 (cmd2, mf, tf).into(),
                 size.0,
                 size.1,
+                best_ask_before.unwrap_or((Decimal::zero(), Decimal::zero())),
+                best_bid_before.unwrap_or((Decimal::zero(), Decimal::zero())),
                 &taker_base_before,
                 &taker_quote_before,
                 &cr,
+                &mr,
             );
         });
         // ignore transfer in

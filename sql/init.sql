@@ -6,7 +6,12 @@ CREATE TABLE `t_sequence` (
   PRIMARY KEY (`f_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
--- TODO data type
+CREATE TABLE IF NOT EXISTS `t_proof` (
+  `f_event_id` bigint unsigned NOT NULL,
+  `f_proof` blob NOT NULL,
+  PRIMARY KEY (`f_event_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 CREATE TABLE `t_clearing_result` (
   `f_id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `f_event_id` bigint unsigned NOT NULL,
