@@ -113,9 +113,9 @@ features = ["serde-rs", "sha256"]
 optional = true
 
 [dependencies.sub-api]
-git = "https://github.com/uinb/fusotao-rust-client.git"
 package = "fusotao-rust-client"
-branch = "polkadot-v0.9.12"
+git = "https://github.com/uinb/fusotao-rust-client.git"
+branch = "polkadot-v0.9.13"
 optional = true
 
 [dependencies.parity-scale-codec]
@@ -125,18 +125,15 @@ optional = true
 
 [dependencies.sp-core]
 git = "https://github.com/paritytech/substrate.git"
-branch = "polkadot-v0.9.12"
+branch = "polkadot-v0.9.13"
 package = "sp-core"
 optional = true
 
 [dependencies.sp-runtime]
 git = "https://github.com/paritytech/substrate.git"
-branch = "polkadot-v0.9.12"
+branch = "polkadot-v0.9.13"
 package = "sp-runtime"
 optional = true
 
 [dev-dependencies]
 tempdir = "0.3"
-
-# [patch.crates-io]
-# crypto-mac = { git = "https://github.com/uinb/traits", package = "crypto-mac", tag = "crypto-mac-v0.7.0" }

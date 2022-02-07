@@ -219,7 +219,7 @@ impl Prover {
                 cmd: encoded_cmd,
                 leaves,
                 maker_page_delta: matches.page_delta.len() as u8,
-                maker_account_delta: maker_accounts.len() as u8,
+                maker_account_delta: maker_accounts.len() as u8 * 2,
                 proof_of_exists: pr0,
                 proof_of_cmd: pr1,
                 root: data.merkle_tree.root().clone().into(),
@@ -422,6 +422,77 @@ mod test {
             let mut s = [0u8; 32];
             s[24..].copy_from_slice(&x.to_be_bytes());
             Self::new(s)
+        }
+    }
+
+    impl MerkleLeaf {
+        const ACCOUNT_KEY: u8 = 0x00;
+        const BESTPRICE_KEY: u8 = 0x02;
+        const ORDERBOOK_KEY: u8 = 0x01;
+        const ORDERPAGE_KEY: u8 = 0x03;
+
+        fn try_get_account(&self) -> anyhow::Result<(u32, [u8; 32])> {
+            if self.key.len() != 37 {
+                return Err(anyhow::anyhow!(""));
+            }
+            match self.key[0] {
+                Self::ACCOUNT_KEY => Ok((
+                    u32::from_le_bytes(self.key[33..].try_into().map_err(|_| anyhow::anyhow!(""))?),
+                    <[u8; 32]>::decode(&mut &self.key[1..33]).map_err(|_| anyhow::anyhow!(""))?,
+                )),
+                _ => Err(anyhow::anyhow!("")),
+            }
+        }
+
+        fn try_get_symbol(&self) -> anyhow::Result<(u32, u32)> {
+            if self.key.len() != 9 {
+                return Err(anyhow::anyhow!(""));
+            }
+            match self.key[0] {
+                Self::ORDERBOOK_KEY | Self::BESTPRICE_KEY => Ok((
+                    u32::from_le_bytes(self.key[1..5].try_into().map_err(|_| anyhow::anyhow!(""))?),
+                    u32::from_le_bytes(self.key[5..].try_into().map_err(|_| anyhow::anyhow!(""))?),
+                )),
+                _ => Err(anyhow::anyhow!("")),
+            }
+        }
+
+        fn try_get_orderpage(&self) -> anyhow::Result<(u32, u32, u128)> {
+            if self.key.len() != 25 {
+                return Err(anyhow::anyhow!(""));
+            }
+            match self.key[0] {
+                Self::ORDERPAGE_KEY => Ok((
+                    u32::from_le_bytes(self.key[1..5].try_into().map_err(|_| anyhow::anyhow!(""))?),
+                    u32::from_le_bytes(self.key[5..9].try_into().map_err(|_| anyhow::anyhow!(""))?),
+                    u128::from_le_bytes(self.key[9..].try_into().map_err(|_| anyhow::anyhow!(""))?),
+                )),
+                _ => Err(anyhow::anyhow!("")),
+            }
+        }
+
+        fn split_value(v: &[u8; 32]) -> ([u8; 16], [u8; 16]) {
+            (v[..16].try_into().unwrap(), v[16..].try_into().unwrap())
+        }
+
+        fn split_old_to_u128(&self) -> (u128, u128) {
+            let (l, r) = Self::split_value(&self.old_v);
+            (u128::from_le_bytes(l), u128::from_le_bytes(r))
+        }
+
+        fn split_old_to_sum(&self) -> u128 {
+            let (l, r) = self.split_old_to_u128();
+            l + r
+        }
+
+        fn split_new_to_u128(&self) -> (u128, u128) {
+            let (l, r) = Self::split_value(&self.new_v);
+            (u128::from_le_bytes(l), u128::from_le_bytes(r))
+        }
+
+        fn split_new_to_sum(&self) -> u128 {
+            let (l, r) = self.split_new_to_u128();
+            l + r
         }
     }
 
@@ -820,6 +891,7 @@ mod test {
         // ask 0.11, 100
         {
             let proof = rx.recv().unwrap();
+            assert_eq!(proof.leaves.len(), 5);
             // ask,bid
             assert_eq!(split_h256_u128(&proof.leaves[0].old_v), (0, 0));
             assert_eq!(
@@ -838,6 +910,18 @@ mod test {
             // quote
             assert_eq!(split_h256_u128(&proof.leaves[2].old_v), (0, 0));
             assert_eq!(split_h256_u128(&proof.leaves[2].new_v), (0, 0));
+            // best price a,b
+            assert_eq!(split_h256_u128(&proof.leaves[3].old_v), (0, 0));
+            assert_eq!(
+                split_h256_u128(&proof.leaves[3].new_v),
+                (100_000000000000000000, 0)
+            );
+            // orderpage at 100 = 0.11
+            assert_eq!(split_h256_u128_sum(&proof.leaves[4].old_v), 0);
+            assert_eq!(
+                split_h256_u128_sum(&proof.leaves[4].new_v),
+                110000000000000000
+            );
         }
         // bid 0.01, 90
         {
@@ -965,6 +1049,360 @@ mod test {
             let tq0 = split_h256_u128_sum(&proof.leaves[4].old_v);
             let tq1 = split_h256_u128_sum(&proof.leaves[4].new_v);
             assert_eq!(decr_quote / 1000 * 999, tq1 - tq0);
+        }
+    }
+
+    #[test]
+    pub fn test_price() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut merkle_tree = GlobalStates::default();
+            let pp = Prover::new(tx, Arc::new(AtomicU64::new(0)));
+            let mut all = Accounts::new();
+            let orderbook = construct_pair();
+            let cmd0 = AssetsCmd {
+                user_id: UserId::from_low_u64_be(1),
+                in_or_out: InOrOut::In,
+                currency: 0,
+                amount: dec!(100),
+                block_number: 1,
+                extrinsic_hash: vec![0],
+            };
+            let after =
+                assets::add_to_available(&mut all, &cmd0.user_id, cmd0.currency, cmd0.amount)
+                    .unwrap();
+            pp.prove_assets_cmd(
+                &mut merkle_tree,
+                1,
+                cmd0,
+                &assets::Balance::default(),
+                &after,
+            );
+            let cmd1 = AssetsCmd {
+                user_id: UserId::from_low_u64_be(2),
+                in_or_out: InOrOut::In,
+                currency: 1,
+                amount: dec!(1000),
+                block_number: 1,
+                extrinsic_hash: vec![0],
+            };
+            let transfer_again =
+                assets::add_to_available(&mut all, &cmd1.user_id, cmd1.currency, cmd1.amount)
+                    .unwrap();
+            pp.prove_assets_cmd(&mut merkle_tree, 1, cmd1, &after, &transfer_again);
+
+            let mut orderbooks = std::collections::HashMap::new();
+            let (mf, tf) = (orderbook.maker_fee, orderbook.taker_fee);
+            orderbooks.insert((0, 1), orderbook);
+            let mut data = Data {
+                orderbooks,
+                accounts: all,
+                merkle_tree,
+                current_event_id: 0,
+            };
+
+            // alice ask p=10, a=0.5
+            {
+                let size = data.orderbooks.get(&(0, 1)).unwrap().size();
+                let cmd2 = LimitCmd {
+                    symbol: (0, 1),
+                    user_id: UserId::from_low_u64_be(1),
+                    order_id: 1,
+                    price: dec!(10),
+                    amount: dec!(0.5),
+                    ask_or_bid: AskOrBid::Ask,
+                    nonce: 1,
+                    signature: vec![0],
+                };
+                let (best_ask_before, best_bid_before) =
+                    data.orderbooks.get(&(0, 1)).unwrap().get_size_of_best();
+                let taker_base_before =
+                    assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.0);
+                let taker_quote_before =
+                    assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.1);
+                let (c, val) =
+                    assets::freeze_if(&cmd2.symbol, cmd2.ask_or_bid, cmd2.price, cmd2.amount);
+                assets::try_freeze(&mut data.accounts, &cmd2.user_id, c, val).unwrap();
+                let mr = matcher::execute_limit(
+                    data.orderbooks.get_mut(&(0, 1)).unwrap(),
+                    cmd2.user_id,
+                    cmd2.order_id,
+                    cmd2.price,
+                    cmd2.amount,
+                    cmd2.ask_or_bid,
+                );
+                let cr = clearing::clear(&mut data.accounts, 3, &(0, 1), tf, mf, &mr, 0);
+                pp.prove_trade_cmd(
+                    &mut data,
+                    cmd2.nonce,
+                    cmd2.signature.clone(),
+                    (cmd2, mf, tf).into(),
+                    size.0,
+                    size.1,
+                    best_ask_before.unwrap_or((Decimal::zero(), Decimal::zero())),
+                    best_bid_before.unwrap_or((Decimal::zero(), Decimal::zero())),
+                    &taker_base_before,
+                    &taker_quote_before,
+                    &cr,
+                    &mr,
+                );
+            }
+            // alice ask p=10, a=0.6
+            {
+                let size = data.orderbooks.get(&(0, 1)).unwrap().size();
+                let cmd2 = LimitCmd {
+                    symbol: (0, 1),
+                    user_id: UserId::from_low_u64_be(1),
+                    order_id: 2,
+                    price: dec!(10),
+                    amount: dec!(0.6),
+                    ask_or_bid: AskOrBid::Ask,
+                    nonce: 1,
+                    signature: vec![0],
+                };
+                let (best_ask_before, best_bid_before) =
+                    data.orderbooks.get(&(0, 1)).unwrap().get_size_of_best();
+                let taker_base_before =
+                    assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.0);
+                let taker_quote_before =
+                    assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.1);
+                let (c, val) =
+                    assets::freeze_if(&cmd2.symbol, cmd2.ask_or_bid, cmd2.price, cmd2.amount);
+                assets::try_freeze(&mut data.accounts, &cmd2.user_id, c, val).unwrap();
+                let mr = matcher::execute_limit(
+                    data.orderbooks.get_mut(&(0, 1)).unwrap(),
+                    cmd2.user_id,
+                    cmd2.order_id,
+                    cmd2.price,
+                    cmd2.amount,
+                    cmd2.ask_or_bid,
+                );
+                let cr = clearing::clear(&mut data.accounts, 4, &(0, 1), tf, mf, &mr, 0);
+                pp.prove_trade_cmd(
+                    &mut data,
+                    cmd2.nonce,
+                    cmd2.signature.clone(),
+                    (cmd2, mf, tf).into(),
+                    size.0,
+                    size.1,
+                    best_ask_before.unwrap_or((Decimal::zero(), Decimal::zero())),
+                    best_bid_before.unwrap_or((Decimal::zero(), Decimal::zero())),
+                    &taker_base_before,
+                    &taker_quote_before,
+                    &cr,
+                    &mr,
+                );
+            }
+            // alice ask p=10, a=0.6
+            {
+                let size = data.orderbooks.get(&(0, 1)).unwrap().size();
+                let cmd2 = LimitCmd {
+                    symbol: (0, 1),
+                    user_id: UserId::from_low_u64_be(1),
+                    order_id: 3,
+                    price: dec!(9.9),
+                    amount: dec!(0.1),
+                    ask_or_bid: AskOrBid::Ask,
+                    nonce: 1,
+                    signature: vec![0],
+                };
+                let (best_ask_before, best_bid_before) =
+                    data.orderbooks.get(&(0, 1)).unwrap().get_size_of_best();
+                let taker_base_before =
+                    assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.0);
+                let taker_quote_before =
+                    assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.1);
+                let (c, val) =
+                    assets::freeze_if(&cmd2.symbol, cmd2.ask_or_bid, cmd2.price, cmd2.amount);
+                assets::try_freeze(&mut data.accounts, &cmd2.user_id, c, val).unwrap();
+                let mr = matcher::execute_limit(
+                    data.orderbooks.get_mut(&(0, 1)).unwrap(),
+                    cmd2.user_id,
+                    cmd2.order_id,
+                    cmd2.price,
+                    cmd2.amount,
+                    cmd2.ask_or_bid,
+                );
+                let cr = clearing::clear(&mut data.accounts, 5, &(0, 1), tf, mf, &mr, 0);
+                pp.prove_trade_cmd(
+                    &mut data,
+                    cmd2.nonce,
+                    cmd2.signature.clone(),
+                    (cmd2, mf, tf).into(),
+                    size.0,
+                    size.1,
+                    best_ask_before.unwrap_or((Decimal::zero(), Decimal::zero())),
+                    best_bid_before.unwrap_or((Decimal::zero(), Decimal::zero())),
+                    &taker_base_before,
+                    &taker_quote_before,
+                    &cr,
+                    &mr,
+                );
+            }
+            // bob p=9.9, a=0.5
+            {
+                let size = data.orderbooks.get(&(0, 1)).unwrap().size();
+                let cmd2 = LimitCmd {
+                    symbol: (0, 1),
+                    user_id: UserId::from_low_u64_be(2),
+                    order_id: 4,
+                    price: dec!(9.9),
+                    amount: dec!(0.5),
+                    ask_or_bid: AskOrBid::Bid,
+                    nonce: 1,
+                    signature: vec![0],
+                };
+                let (best_ask_before, best_bid_before) =
+                    data.orderbooks.get(&(0, 1)).unwrap().get_size_of_best();
+                let taker_base_before =
+                    assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.0);
+                let taker_quote_before =
+                    assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.1);
+                let (c, val) =
+                    assets::freeze_if(&cmd2.symbol, cmd2.ask_or_bid, cmd2.price, cmd2.amount);
+                assets::try_freeze(&mut data.accounts, &cmd2.user_id, c, val).unwrap();
+                let mr = matcher::execute_limit(
+                    data.orderbooks.get_mut(&(0, 1)).unwrap(),
+                    cmd2.user_id,
+                    cmd2.order_id,
+                    cmd2.price,
+                    cmd2.amount,
+                    cmd2.ask_or_bid,
+                );
+                let cr = clearing::clear(&mut data.accounts, 6, &(0, 1), tf, mf, &mr, 0);
+                pp.prove_trade_cmd(
+                    &mut data,
+                    cmd2.nonce,
+                    cmd2.signature.clone(),
+                    (cmd2, mf, tf).into(),
+                    size.0,
+                    size.1,
+                    best_ask_before.unwrap_or((Decimal::zero(), Decimal::zero())),
+                    best_bid_before.unwrap_or((Decimal::zero(), Decimal::zero())),
+                    &taker_base_before,
+                    &taker_quote_before,
+                    &cr,
+                    &mr,
+                );
+            }
+        });
+        // ignore transfer in
+        rx.recv().unwrap();
+        rx.recv().unwrap();
+        /*
+         * ignore ask
+         * 1. p=10, a=0.5
+         * 2. p=10, a=0.6
+         * 3. p=9.9, a=0.1
+         */
+        rx.recv().unwrap();
+        rx.recv().unwrap();
+        rx.recv().unwrap();
+        // bid p=9.9, a=0.5
+        {
+            let proof = rx.recv().unwrap();
+            assert_eq!(proof.leaves.len(), 7);
+            // best price a,b
+            assert_eq!(
+                split_h256_u128(&proof.leaves[5].old_v),
+                (dec!(9.9).to_amount(), 0)
+            );
+            assert_eq!(
+                split_h256_u128(&proof.leaves[5].new_v),
+                (dec!(10).to_amount(), dec!(9.9).to_amount())
+            );
+            assert_eq!(
+                &proof.leaves[5].old_v,
+                &hex::decode("00005e2c8cdd6389000000000000000000000000000000000000000000000000")
+                    .unwrap()[..]
+            );
+            assert_eq!(
+                &proof.leaves[5].new_v,
+                &hex::decode("0000e8890423c78a000000000000000000005e2c8cdd63890000000000000000")
+                    .unwrap()[..]
+            );
+            // p=9.9
+            assert_eq!(
+                split_h256_u128_sum(&proof.leaves[6].old_v),
+                dec!(0.1).to_amount()
+            );
+            assert_eq!(
+                split_h256_u128_sum(&proof.leaves[6].new_v),
+                dec!(0.4).to_amount()
+            );
+
+            let maker_accounts = 2u8;
+            let pages = 1u8;
+            let (base, quote) = (0, 1);
+            let leaves_count = (4u8 + maker_accounts + pages) as usize;
+            assert!(proof.leaves.len() == leaves_count);
+            aseert!(maker_accounts % 2 == 0);
+            let price = dec!(9.9).to_amount();
+            let amount = dec!(0.5).to_amount();
+            let base_charged = dec!(0.0001).to_amount();
+
+            let (ask0, bid0) = proof.leaves[0].split_old_to_u128();
+            let (ask1, bid1) = proof.leaves[0].split_new_to_u128();
+            let ask_delta = ask0 - ask1;
+            let bid_delta = bid1 - bid0;
+            let taker_base = &proof.leaves[maker_accounts as usize + 1];
+            let (tba0, tbf0) = taker_base.split_old_to_u128();
+            let (tba1, tbf1) = taker_base.split_new_to_u128();
+            let tb_delta = (tba1 + tbf1) - (tba0 + tbf0);
+
+            let best_price = &proof.leaves[maker_accounts as usize + 3];
+            let (b, q) = best_price.try_get_symbol().unwrap();
+            assert!(b == base && q == quote);
+            let (best_ask0, best_bid0) = best_price.split_old_to_u128();
+            let (best_ask1, best_bid1) = best_price.split_new_to_u128();
+
+            if ask_delta != 0 {
+                // trading happened
+                assert!(pages > 0 && price >= best_ask0,);
+                // best_ask0 <= page0 < page1 < .. < pagen <= best_ask1
+                let mut pre_best = best_ask0;
+                let mut taken_asks = 0u128;
+                for i in 0..pages as usize - 1 {
+                    let page = &proof.leaves[maker_accounts as usize + 4 + i];
+                    let (b, q, p) = page.try_get_orderpage().unwrap();
+                    assert!(b == base && q == quote,);
+                    assert!(pre_best <= p,);
+                    pre_best = p;
+                    assert!(page.split_new_to_sum() == 0);
+                    taken_asks += page.split_old_to_sum();
+                }
+                if bid_delta != 0 {
+                    // partial_filled
+                    let taker_price_page = proof.leaves.last().unwrap();
+                    let (b, q, p) = taker_price_page.try_get_orderpage().unwrap();
+                    assert!(b == base && q == quote && p == price,);
+                    assert!(best_bid1 == price,);
+                    let prv_is_maker = taker_price_page.split_old_to_sum();
+                    let now_is_taker = taker_price_page.split_new_to_sum();
+                    assert!(taken_asks + prv_is_maker + now_is_taker == amount,);
+                } else {
+                    // filled or conditional_canceled
+                    let vanity_maker = proof.leaves.last().unwrap();
+                    let (b, q, p) = vanity_maker.try_get_orderpage().unwrap();
+                    assert!(b == base && q == quote && p == price,);
+                    assert!(best_bid1 == best_bid0,);
+                    let prv_is_maker = vanity_maker.split_old_to_sum();
+                    let now_is_maker = vanity_maker.split_new_to_sum();
+                    assert!(tb_delta + base_charged == taken_asks + prv_is_maker - now_is_maker,);
+                }
+            } else {
+                // no trading
+                assert!(best_ask1 == best_ask0,);
+                if bid_delta != 0 {
+                    // placed
+                    let taker_price_page = proof.leaves.last().unwrap();
+                    let (b, q, p) = taker_price_page.try_get_orderpage().unwrap();
+                    assert!(b == base && q == quote && p == price,);
+                    let prv_is_maker = taker_price_page.split_old_to_sum();
+                    let now_is_maker = taker_price_page.split_new_to_sum();
+                    assert!(amount == now_is_maker - prv_is_maker,);
+                }
+            }
         }
     }
 }
