@@ -302,6 +302,7 @@ fn handle_event(
                         &taker_base_before,
                         &taker_quote_before,
                         &out,
+                        &mr,
                     );
                 }
             }
@@ -356,6 +357,7 @@ fn handle_event(
                         &taker_base_before,
                         &taker_quote_before,
                         &out,
+                        &mr,
                     );
                 }
             }

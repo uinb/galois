@@ -315,6 +315,7 @@ pub fn clear(
 
 #[allow(unused_must_use)]
 #[cfg(test)]
+#[cfg(not(feature = "fusotao"))]
 pub mod test {
     use rust_decimal::{prelude::Zero, Decimal};
     use rust_decimal_macros::dec;

@@ -171,6 +171,8 @@ impl Maker {
 pub struct Match {
     pub maker: Vec<Maker>,
     pub taker: Taker,
+    #[cfg(feature = "fusotao")]
+    pub page_delta: std::collections::BTreeMap<Price, (Amount, Amount)>,
 }
 
 pub fn execute_limit(
@@ -181,18 +183,22 @@ pub fn execute_limit(
     amount: Amount,
     ask_or_bid: AskOrBid,
 ) -> Match {
-    let mut makers = Vec::<Maker>::new();
-    let mut order = Order::new(order_id, user_id, price, amount);
     cfg_if::cfg_if! {
         if #[cfg(feature = "fusotao")] {
+            use rust_decimal::prelude::Zero;
             let mut max_makers = 20u32;
+            let mut page_delta = std::collections::BTreeMap::<Price, (Amount, Amount)>::new();
         }
     }
+    let mut makers = Vec::<Maker>::new();
+    let mut order = Order::new(order_id, user_id, price, amount);
     loop {
         if order.is_filled() {
             return Match {
                 maker: makers,
                 taker: Taker::taker(order, ask_or_bid, State::Filled),
+                #[cfg(feature = "fusotao")]
+                page_delta,
             };
         }
         if let Some(mut best) = book.get_best_if_match(ask_or_bid, &order.price) {
@@ -203,22 +209,42 @@ pub fn execute_limit(
                 #[cfg(feature = "fusotao")]
                 &mut max_makers,
             );
+            cfg_if::cfg_if! {
+                if #[cfg(feature = "fusotao")] {
+                    page_delta.insert(
+                        page.price,
+                        (
+                            traded.iter().map(|o| o.filled).sum::<Amount>() + page.amount,
+                            page.amount,
+                        ),
+                    );
+                }
+            }
             if page.is_empty() {
                 best.remove();
             }
-            traded.iter().for_each(|m| {
-                if m.state == State::Filled {
+            traded
+                .iter()
+                .filter(|m| m.state == State::Filled)
+                .for_each(|m| {
                     book.indices.remove(&m.order_id);
-                }
-            });
+                });
             makers.append(&mut traded);
             if interrupted {
                 return Match {
                     taker: Taker::taker(order, ask_or_bid, State::ConditionalCanceled),
                     maker: makers,
+                    #[cfg(feature = "fusotao")]
+                    page_delta,
                 };
             }
         } else {
+            cfg_if::cfg_if! {
+                if #[cfg(feature = "fusotao")] {
+                    let size_before = book.get_page_size(&order.price).unwrap_or(Amount::zero());
+                    page_delta.insert(order.price, (size_before, size_before + order.unfilled));
+                }
+            }
             book.insert(order.clone(), ask_or_bid);
             return Match {
                 taker: match makers.is_empty() {
@@ -226,6 +252,8 @@ pub fn execute_limit(
                     false => Taker::taker(order, ask_or_bid, State::PartialFilled),
                 },
                 maker: makers,
+                #[cfg(feature = "fusotao")]
+                page_delta,
             };
         }
     }
@@ -271,9 +299,20 @@ fn take(
 }
 
 pub fn cancel(orderbook: &mut OrderBook, order_id: u64) -> Option<Match> {
-    orderbook.remove(order_id).map(|(order, from)| Match {
-        maker: vec![],
-        taker: Taker::taker(order, from, State::Canceled),
+    orderbook.remove(order_id).map(|(order, from)| {
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "fusotao")] {
+                use rust_decimal::prelude::Zero;
+                let after_removed = orderbook.get_page_size(&order.price).unwrap_or(Amount::zero());
+                let page_delta = std::collections::BTreeMap::from([(order.price, (after_removed + order.unfilled, after_removed))]);
+            }
+        }
+        Match {
+            maker: vec![],
+            taker: Taker::taker(order, from, State::Canceled),
+            #[cfg(feature = "fusotao")]
+            page_delta,
+        }
     })
 }
 

@@ -256,14 +256,6 @@ impl OrderBook {
             .or_insert_with(|| OrderPage::with_init_order(order));
     }
 
-    // // FIXME
-    // pub fn decr_size_on(&mut self, ask_or_bid: AskOrBid, amount: &Amount) {
-    //     match ask_or_bid {
-    //         AskOrBid::Ask => self.ask_size -= amount,
-    //         AskOrBid::Bid => self.bid_size -= amount,
-    //     }
-    // }
-
     pub fn remove(&mut self, order_id: OrderId) -> Option<(Order, AskOrBid)> {
         let price = self.indices.remove(&order_id)?;
         match (self.get_best_ask(), self.get_best_bid()) {

@@ -93,7 +93,7 @@ impl FusoConnector {
         let xt: sub_api::UncheckedExtrinsicV4<_> =
             sub_api::compose_extrinsic!(api, "Verifier", "verify", batch);
         // TODO
-        api.send_extrinsic(xt.hex_encode(), sub_api::XtStatus::InBlock)
+        api.send_extrinsic(xt.hex_encode(), sub_api::XtStatus::Broadcast)
             .map_err(|e| anyhow::anyhow!("submit proofs failed, {:?}", e))
             .map(|_| ())
     }
