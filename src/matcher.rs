@@ -19,11 +19,11 @@ use crate::{
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum State {
-    Submitted,
+    Placed,
     Canceled,
     Filled,
-    PartialFilled,
-    ConditionalCanceled,
+    PartiallyFilled,
+    ConditionallyCanceled,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
@@ -44,11 +44,11 @@ impl Into<u32> for Role {
 impl Into<u32> for State {
     fn into(self) -> u32 {
         match self {
-            State::Submitted => 0,
+            State::Placed => 0,
             State::Canceled => 1,
             State::Filled => 2,
-            State::PartialFilled => 3,
-            State::ConditionalCanceled => 4,
+            State::PartiallyFilled => 3,
+            State::ConditionallyCanceled => 4,
         }
     }
 }
@@ -104,7 +104,7 @@ impl Taker {
             price,
             unfilled,
             ask_or_bid,
-            state: State::PartialFilled,
+            state: State::PartiallyFilled,
         }
     }
 
@@ -162,7 +162,7 @@ impl Maker {
             order_id,
             price,
             filled,
-            state: State::PartialFilled,
+            state: State::PartiallyFilled,
         }
     }
 }
@@ -232,7 +232,7 @@ pub fn execute_limit(
             makers.append(&mut traded);
             if interrupted {
                 return Match {
-                    taker: Taker::taker(order, ask_or_bid, State::ConditionalCanceled),
+                    taker: Taker::taker(order, ask_or_bid, State::ConditionallyCanceled),
                     maker: makers,
                     #[cfg(feature = "fusotao")]
                     page_delta,
@@ -250,8 +250,8 @@ pub fn execute_limit(
             book.insert(order.clone(), ask_or_bid);
             return Match {
                 taker: match makers.is_empty() {
-                    true => Taker::taker(order, ask_or_bid, State::Submitted),
-                    false => Taker::taker(order, ask_or_bid, State::PartialFilled),
+                    true => Taker::taker(order, ask_or_bid, State::Placed),
+                    false => Taker::taker(order, ask_or_bid, State::PartiallyFilled),
                 },
                 maker: makers,
                 #[cfg(feature = "fusotao")]
@@ -356,7 +356,7 @@ mod test {
             amount,
             AskOrBid::Bid,
         );
-        assert_eq!(State::Submitted, mr.taker.state);
+        assert_eq!(State::Placed, mr.taker.state);
         assert!(mr.maker.is_empty());
         assert_eq!(
             dec!(0.1),
@@ -411,7 +411,7 @@ mod test {
             amount,
             AskOrBid::Bid,
         );
-        assert_eq!(State::Submitted, mr.taker.state);
+        assert_eq!(State::Placed, mr.taker.state);
         assert!(mr.maker.is_empty());
 
         let price = dec!(0.1);
@@ -424,7 +424,7 @@ mod test {
             amount,
             AskOrBid::Bid,
         );
-        assert_eq!(State::Submitted, mr.taker.state);
+        assert_eq!(State::Placed, mr.taker.state);
         assert!(mr.maker.is_empty());
         let price = dec!(0.08);
         let amount = dec!(200);
@@ -478,7 +478,7 @@ mod test {
             amount,
             AskOrBid::Ask,
         );
-        assert_eq!(State::Submitted, mr.taker.state);
+        assert_eq!(State::Placed, mr.taker.state);
         assert!(book.get_best_if_match(AskOrBid::Bid, &dec!(0.11)).is_none());
         assert_eq!(
             dec!(0.12),
@@ -580,7 +580,7 @@ mod test {
             amount,
             AskOrBid::Ask,
         );
-        assert_eq!(mr.taker.state, State::ConditionalCanceled);
+        assert_eq!(mr.taker.state, State::ConditionallyCanceled);
         assert!(mr.maker.is_empty());
         assert!(book.find_order(1001).is_some());
         assert!(book.find_order(1002).is_none());
@@ -634,7 +634,7 @@ mod test {
             amount * dec!(2),
             AskOrBid::Ask,
         );
-        assert_eq!(mr.taker.state, State::ConditionalCanceled);
+        assert_eq!(mr.taker.state, State::ConditionallyCanceled);
         assert_eq!(mr.taker.unfilled, amount);
         assert_eq!(mr.maker.len(), 1);
         assert_eq!(mr.maker[0].filled, amount);
@@ -687,7 +687,7 @@ mod test {
             amount * dec!(100),
             AskOrBid::Ask,
         );
-        assert_eq!(mr.taker.state, State::ConditionalCanceled);
+        assert_eq!(mr.taker.state, State::ConditionallyCanceled);
         assert_eq!(mr.taker.unfilled, amount * dec!(80));
         assert_eq!(mr.maker.len(), 20);
         assert_eq!(mr.maker[0].filled, amount);
@@ -730,7 +730,7 @@ mod test {
             AskOrBid::Bid,
         );
         assert!(book.find_order(1001).is_some());
-        assert_eq!(State::Submitted, mr.taker.state);
+        assert_eq!(State::Placed, mr.taker.state);
         assert!(mr.maker.is_empty());
     }
 }
