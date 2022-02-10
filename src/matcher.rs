@@ -643,6 +643,59 @@ mod test {
         assert!(book.find_order(1003).is_none());
     }
 
+    #[cfg(feature = "fusotao")]
+    #[test]
+    pub fn test_max_makers() {
+        let base_scale = 5;
+        let quote_scale = 1;
+        let taker_fee = dec!(0.001);
+        let maker_fee = dec!(0.001);
+        let min_amount = dec!(1);
+        let min_vol = dec!(1);
+        let mut book = OrderBook::new(
+            base_scale,
+            quote_scale,
+            taker_fee,
+            maker_fee,
+            taker_fee,
+            maker_fee,
+            1,
+            min_amount,
+            min_vol,
+            true,
+            true,
+        );
+
+        let price = dec!(0.1);
+        let amount = dec!(1);
+        for i in 1..30 {
+            execute_limit(
+                &mut book,
+                UserId::from_low_u64_be(2),
+                i as u64,
+                price,
+                amount,
+                AskOrBid::Bid,
+            );
+        }
+
+        let mr = execute_limit(
+            &mut book,
+            UserId::from_low_u64_be(1),
+            100,
+            price,
+            amount * dec!(100),
+            AskOrBid::Ask,
+        );
+        assert_eq!(mr.taker.state, State::ConditionalCanceled);
+        assert_eq!(mr.taker.unfilled, amount * dec!(80));
+        assert_eq!(mr.maker.len(), 20);
+        assert_eq!(mr.maker[0].filled, amount);
+        assert!(book.find_order(1).is_none());
+        assert!(book.find_order(20).is_none());
+        assert!(book.find_order(21).is_some());
+    }
+
     // useless, the order id should be global unique rather than just in orderbook scope
     #[test]
     pub fn test_order_replay() {
