@@ -209,7 +209,7 @@ impl Prover {
             pages.reverse();
         }
         leaves.append(&mut pages);
-        let (pr0, pr1) = gen_proofs(&mut data.merkle_tree, &leaves);
+        let merkle_proof = gen_proofs(&mut data.merkle_tree, &leaves);
         self.sender
             .send(Proof {
                 event_id,
@@ -220,8 +220,7 @@ impl Prover {
                 leaves,
                 maker_page_delta: matches.page_delta.len() as u8,
                 maker_account_delta: maker_accounts.len() as u8 * 2,
-                proof_of_exists: pr0,
-                proof_of_cmd: pr1,
+                merkle_proof,
                 root: data.merkle_tree.root().clone().into(),
             })
             .unwrap();
@@ -249,7 +248,7 @@ impl Prover {
             new_available,
             new_frozen,
         )];
-        let (pr0, pr1) = gen_proofs(merkle_tree, &leaves);
+        let merkle_proof = gen_proofs(merkle_tree, &leaves);
         self.sender
             .send(Proof {
                 event_id,
@@ -260,8 +259,7 @@ impl Prover {
                 leaves,
                 maker_page_delta: 0,
                 maker_account_delta: 0,
-                proof_of_exists: pr0,
-                proof_of_cmd: pr1,
+                merkle_proof,
                 root: merkle_tree.root().clone().into(),
             })
             .unwrap();
@@ -287,7 +285,7 @@ impl Prover {
             old_frozen,
         )];
         let old_root = merkle_tree.root().clone();
-        let (pr0, pr1) = gen_proofs(merkle_tree, &leaves);
+        let merkle_proof = gen_proofs(merkle_tree, &leaves);
         if &old_root != merkle_tree.root() {
             self.sender
                 .send(Proof {
@@ -299,8 +297,7 @@ impl Prover {
                     leaves,
                     maker_page_delta: 0,
                     maker_account_delta: 0,
-                    proof_of_exists: pr0,
-                    proof_of_cmd: pr1,
+                    merkle_proof,
                     root: merkle_tree.root().clone().into(),
                 })
                 .unwrap();
@@ -308,35 +305,23 @@ impl Prover {
     }
 }
 
-fn gen_proofs(merkle_tree: &mut GlobalStates, leaves: &Vec<MerkleLeaf>) -> (Vec<u8>, Vec<u8>) {
+fn gen_proofs(merkle_tree: &mut GlobalStates, leaves: &Vec<MerkleLeaf>) -> Vec<u8> {
     let keys = leaves
         .iter()
         .map(|leaf| Sha256::digest(&leaf.key).into())
         .collect::<Vec<_>>();
-    let poe = merkle_tree.merkle_proof(keys.clone()).unwrap();
-    let pr0 = poe
-        .compile(
-            leaves
-                .iter()
-                .map(|leaf| (Sha256::digest(&leaf.key).into(), leaf.old_v.into()))
-                .collect::<Vec<_>>(),
-        )
-        .unwrap();
+    // TODO merge origin to support update all
     leaves.iter().for_each(|leaf| {
         merkle_tree
             .update(Sha256::digest(&leaf.key).into(), leaf.new_v.into())
             .unwrap();
     });
-    let poc = merkle_tree.merkle_proof(keys.clone()).unwrap();
-    let pr1 = poc
-        .compile(
-            leaves
-                .iter()
-                .map(|leaf| (Sha256::digest(&leaf.key).into(), leaf.new_v.into()))
-                .collect::<Vec<_>>(),
-        )
-        .unwrap();
-    (pr0.into(), pr1.into())
+    merkle_tree
+        .merkle_proof(keys.clone())
+        .expect("generate merkle proof failed")
+        .compile(keys)
+        .expect("compile merkle proof failed")
+        .into()
 }
 
 fn new_account_merkle_leaf(
@@ -566,21 +551,20 @@ mod test {
             pp.prove_assets_cmd(&mut merkle_tree, 1, cmd1, &after, &transfer_again);
         });
         let proof = rx.recv().unwrap();
-        let p0 = CompiledMerkleProof(proof.proof_of_exists.clone());
+        let mp = CompiledMerkleProof(proof.merkle_proof.clone());
         let old = proof
             .leaves
             .iter()
             .map(|v| (Sha256::digest(&v.key).into(), v.old_v.into()))
             .collect::<Vec<_>>();
-        let r = p0.verify::<Sha256Hasher>(&H256::default(), old).unwrap();
+        let r = mp.verify::<Sha256Hasher>(&H256::default(), old).unwrap();
         assert!(r);
-        let p1 = CompiledMerkleProof(proof.proof_of_cmd.clone());
         let new = proof
             .leaves
             .iter()
             .map(|v| (Sha256::digest(&v.key).into(), v.new_v.into()))
             .collect::<Vec<_>>();
-        let r = p1.verify::<Sha256Hasher>(&proof.root.into(), new).unwrap();
+        let r = mp.verify::<Sha256Hasher>(&proof.root.into(), new).unwrap();
         assert!(r);
         assert_eq!(
             split_h256_u128(&proof.leaves[0].new_v),
@@ -589,21 +573,20 @@ mod test {
         assert_eq!(split_h256_u128(&proof.leaves[0].old_v), (0, 0));
         let new_root = proof.root.clone();
         let proof = rx.recv().unwrap();
-        let p0 = CompiledMerkleProof(proof.proof_of_exists.clone());
+        let mp = CompiledMerkleProof(proof.merkle_proof.clone());
         let old = proof
             .leaves
             .iter()
             .map(|v| (Sha256::digest(&v.key).into(), v.old_v.into()))
             .collect::<Vec<_>>();
-        let r = p0.verify::<Sha256Hasher>(&new_root.into(), old).unwrap();
+        let r = mp.verify::<Sha256Hasher>(&new_root.into(), old).unwrap();
         assert!(r);
-        let p1 = CompiledMerkleProof(proof.proof_of_cmd.clone());
         let new = proof
             .leaves
             .iter()
             .map(|v| (Sha256::digest(&v.key).into(), v.new_v.into()))
             .collect::<Vec<_>>();
-        let r = p1.verify::<Sha256Hasher>(&proof.root.into(), new).unwrap();
+        let r = mp.verify::<Sha256Hasher>(&proof.root.into(), new).unwrap();
         assert!(r);
         assert_eq!(
             split_h256_u128(&proof.leaves[0].new_v),

@@ -34,7 +34,7 @@ pub fn clear(
     let base = symbol.0;
     let quote = symbol.1;
     match mr.taker.state {
-        State::Submitted => {
+        State::Placed => {
             let base_account = assets::get_balance_to_owned(accounts, &mr.taker.user_id, base);
             let quote_account = assets::get_balance_to_owned(accounts, &mr.taker.user_id, quote);
             vec![Output {
@@ -122,7 +122,7 @@ pub fn clear(
                 }
             }
         }
-        // Filled, PartialFilled, ConditionalCanceled
+        // Filled, PartiallyFilled, ConditionallyCanceled
         _ => {
             match mr.taker.ask_or_bid {
                 AskOrBid::Ask => {
@@ -168,7 +168,7 @@ pub fn clear(
                     }
                     // taker base account frozen decr sum(filled)
                     // taker quote account available incr sum(filled * price)
-                    if mr.taker.state == State::ConditionalCanceled {
+                    if mr.taker.state == State::ConditionallyCanceled {
                         assets::try_unfreeze(accounts, &mr.taker.user_id, base, mr.taker.unfilled)
                             .unwrap();
                     }
@@ -274,7 +274,7 @@ pub fn clear(
                         assets::try_unfreeze(accounts, &mr.taker.user_id, quote, return_quote)
                             .unwrap();
                     }
-                    if mr.taker.state == State::ConditionalCanceled {
+                    if mr.taker.state == State::ConditionallyCanceled {
                         assets::try_unfreeze(
                             accounts,
                             &mr.taker.user_id,

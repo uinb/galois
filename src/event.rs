@@ -482,6 +482,7 @@ fn handle_event(
     }
 }
 
+#[cfg(feature = "fusotao")]
 fn gen_adjust_fee_cmds(delta: u64, fee_adjust_threshold: u64, data: &Data) -> Vec<Command> {
     let mut times: u32 = (delta / fee_adjust_threshold) as u32;
     times = if times > 0 { times } else { 1 };

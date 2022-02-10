@@ -79,8 +79,7 @@ pub struct Proof {
     pub leaves: Vec<MerkleLeaf>,
     pub maker_page_delta: u8,
     pub maker_account_delta: u8,
-    pub proof_of_exists: Vec<u8>,
-    pub proof_of_cmd: Vec<u8>,
+    pub merkle_proof: Vec<u8>,
     pub root: [u8; 32],
 }
 
