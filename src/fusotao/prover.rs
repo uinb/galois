@@ -14,8 +14,11 @@
 
 use super::*;
 use crate::{assets::Balance, matcher::*, orderbook::AskOrBid, output::Output};
-use sha2::{Digest, Sha256};
+use blake2::{Blake2b, Digest};
+use generic_array::typenum::U32;
 use std::{collections::HashMap, sync::mpsc::Sender};
+
+pub type BlakeTwo256 = Blake2b<U32>;
 
 const ACCOUNT_KEY: u8 = 0x00;
 const ORDERBOOK_KEY: u8 = 0x01;
@@ -308,12 +311,12 @@ impl Prover {
 fn gen_proofs(merkle_tree: &mut GlobalStates, leaves: &Vec<MerkleLeaf>) -> Vec<u8> {
     let keys = leaves
         .iter()
-        .map(|leaf| Sha256::digest(&leaf.key).into())
+        .map(|leaf| BlakeTwo256::digest(&leaf.key).into())
         .collect::<Vec<_>>();
     // TODO merge origin to support update all
     leaves.iter().for_each(|leaf| {
         merkle_tree
-            .update(Sha256::digest(&leaf.key).into(), leaf.new_v.into())
+            .update(BlakeTwo256::digest(&leaf.key).into(), leaf.new_v.into())
             .unwrap();
     });
     merkle_tree
@@ -397,9 +400,10 @@ fn new_orderpage_merkle_leaf(
 mod test {
     use std::sync::{atomic::AtomicU64, Arc};
 
+    use super::BlakeTwo256;
+    use blake2::Digest;
     use rust_decimal_macros::dec;
-    use sha2::{Digest, Sha256};
-    use smt::{sha256::Sha256Hasher, CompiledMerkleProof, H256};
+    use smt::{blake2b::Blake2bHasher, CompiledMerkleProof, H256};
 
     impl UserId {
         // adapt to legacy code
@@ -555,16 +559,16 @@ mod test {
         let old = proof
             .leaves
             .iter()
-            .map(|v| (Sha256::digest(&v.key).into(), v.old_v.into()))
+            .map(|v| (BlakeTwo256::digest(&v.key).into(), v.old_v.into()))
             .collect::<Vec<_>>();
-        let r = mp.verify::<Sha256Hasher>(&H256::default(), old).unwrap();
+        let r = mp.verify::<Blake2bHasher>(&H256::default(), old).unwrap();
         assert!(r);
         let new = proof
             .leaves
             .iter()
-            .map(|v| (Sha256::digest(&v.key).into(), v.new_v.into()))
+            .map(|v| (BlakeTwo256::digest(&v.key).into(), v.new_v.into()))
             .collect::<Vec<_>>();
-        let r = mp.verify::<Sha256Hasher>(&proof.root.into(), new).unwrap();
+        let r = mp.verify::<Blake2bHasher>(&proof.root.into(), new).unwrap();
         assert!(r);
         assert_eq!(
             split_h256_u128(&proof.leaves[0].new_v),
@@ -577,16 +581,16 @@ mod test {
         let old = proof
             .leaves
             .iter()
-            .map(|v| (Sha256::digest(&v.key).into(), v.old_v.into()))
+            .map(|v| (BlakeTwo256::digest(&v.key).into(), v.old_v.into()))
             .collect::<Vec<_>>();
-        let r = mp.verify::<Sha256Hasher>(&new_root.into(), old).unwrap();
+        let r = mp.verify::<Blake2bHasher>(&new_root.into(), old).unwrap();
         assert!(r);
         let new = proof
             .leaves
             .iter()
-            .map(|v| (Sha256::digest(&v.key).into(), v.new_v.into()))
+            .map(|v| (BlakeTwo256::digest(&v.key).into(), v.new_v.into()))
             .collect::<Vec<_>>();
-        let r = mp.verify::<Sha256Hasher>(&proof.root.into(), new).unwrap();
+        let r = mp.verify::<Blake2bHasher>(&proof.root.into(), new).unwrap();
         assert!(r);
         assert_eq!(
             split_h256_u128(&proof.leaves[0].new_v),
