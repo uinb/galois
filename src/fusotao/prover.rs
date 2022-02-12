@@ -1392,4 +1392,233 @@ mod test {
             }
         }
     }
+
+    #[test]
+    pub fn test_canceling() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut merkle_tree = GlobalStates::default();
+            let pp = Prover::new(tx, Arc::new(AtomicU64::new(0)));
+            let mut all = Accounts::new();
+            let orderbook = construct_pair();
+            let cmd0 = AssetsCmd {
+                user_id: UserId::from_low_u64_be(1),
+                in_or_out: InOrOut::In,
+                currency: 0,
+                amount: dec!(100),
+                block_number: 1,
+                extrinsic_hash: vec![0],
+            };
+            let after =
+                assets::add_to_available(&mut all, &cmd0.user_id, cmd0.currency, cmd0.amount)
+                    .unwrap();
+            pp.prove_assets_cmd(
+                &mut merkle_tree,
+                1,
+                cmd0,
+                &assets::Balance::default(),
+                &after,
+            );
+            let cmd1 = AssetsCmd {
+                user_id: UserId::from_low_u64_be(2),
+                in_or_out: InOrOut::In,
+                currency: 1,
+                amount: dec!(1000),
+                block_number: 1,
+                extrinsic_hash: vec![0],
+            };
+            let transfer_again =
+                assets::add_to_available(&mut all, &cmd1.user_id, cmd1.currency, cmd1.amount)
+                    .unwrap();
+            pp.prove_assets_cmd(&mut merkle_tree, 1, cmd1, &after, &transfer_again);
+
+            let mut orderbooks = std::collections::HashMap::new();
+            let (mf, tf) = (orderbook.maker_fee, orderbook.taker_fee);
+            orderbooks.insert((0, 1), orderbook);
+            let mut data = Data {
+                orderbooks,
+                accounts: all,
+                merkle_tree,
+                current_event_id: 0,
+            };
+
+            // alice ask p=10, a=1.1
+            {
+                let size = data.orderbooks.get(&(0, 1)).unwrap().size();
+                let cmd2 = LimitCmd {
+                    symbol: (0, 1),
+                    user_id: UserId::from_low_u64_be(1),
+                    order_id: 1,
+                    price: dec!(10),
+                    amount: dec!(1.1),
+                    ask_or_bid: AskOrBid::Ask,
+                    nonce: 1,
+                    signature: vec![0],
+                };
+                let (best_ask_before, best_bid_before) =
+                    data.orderbooks.get(&(0, 1)).unwrap().get_size_of_best();
+                let taker_base_before =
+                    assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.0);
+                let taker_quote_before =
+                    assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.1);
+                let (c, val) =
+                    assets::freeze_if(&cmd2.symbol, cmd2.ask_or_bid, cmd2.price, cmd2.amount);
+                assets::try_freeze(&mut data.accounts, &cmd2.user_id, c, val).unwrap();
+                let mr = matcher::execute_limit(
+                    data.orderbooks.get_mut(&(0, 1)).unwrap(),
+                    cmd2.user_id,
+                    cmd2.order_id,
+                    cmd2.price,
+                    cmd2.amount,
+                    cmd2.ask_or_bid,
+                );
+                let cr = clearing::clear(&mut data.accounts, 3, &(0, 1), tf, mf, &mr, 0);
+                pp.prove_trade_cmd(
+                    &mut data,
+                    cmd2.nonce,
+                    cmd2.signature.clone(),
+                    (cmd2, mf, tf).into(),
+                    size.0,
+                    size.1,
+                    best_ask_before.unwrap_or((Decimal::zero(), Decimal::zero())),
+                    best_bid_before.unwrap_or((Decimal::zero(), Decimal::zero())),
+                    &taker_base_before,
+                    &taker_quote_before,
+                    &cr,
+                    &mr,
+                );
+            }
+            // alice ask p=5, a=7.6
+            {
+                let size = data.orderbooks.get(&(0, 1)).unwrap().size();
+                let cmd2 = LimitCmd {
+                    symbol: (0, 1),
+                    user_id: UserId::from_low_u64_be(1),
+                    order_id: 2,
+                    price: dec!(5),
+                    amount: dec!(7.6),
+                    ask_or_bid: AskOrBid::Ask,
+                    nonce: 1,
+                    signature: vec![0],
+                };
+                let (best_ask_before, best_bid_before) =
+                    data.orderbooks.get(&(0, 1)).unwrap().get_size_of_best();
+                let taker_base_before =
+                    assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.0);
+                let taker_quote_before =
+                    assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.1);
+                let (c, val) =
+                    assets::freeze_if(&cmd2.symbol, cmd2.ask_or_bid, cmd2.price, cmd2.amount);
+                assets::try_freeze(&mut data.accounts, &cmd2.user_id, c, val).unwrap();
+                let mr = matcher::execute_limit(
+                    data.orderbooks.get_mut(&(0, 1)).unwrap(),
+                    cmd2.user_id,
+                    cmd2.order_id,
+                    cmd2.price,
+                    cmd2.amount,
+                    cmd2.ask_or_bid,
+                );
+                let cr = clearing::clear(&mut data.accounts, 4, &(0, 1), tf, mf, &mr, 0);
+                pp.prove_trade_cmd(
+                    &mut data,
+                    cmd2.nonce,
+                    cmd2.signature.clone(),
+                    (cmd2, mf, tf).into(),
+                    size.0,
+                    size.1,
+                    best_ask_before.unwrap_or((Decimal::zero(), Decimal::zero())),
+                    best_bid_before.unwrap_or((Decimal::zero(), Decimal::zero())),
+                    &taker_base_before,
+                    &taker_quote_before,
+                    &cr,
+                    &mr,
+                );
+            }
+            // alice cancel 2
+            {
+                let size = data.orderbooks.get(&(0, 1)).unwrap().size();
+                let cmd2 = CancelCmd {
+                    symbol: (0, 1),
+                    user_id: UserId::from_low_u64_be(1),
+                    order_id: 2,
+                    nonce: 1,
+                    signature: vec![0],
+                };
+                let (best_ask_before, best_bid_before) =
+                    data.orderbooks.get(&(0, 1)).unwrap().get_size_of_best();
+                let taker_base_before =
+                    assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.0);
+                let taker_quote_before =
+                    assets::get_balance_to_owned(&data.accounts, &cmd2.user_id, cmd2.symbol.1);
+                let mr = matcher::cancel(data.orderbooks.get_mut(&(0, 1)).unwrap(), cmd2.order_id)
+                    .unwrap();
+                let cr = clearing::clear(&mut data.accounts, 5, &(0, 1), tf, mf, &mr, 0);
+                pp.prove_trade_cmd(
+                    &mut data,
+                    cmd2.nonce,
+                    cmd2.signature.clone(),
+                    cmd2.into(),
+                    size.0,
+                    size.1,
+                    best_ask_before.unwrap_or((Decimal::zero(), Decimal::zero())),
+                    best_bid_before.unwrap_or((Decimal::zero(), Decimal::zero())),
+                    &taker_base_before,
+                    &taker_quote_before,
+                    &cr,
+                    &mr,
+                );
+            }
+        });
+        // ignore transfer in
+        rx.recv().unwrap();
+        rx.recv().unwrap();
+        /*
+         * ignore ask
+         * 1. p=10, a=1.1
+         * 2. p=5, a=7.6
+         */
+        rx.recv().unwrap();
+        rx.recv().unwrap();
+        // cancel p=5, a=7.6
+        {
+            let proof = rx.recv().unwrap();
+            let (base, quote) = (0, 1);
+            let leaves = proof.leaves;
+            let account = UserId::from_low_u64_be(1);
+            assert!(leaves.len() == 5,);
+            let (b, q) = leaves[0].try_get_symbol().unwrap();
+            assert!(b == base && q == quote,);
+            let (ask0, bid0) = leaves[0].split_old_to_u128();
+            let (ask1, bid1) = leaves[0].split_new_to_u128();
+            let ask_delta = ask0 - ask1;
+            let bid_delta = bid0 - bid1;
+            assert!(ask_delta + bid_delta != 0,);
+            assert!(ask_delta & bid_delta == 0,);
+
+            let (b, id) = leaves[1].try_get_account().unwrap();
+            assert!(b == base,);
+            assert!(<crate::core::B256 as AsRef<[u8; 32]>>::as_ref(&account) == &id);
+            let (ba0, bf0) = leaves[1].split_old_to_u128();
+            let (ba1, bf1) = leaves[1].split_new_to_u128();
+            assert!(ba0 + bf0 == ba1 + bf1,);
+
+            let (q, id) = leaves[2].try_get_account().unwrap();
+            assert!(q == quote,);
+            assert!(<crate::core::B256 as AsRef<[u8; 32]>>::as_ref(&account) == &id);
+            let (qa0, qf0) = leaves[2].split_old_to_u128();
+            let (qa1, qf1) = leaves[2].split_new_to_u128();
+            assert!(qa0 + qf0 == qa1 + qf1,);
+
+            let (best_ask0, best_bid0) = leaves[3].split_old_to_u128();
+            let (b, q, cancel_at) = leaves[4].try_get_orderpage().unwrap();
+            assert!(b == base && q == quote && (cancel_at >= best_ask0 || cancel_at <= best_bid0),);
+            let before_cancel = leaves[4].split_old_to_sum();
+            let after_cancel = leaves[4].split_new_to_sum();
+            if cancel_at >= best_ask0 {
+                assert!(ask_delta == before_cancel - after_cancel,);
+            } else {
+                assert!(bid_delta == before_cancel - after_cancel,);
+            }
+        }
+    }
 }
