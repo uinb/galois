@@ -208,7 +208,7 @@ impl Prover {
                 new_orderpage_merkle_leaf(symbol, k.to_amount(), v.0.to_amount(), v.1.to_amount())
             })
             .collect::<Vec<_>>();
-        if taker.ask_or_bid == AskOrBid::Bid && !pages.is_empty() {
+        if taker.ask_or_bid == AskOrBid::Ask && !pages.is_empty() {
             pages.reverse();
         }
         leaves.append(&mut pages);
