@@ -178,11 +178,12 @@ pub struct Match {
 pub fn execute_limit(
     book: &mut OrderBook,
     user_id: UserId,
-    order_id: u64,
+    order_id: OrderId,
     price: Price,
     amount: Amount,
     ask_or_bid: AskOrBid,
 ) -> Match {
+    book.update_executed_order_id(order_id);
     cfg_if::cfg_if! {
         if #[cfg(feature = "fusotao")] {
             use rust_decimal::prelude::Zero;

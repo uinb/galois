@@ -251,7 +251,7 @@ fn handle_event(
             let orderbook = data
                 .orderbooks
                 .get_mut(&cmd.symbol)
-                .filter(|b| b.should_accept(cmd.price, cmd.amount, id))
+                .filter(|b| b.should_accept(cmd.price, cmd.amount, cmd.order_id))
                 .filter(|b| b.find_order(cmd.order_id).is_none())
                 .ok_or(EventsError::EventRejected(
                     id,

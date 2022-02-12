@@ -208,6 +208,10 @@ impl OrderBook {
         }
     }
 
+    pub fn update_executed_order_id(&mut self, id: OrderId) {
+        self.max_id = id;
+    }
+
     pub fn size(&self) -> (Amount, Amount) {
         (
             self.asks.values().fold(Amount::zero(), |x, a| x + a.amount),
@@ -239,7 +243,6 @@ impl OrderBook {
     }
 
     pub fn insert(&mut self, order: Order, ask_or_bid: AskOrBid) {
-        self.max_id = order.id;
         match ask_or_bid {
             AskOrBid::Ask => Self::insert_into(&mut self.asks, &mut self.indices, order),
             AskOrBid::Bid => Self::insert_into(&mut self.bids, &mut self.indices, order),
