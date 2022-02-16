@@ -73,8 +73,6 @@ pub struct MerkleLeaf {
 pub struct Proof {
     pub event_id: u64,
     pub user_id: UserId,
-    pub nonce: u32,
-    pub signature: Vec<u8>,
     pub cmd: FusoCommand,
     pub leaves: Vec<MerkleLeaf>,
     pub maker_page_delta: u8,
