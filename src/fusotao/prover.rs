@@ -217,8 +217,6 @@ impl Prover {
             .send(Proof {
                 event_id,
                 user_id,
-                nonce,
-                signature,
                 cmd: encoded_cmd,
                 leaves,
                 maker_page_delta: matches.page_delta.len() as u8,
@@ -256,8 +254,6 @@ impl Prover {
             .send(Proof {
                 event_id,
                 user_id: cmd.user_id,
-                nonce: cmd.block_number,
-                signature: cmd.extrinsic_hash.clone(),
                 cmd: cmd.into(),
                 leaves,
                 maker_page_delta: 0,
@@ -294,8 +290,6 @@ impl Prover {
                 .send(Proof {
                     event_id,
                     user_id: cmd.user_id,
-                    nonce: cmd.block_number,
-                    signature: cmd.extrinsic_hash.clone(),
                     cmd: cmd.into(),
                     leaves,
                     maker_page_delta: 0,
