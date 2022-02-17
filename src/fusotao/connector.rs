@@ -37,6 +37,7 @@ pub struct FusoConnector {
 
 #[derive(Clone, Decode, Debug, Default)]
 pub struct Dominator {
+    pub name: Vec<u8>,
     pub staked: u128,
     pub merkle_root: [u8; 32],
     pub start_from: u32,
