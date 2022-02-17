@@ -1,3 +1,7 @@
+# v0.2.5-rc.1
+
+- add dominator name field
+
 # v0.2.4
 
 - MaxFee Constraint of increasing fee
