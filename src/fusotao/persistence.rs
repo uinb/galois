@@ -42,7 +42,10 @@ pub fn fetch_raw_after(event_id: u64) -> Vec<(u64, RawParameter)> {
     conn.exec_map(
         sql,
         // TODO calculate max_weight and max_length
-        (event_id, C.sequence.batch_size),
+        (
+            event_id,
+            C.fusotao.as_ref().map_or(20, |c| c.proof_batch_limit),
+        ),
         |(f_event_id, f_proof): (u64, Vec<u8>)| (f_event_id, RawParameter(f_proof)),
     )
     .unwrap_or_default()
