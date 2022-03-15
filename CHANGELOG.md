@@ -1,4 +1,4 @@
-# v0.2.5.rc.2
+# v0.2.5-rc.2
 
 - use independent config of submitting proofs
 
