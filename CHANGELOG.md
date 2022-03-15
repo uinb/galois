@@ -1,3 +1,7 @@
+# v0.2.5-rc.7
+
+- copy unit tests
+
 # v0.2.5-rc.5
 
 - wait for proofs InBlock
