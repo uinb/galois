@@ -115,7 +115,7 @@ impl FusoConnector {
     fn submit_batch(api: &FusoApi, batch: Vec<RawParameter>) -> anyhow::Result<()> {
         let xt: sub_api::UncheckedExtrinsicV4<_> =
             sub_api::compose_extrinsic!(api, "Verifier", "verify", batch);
-        api.send_extrinsic(xt.hex_encode(), sub_api::XtStatus::Broadcast)
+        api.send_extrinsic(xt.hex_encode(), sub_api::XtStatus::InBlock)
             .map_err(|e| anyhow::anyhow!("submit proofs failed, {:?}", e))
             .map(|_| log::info!("submitting proofs ok"))
     }
