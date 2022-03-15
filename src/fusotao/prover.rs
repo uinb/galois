@@ -1636,9 +1636,6 @@ mod test {
             .unwrap()),
         };
         let (b, q, p) = ml.try_get_orderpage().unwrap();
-        // assert!(b == 0 && q == 1 && p == );
-        // assert_eq!(ml.try_get_orderpage().unwrap().2, dec!(10.0).to_amount());
-        ml.split_old_to_sum() - ml.split_new_to_sum();
         assert_eq!(
             super::to_decimal_represent(ml.split_old_to_sum()),
             dec!(1476.5)
@@ -1647,5 +1644,294 @@ mod test {
             super::to_decimal_represent(ml.split_new_to_sum()),
             dec!(1416.5)
         );
+    }
+
+    #[test]
+    pub fn test_take_whole_page_then_quit() {
+        let taker_base = MerkleLeaf {
+            key: hex::decode(
+                "00a0c2d5a09b2924eb27168d3a7f98779d65c73b7fd1f77c1cb7e21ed138461e3900000000",
+            )
+            .unwrap(),
+            old_v: cv(hex::decode(
+                "0038dec81916000000000000000000000000c7e0541072860400000000000000",
+            )
+            .unwrap()),
+            new_v: cv(hex::decode(
+                "00603c426bc1985a01000000000000000000c7e0541072860400000000000000",
+            )
+            .unwrap()),
+        };
+        let maker_base = MerkleLeaf {
+            key: hex::decode(
+                "0016f6d1868f4ab0e070c4d7938c1bd552425804c6784a1ace659e162d44bdc56900000000",
+            )
+            .unwrap(),
+            old_v: cv(hex::decode(
+                "0000000000000000000000000000000000c04948987cf15a0100000000000000",
+            )
+            .unwrap()),
+            new_v: cv(hex::decode(
+                "0000000000000000000000000000000000000000000000000000000000000000",
+            )
+            .unwrap()),
+        };
+        let page = MerkleLeaf {
+            key: hex::decode("0300000000010000000000470ea1b0f8000000000000000000").unwrap(),
+            old_v: cv(hex::decode(
+                "0000000000000000000000000000000000c04948987cf15a0100000000000000",
+            )
+            .unwrap()),
+            new_v: cv(hex::decode(
+                "0000000000000000000000000000000000000000000000000000000000000000",
+            )
+            .unwrap()),
+        };
+        let best_price = MerkleLeaf {
+            key: hex::decode("020000000001000000").unwrap(),
+            old_v: cv(hex::decode(
+                "0000470ea1b0f800000000000000000000009108c73695000000000000000000",
+            )
+            .unwrap()),
+            new_v: cv(hex::decode(
+                "008027461a740a01000000000000000000009108c73695000000000000000000",
+            )
+            .unwrap()),
+        };
+        let taker_fee = 1000;
+        let mb_delta = maker_base.split_old_to_sum() - maker_base.split_new_to_sum();
+        let base_charged = mb_delta / taker_fee;
+        let tb_delta = taker_base.split_new_to_sum() - taker_base.split_old_to_sum();
+        let prv_is_maker = page.split_old_to_sum();
+        let now_is_maker = page.split_new_to_sum();
+        assert!(tb_delta + base_charged == prv_is_maker - now_is_maker);
+    }
+
+    impl MerkleLeaf {
+        fn from_hex(key: &str, old_v: &str, new_v: &str) -> Self {
+            Self {
+                key: hex::decode(key).unwrap(),
+                old_v: cv(hex::decode(old_v).unwrap()),
+                new_v: cv(hex::decode(new_v).unwrap()),
+            }
+        }
+    }
+
+    #[test]
+    pub fn merkle_verify_should_work() {
+        let leaves = vec![
+            MerkleLeaf::from_hex(
+                "010000000001000000",
+                "0080efab051761049c02000000000000008060b77606ab2f5b0f000000000000",
+                "00c0a5636d9a6fa99a02000000000000008060b77606ab2f5b0f000000000000",
+            ),
+            MerkleLeaf::from_hex(
+                "0016f6d1868f4ab0e070c4d7938c1bd552425804c6784a1ace659e162d44bdc56900000000",
+                "0000000000000000000000000000000000c04948987cf15a0100000000000000",
+                "0000000000000000000000000000000000000000000000000000000000000000",
+            ),
+            MerkleLeaf::from_hex(
+                "0016f6d1868f4ab0e070c4d7938c1bd552425804c6784a1ace659e162d44bdc56901000000",
+                "0060cdab71d92e1600000000000000000040beba547f712e0000000000000000",
+                "0016194132db712e00000000000000000040beba547f712e0000000000000000",
+            ),
+            MerkleLeaf::from_hex(
+                "00a0c2d5a09b2924eb27168d3a7f98779d65c73b7fd1f77c1cb7e21ed138461e3900000000",
+                "0038dec81916000000000000000000000000c7e0541072860400000000000000",
+                "00603c426bc1985a01000000000000000000c7e0541072860400000000000000",
+            ),
+            MerkleLeaf::from_hex(
+                "00a0c2d5a09b2924eb27168d3a7f98779d65c73b7fd1f77c1cb7e21ed138461e3901000000",
+                "001787d6fc288b43000000000000000000000000000000000000000000000000",
+                "00871b42a0ef412b000000000000000000000000000000000000000000000000",
+            ),
+            MerkleLeaf::from_hex(
+                "020000000001000000",
+                "0000470ea1b0f800000000000000000000009108c73695000000000000000000",
+                "008027461a740a01000000000000000000009108c73695000000000000000000",
+            ),
+            MerkleLeaf::from_hex(
+                "0300000000010000000000470ea1b0f8000000000000000000",
+                "0000000000000000000000000000000000c04948987cf15a0100000000000000",
+                "0000000000000000000000000000000000000000000000000000000000000000",
+            ),
+        ];
+        let mp = CompiledMerkleProof(
+            hex::decode(
+                "4c4fef51efba86b6937a1469334e21ac832fab5e731d9e744f3ceb4d60c7fa011ea0e1eca89470b5f9c6b96db6385c8c37237b3a58dea77a87e1f6a67820c5d401ae6d00004f0451f4ae186d9a05c17ee5f724f30e3ae98fd9ea5c2445157977e51cf35b3df2341cf11d9558312b537fe0d2c94d0f46c9e575cd4dc1ab54b952ee560bc21d542508005061a14d393a58f8749891558a4a604abe58ac66803ca0b84b5fcf43b64932cca84f015013d9b73a5ddf0de0a65186e37d66e48e8591416ee11cd6e87270eae36e4f09c950aebc2675cda42bfe3077a7dc5ca4749c7ee996add7c9ffda91980837e562119550b463c168546ae68ffd001fbc93866fe746213a1222d5ac026617e711a7c247e7507ca0d7fdb729a5706aec0f4db86cfe4ca1acc022992ca388daa2bed0c69ec12a50e528a4b614cfba56d4d890249eed3eee0666e581a50cb6415beebc0d9cf4c82850e68fecb62daa397d9f1d6027b60301761fa3a45e7ae9eea1b47ef6af432dbbef50e89d7ae815374608074f46c77254b3dd0d6e5ced33dbe1720b268094ac179bb64c4ff451f436e5ee891b625f2923db8e297a7b0aa8e3587eaea65a04623173720f200c6a744d34087485fc096e25ee0dcfbaa42ff08483d28d1f889112ab7f0eab4b6f08004f0151f6dbaa04a44bb2bfdffccc8144a5797cdeea67660ec89be12ef35e2d0bf19a792b528bcd89340247b549cd3b4c02e2b652d63b3963c472eb48b53a1ce77e8c200051027ac4835a2f9cd13d2f3f9ebc5f85ba876e1c269cfd20ab75f0082cb75f11ed3a000000000000000000000000000000000000000000000000000000000000000050380d38de546fe8d8902358b9ed8183c5d9c2c8d8c31ba15568d4d8cc459bec5050fe98468806407b2fb6f1d007a5476ff96dcda33a4a7d0bd6afc7d3bcd6f2d7c650cc82539a9fb57ca560cb288b9024d183ad5adfeb2a3964c3e0e1ccd4a5635154507b9369b0459ddfacfe18b3507a1bd084f9165c3e81da47b38578b1131a2c5b1750549f493e2860dd60b22b95ea7c4778f882de548745b849a3c3befc985084bb324c4ff451f4212c9bd349391a0144eee1c8ea2ee9489932fd1c8b4b8184482e3c42d19d0e9451d050fe13eb6899e2800a8578419c52598a650305453f37429de9af2b4d00004f01503676428417132817201e732f1a96cd590512cb64fb04428266116e020ce4638f50e844cdfe7b66a06d59e5bcaf1dea26441092b767f0c027e91eef290977f723a1510195e00a12ec35ad37d6e724390ab0853982f04bacbf725346ae78765f80315c60000000000000000000000000000000000000000000000000000000000000000050799b1503e67eabb7def82e990783d1fd4635cf53350be185e6b3ec4e2b6e7fcc5015eaeca48ef3a7075c9c2345a3b012bf55efb70596def74c29db1843292bf596508e581b55c6ccf9ad632039b7394a9f87a010265754d38e9865293ae81b0aeae350437b09251327a46fec149055e793bbcd7a93730b891313fd700391cc2c6fb5d548484c4ff351f30dd148eaaedd2c5ae2ff81a8cdd71e6a17b30eb1d8dfabf3e939b5281b64d1d87c0ecc99a8947ce99bbbd17d85b70c4b99893491ed295a7bddc97292ed02070050a46c50963b2b53d9f15882e003000a3e815464f374e40685d023a63db4b6fdd04f0151f638e5b86696292a464a86a82d34ff7ca3a65f7e1d440eb95bbb01918c8f55791a16415e5822820e865f64f3065b3d8bb2fd509538bdf6b8076c3547abd7fa04005102f4c4f742b88807edec314d74574fcb134a025b6b2e9bb34add6eaf7f6f938b610000000000000000000000000000000000000000000000000000000000004000501670d273c906783c61e2b11e2c5a16468610cc2675ca1251f466d923439f37d850a9b540b9c386d72203534b7af0571ddca4d8f5714631c084d1eb559f0692394e50b071450fa4e3e04aa8c889c0a6d4d4e634645a7587407919a5f24f014b29c20c50b389181fc05b95eb39e4a5fb15f870173206b90d9d0cedb8969dd46eefc3c6b74c4ff6506dbee8fcf763c716e486e35f82d1947fd58f7a51076f5468d16deaf8a6026811504b21a7e46057d0aa6a9bd9f92dfdafa2e746a13a92a1315d45a478998254a94c5026edaf50a4527a3456fc9c198ceae6aee9d6bcfc91be5e66a012ca74179c782c5005ff597fb9a556280d039290741cc425d190d8893fb6cae4d57c456b1c46e7f0507059de345e9653be65bfe63e6774aca5c7c0fa03d149d13ce0dfd37c8acfb70c508c4a6b5395cfea9e7e80f472fbbada60f745d9996e809150c6a4317a37b588f34850a801d8e4b6ab0462fc5c49e5af39dfe8acaffa9661bbd923bbc387fdfd382c414c4ff251f2e5f155995a0d9153d51e2c425d53f1bc67ff1ca54867122cae9d8bcb2c979b78655ad3e45567377d5f4a4bd99478e3849b1c90b9dfe3191c050b5951945503004f0251f56eba5e1afba6dea072bf4530ae47f2ab0c587e3f4edc1e26908ed54a32573b278d9edb4d5733815d91603d062dbbcddcf0d91d1dc09216fcd318397ef214130050bbad095a5ac0e0301deb94a1673e4225c44e0ef777223fd21b95585baf6312165020ab7590665078b7a000bebd89441b61fddd115bf63fd3de97254ffc5127b03050b419a8bdcc7fd2a49c19d9f849b48399a4fe66c4db119b9893973f8978c304555039d1e341b36ce61c724ea49941b5a3fbef1b185c46a5d19f5b8f4708557b72aa50c9a2c2c674ce529fbc691cf52b34afe2ac849c11403935fdb615878f5383c0af500b6bbc065a5f422ba83addaa471225600ce8b9e58f735295c20ec86cfa35b3c94c4ff750cfe2eb886dcc8c7cd7bcf4e810983e6658d69bcdec78310106b329d8b60663ba502be8d680b416ad5aa8a7f0c8c59f3a9adfdffc4e19f4e71374724b54ee06b7cd50fd2ea74fa7c2268987ca87286d2d8e4161afc1f9e55564ebf94e13b0f2764b6050ab116995d5d658127f4ba1762c0d3380f1ac1c47bb59e13ff9a27d114fc0f5955098def021cdb40c2ea4f0375b8b5af0ee6573bdb73fb58adde0728aa25f416d8e485072c5ed23861e76d08b1c48600bb5c9df88801d9e69189c9898efd08511280f7c4848",
+            )
+            .unwrap(),
+        );
+        let (old, new): (Vec<_>, Vec<_>) = leaves
+            .iter()
+            .map(|v| {
+                let key = BlakeTwo256::digest(&v.key).into();
+                ((key, v.old_v.into()), (key, v.new_v.into()))
+            })
+            .unzip();
+        let known_root: [u8; 32] = cv(hex::decode(
+            "328305a5f766959084694f439196b41d3731e4532ef9ad5fb5327868af154f4e",
+        )
+        .unwrap());
+        let r = mp
+            .verify::<smt::blake2b::Blake2bHasher>(&known_root.into(), old)
+            .unwrap();
+        assert!(r);
+        let new_root: [u8; 32] = cv(hex::decode(
+            "f545a8eabcd8fe7ee07c7c3100b896d40b83f07dc66198a3280354d48f602bdb",
+        )
+        .unwrap());
+        let r = mp
+            .verify::<smt::blake2b::Blake2bHasher>(&new_root.into(), new)
+            .unwrap();
+        assert!(r);
+    }
+
+    #[test]
+    pub fn test_conditionally_canceled_with_single_maker() {
+        let leaves = vec![
+            MerkleLeaf::from_hex(
+                "010000000001000000",
+                "0080efab051761049c02000000000000008060b77606ab2f5b0f000000000000",
+                "00c0a5636d9a6fa99a02000000000000008060b77606ab2f5b0f000000000000",
+            ),
+            MerkleLeaf::from_hex(
+                "0016f6d1868f4ab0e070c4d7938c1bd552425804c6784a1ace659e162d44bdc56900000000",
+                "0000000000000000000000000000000000c04948987cf15a0100000000000000",
+                "0000000000000000000000000000000000000000000000000000000000000000",
+            ),
+            MerkleLeaf::from_hex(
+                "0016f6d1868f4ab0e070c4d7938c1bd552425804c6784a1ace659e162d44bdc56901000000",
+                "0060cdab71d92e1600000000000000000040beba547f712e0000000000000000",
+                "0016194132db712e00000000000000000040beba547f712e0000000000000000",
+            ),
+            MerkleLeaf::from_hex(
+                "00a0c2d5a09b2924eb27168d3a7f98779d65c73b7fd1f77c1cb7e21ed138461e3900000000",
+                "0038dec81916000000000000000000000000c7e0541072860400000000000000",
+                "00603c426bc1985a01000000000000000000c7e0541072860400000000000000",
+            ),
+            MerkleLeaf::from_hex(
+                "00a0c2d5a09b2924eb27168d3a7f98779d65c73b7fd1f77c1cb7e21ed138461e3901000000",
+                "001787d6fc288b43000000000000000000000000000000000000000000000000",
+                "00871b42a0ef412b000000000000000000000000000000000000000000000000",
+            ),
+            MerkleLeaf::from_hex(
+                "020000000001000000",
+                "0000470ea1b0f800000000000000000000009108c73695000000000000000000",
+                "008027461a740a01000000000000000000009108c73695000000000000000000",
+            ),
+            MerkleLeaf::from_hex(
+                "0300000000010000000000470ea1b0f8000000000000000000",
+                "0000000000000000000000000000000000c04948987cf15a0100000000000000",
+                "0000000000000000000000000000000000000000000000000000000000000000",
+            ),
+        ];
+        let base = 0u32;
+        let quote = 1u32;
+        let price = 90000000000000000u128;
+        let amount = 54077700000000000000u128;
+        let pages = 1;
+        let maker_accounts = 2;
+        let leaves_count = (4u8 + maker_accounts + pages) as usize;
+        assert!(leaves.len() == leaves_count,);
+        assert!(maker_accounts % 2 == 0,);
+        let (ask0, bid0) = leaves[0].split_old_to_u128();
+        let (ask1, bid1) = leaves[0].split_new_to_u128();
+        let ask_delta = ask0 - ask1;
+        let bid_delta = bid1 - bid0;
+
+        let taker_base = &leaves[maker_accounts as usize + 1];
+        let (tba0, tbf0) = taker_base.split_old_to_u128();
+        let (tba1, tbf1) = taker_base.split_new_to_u128();
+        let tb_delta = (tba1 + tbf1) - (tba0 + tbf0);
+        let (bk, taker_b_id) = taker_base.try_get_account().unwrap();
+        let taker_quote = &leaves[maker_accounts as usize + 2];
+        let (tqa0, tqf0) = taker_quote.split_old_to_u128();
+        let (tqa1, tqf1) = taker_quote.split_new_to_u128();
+        let (qk, taker_q_id) = taker_quote.try_get_account().unwrap();
+        let tq_delta = (tqa0 + tqf0) - (tqa1 + tqf1);
+        assert!(bk == base && qk == quote,);
+        assert!(taker_b_id == taker_q_id,);
+        let mut mb_delta = 0u128;
+        let mut mq_delta = 0u128;
+        for i in 0..maker_accounts as usize / 2 {
+            // base first
+            let maker_base = &leaves[i * 2 + 1];
+            let (bk, maker_b_id) = maker_base.try_get_account().unwrap();
+            let mb0 = maker_base.split_old_to_sum();
+            let mb1 = maker_base.split_new_to_sum();
+            let base_decr = mb0 - mb1;
+            mb_delta += base_decr;
+            // then quote
+            let maker_quote = &leaves[i * 2 + 2];
+            let (qk, maker_q_id) = maker_quote.try_get_account().unwrap();
+            assert!(quote == qk && base == bk,);
+            assert!(maker_b_id == maker_q_id,);
+            let mq0 = maker_quote.split_old_to_sum();
+            let mq1 = maker_quote.split_new_to_sum();
+            let quote_incr = mq1 - mq0;
+            mq_delta += quote_incr;
+        }
+        let quote_charged = tq_delta / 1000;
+        assert!(mq_delta + quote_charged == tq_delta,);
+        let base_charged = mb_delta / 1000;
+        assert!(tb_delta + base_charged == mb_delta,);
+        assert!(ask_delta == mb_delta,);
+        if bid_delta != 0 {
+            assert!(bid_delta == amount - mb_delta,);
+        }
+        let best_price = &leaves[maker_accounts as usize + 3];
+        let (b, q) = best_price.try_get_symbol().unwrap();
+        assert!(b == base && q == quote,);
+        let (best_ask0, best_bid0) = best_price.split_old_to_u128();
+        let (best_ask1, best_bid1) = best_price.split_new_to_u128();
+
+        if ask_delta != 0 {
+            // trading happened
+            assert!(pages > 0 && price >= best_ask0,);
+            // best_ask0 <= page0 < page1 < .. < pagen <= best_ask1
+            let mut pre_best = best_ask0;
+            let mut taken_asks = 0u128;
+            for i in 0..pages as usize - 1 {
+                let page = &leaves[maker_accounts as usize + 4 + i];
+                let (b, q, p) = page.try_get_orderpage().unwrap();
+                assert!(b == base && q == quote,);
+                assert!(pre_best <= p,);
+                pre_best = p;
+                assert!(page.split_new_to_sum() == 0,);
+                taken_asks += page.split_old_to_sum();
+            }
+            if bid_delta != 0 {
+                // partial_filled
+                let taker_price_page = leaves.last().unwrap();
+                let (b, q, p) = taker_price_page.try_get_orderpage().unwrap();
+                assert!(b == base && q == quote && p == price,);
+                assert!(best_bid1 == price,);
+                let prv_is_maker = taker_price_page.split_old_to_sum();
+                let now_is_taker = taker_price_page.split_new_to_sum();
+                assert!(taken_asks + prv_is_maker + now_is_taker == amount,);
+            } else {
+                // filled or conditional_canceled
+                let vanity_maker = leaves.last().unwrap();
+                let (b, q, p) = vanity_maker.try_get_orderpage().unwrap();
+                assert!(b == base && q == quote,);
+                assert!(best_bid1 == best_bid0,);
+                let prv_is_maker = vanity_maker.split_old_to_sum();
+                let now_is_maker = vanity_maker.split_new_to_sum();
+                assert!(tb_delta + base_charged == taken_asks + prv_is_maker - now_is_maker,);
+            }
+        } else {
+            // no trading
+            assert!(best_ask1 == best_ask0,);
+            if bid_delta != 0 {
+                // placed
+                let taker_price_page = leaves.last().unwrap();
+                let (b, q, p) = taker_price_page.try_get_orderpage().unwrap();
+                assert!(b == base && q == quote && p == price,);
+                let prv_is_maker = taker_price_page.split_old_to_sum();
+                let now_is_maker = taker_price_page.split_new_to_sum();
+                assert!(amount == now_is_maker - prv_is_maker,);
+            }
+        }
     }
 }
