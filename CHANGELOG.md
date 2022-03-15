@@ -1,3 +1,7 @@
+# v0.2.5-rc.6
+
+- bump v0.2.5-rc.6
+
 # v0.2.5-rc.5
 
 - wait for proofs InBlock
