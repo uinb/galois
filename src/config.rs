@@ -69,6 +69,7 @@ pub struct FusotaoConfig {
     pub node_url: String,
     pub key_seed: String,
     pub claim_block: u32,
+    pub proof_batch_limit: usize,
     pub fee_adjust_threshold: u64,
 }
 
@@ -78,6 +79,7 @@ impl Default for FusotaoConfig {
             node_url: String::from(""),
             key_seed: String::from(""),
             claim_block: 1,
+            proof_batch_limit: 20,
             fee_adjust_threshold: 10,
         }
     }
