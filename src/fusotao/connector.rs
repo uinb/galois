@@ -84,14 +84,16 @@ impl FusoConnector {
         let result = Dominator::decode(&mut payload.as_slice()).unwrap();
         self.proved_event_id
             .store(result.sequence.0, Ordering::Relaxed);
+        log::info!("synchronizing proving progress: {}", result.sequence.0);
         Ok(self.proved_event_id.clone())
     }
 
     pub fn start_submitting(&self) -> anyhow::Result<()> {
         let api = self.api.clone();
         let proved_event_id = self.proved_event_id.clone();
+        let mut inner_counter = proved_event_id.load(Ordering::Relaxed);
         std::thread::spawn(move || loop {
-            let proofs = persistence::fetch_raw_after(proved_event_id.load(Ordering::Relaxed));
+            let proofs = persistence::fetch_raw_after(inner_counter);
             if proofs.is_empty() {
                 std::thread::sleep(Duration::from_millis(1000));
                 continue;
@@ -99,7 +101,11 @@ impl FusoConnector {
             let in_block = proofs.last().unwrap().0;
             let proofs = proofs.into_iter().map(|p| p.1).collect::<Vec<_>>();
             match Self::submit_batch(&api, proofs) {
-                Ok(()) => proved_event_id.store(in_block, Ordering::Relaxed),
+                Ok(()) => {
+                    inner_counter = in_block;
+                    proved_event_id.store(in_block, Ordering::Relaxed);
+                    log::debug!("rotate proved event to {}", in_block);
+                }
                 Err(e) => log::error!("{:?}", e),
             }
         });
@@ -109,7 +115,7 @@ impl FusoConnector {
     fn submit_batch(api: &FusoApi, batch: Vec<RawParameter>) -> anyhow::Result<()> {
         let xt: sub_api::UncheckedExtrinsicV4<_> =
             sub_api::compose_extrinsic!(api, "Verifier", "verify", batch);
-        api.send_extrinsic(xt.hex_encode(), sub_api::XtStatus::Broadcast)
+        api.send_extrinsic(xt.hex_encode(), sub_api::XtStatus::InBlock)
             .map_err(|e| anyhow::anyhow!("submit proofs failed, {:?}", e))
             .map(|_| log::info!("submitting proofs ok"))
     }

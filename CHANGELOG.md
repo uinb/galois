@@ -1,3 +1,11 @@
+# v0.2.5-rc.5
+
+- wait for proofs InBlock
+
+# v0.2.5-rc.4
+
+- use inner counter instead of Arc
+
 # v0.2.4
 
 - MaxFee Constraint of increasing fee
