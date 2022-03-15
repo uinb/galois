@@ -1,4 +1,4 @@
-# v0.2.5-rc.3
+# v0.2.5-rc.4
 
 - use inner counter instead of Arc
 
