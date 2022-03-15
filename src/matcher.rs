@@ -212,13 +212,16 @@ pub fn execute_limit(
             );
             cfg_if::cfg_if! {
                 if #[cfg(feature = "fusotao")] {
-                    page_delta.insert(
-                        page.price,
-                        (
-                            traded.iter().map(|o| o.filled).sum::<Amount>() + page.amount,
-                            page.amount,
-                        ),
-                    );
+                    let taking_at_page = traded.iter().map(|o| o.filled).sum::<Amount>();
+                    if !taking_at_page.is_zero() {
+                        page_delta.insert(
+                            page.price,
+                            (
+                                taking_at_page + page.amount,
+                                page.amount,
+                            ),
+                        );
+                    }
                 }
             }
             if page.is_empty() {
