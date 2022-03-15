@@ -1,3 +1,7 @@
+# v0.2.5-rc.3
+
+- use inner counter instead of Arc
+
 # v0.2.4
 
 - MaxFee Constraint of increasing fee
