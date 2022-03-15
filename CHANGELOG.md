@@ -1,3 +1,7 @@
+# v0.2.5.rc.2
+
+- use independent config of submitting proofs
+
 # v0.2.4
 
 - MaxFee Constraint of increasing fee
