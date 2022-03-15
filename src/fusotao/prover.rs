@@ -1615,4 +1615,37 @@ mod test {
             }
         }
     }
+
+    fn cv<T, const N: usize>(v: Vec<T>) -> [T; N] {
+        v.try_into().unwrap_or_else(|v: Vec<T>| {
+            panic!("Expected a Vec of length {} but it was {}", N, v.len())
+        })
+    }
+
+    #[test]
+    pub fn test_take_best_only() {
+        let ml = MerkleLeaf {
+            key: hex::decode("0300000000010000000000e8890423c78a0000000000000000").unwrap(),
+            old_v: cv(hex::decode(
+                "00000000000000000000000000000000000042f02abf8d0a5000000000000000",
+            )
+            .unwrap()),
+            new_v: cv(hex::decode(
+                "000000000000000000000000000000000000d2b40fede2c94c00000000000000",
+            )
+            .unwrap()),
+        };
+        let (b, q, p) = ml.try_get_orderpage().unwrap();
+        // assert!(b == 0 && q == 1 && p == );
+        // assert_eq!(ml.try_get_orderpage().unwrap().2, dec!(10.0).to_amount());
+        ml.split_old_to_sum() - ml.split_new_to_sum();
+        assert_eq!(
+            super::to_decimal_represent(ml.split_old_to_sum()),
+            dec!(1476.5)
+        );
+        assert_eq!(
+            super::to_decimal_represent(ml.split_new_to_sum()),
+            dec!(1416.5)
+        );
+    }
 }

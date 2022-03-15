@@ -237,7 +237,7 @@ impl ToBlockChainNumeric for Decimal {
 }
 
 // FIXME
-fn to_decimal_represent(v: u128) -> Decimal {
+pub fn to_decimal_represent(v: u128) -> Decimal {
     let n = v / ONE_ONCHAIN;
     let f = v % ONE_ONCHAIN;
     let n: Amount = n.try_into().unwrap();
