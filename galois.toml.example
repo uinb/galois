@@ -17,11 +17,6 @@ fetch_intervel_ms = 5
 [fusotao]
 node_url = "ws://localhost:9944"
 key_seed = "//Alice"
-claim_block = "0x0000000000000000000000000000000000000000000000000000000000000000"
-
-[log]
-[log.appenders.console]
-kind = "console"
-[log.root]
-level = "info"
-appenders = ["console"]
+proof_batch_limit = 20
+claim_block = 1
+fee_adjust_threshold = 1000
