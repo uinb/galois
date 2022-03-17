@@ -12,6 +12,11 @@ readme = "README.md"
 name = "galois"
 path = "bin/galois.rs"
 
+[[bin]]
+name = "enc-config"
+path = "bin/enc.rs"
+required-features = ["enc-conf"]
+
 [features]
 default = []
 fusotao = ["sub-api", "parity-scale-codec", "smt", "memmap", "sp-core", "sp-runtime"]
@@ -71,6 +76,7 @@ version = "2.2"
 
 [dependencies.log]
 version = "0.4"
+features = ["serde"]
 
 [dependencies.log4rs]
 version = "1.0"
