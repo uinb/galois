@@ -91,22 +91,39 @@ impl FusoConnector {
     pub fn start_submitting(&self) -> anyhow::Result<()> {
         let api = self.api.clone();
         let proved_event_id = self.proved_event_id.clone();
-        let mut inner_counter = proved_event_id.load(Ordering::Relaxed);
+        let mut in_block = proved_event_id.load(Ordering::Relaxed);
         std::thread::spawn(move || loop {
-            let proofs = persistence::fetch_raw_after(inner_counter);
+            let proofs = persistence::fetch_raw_after(in_block);
             if proofs.is_empty() {
                 std::thread::sleep(Duration::from_millis(1000));
                 continue;
             }
-            let in_block = proofs.last().unwrap().0;
-            let proofs = proofs.into_iter().map(|p| p.1).collect::<Vec<_>>();
-            match Self::submit_batch(&api, proofs) {
+            let mut total_size = 0usize;
+            let mut last_submit = 0u64;
+            let mut truncated = vec![];
+            for (event_id, proof) in proofs.into_iter() {
+                if total_size + proof.0.len() >= super::MAX_EXTRINSIC_SIZE {
+                    break;
+                }
+                total_size += proof.0.len();
+                last_submit = event_id;
+                truncated.push(proof);
+            }
+            if truncated.is_empty() {
+                log::error!(
+                    "A single extrinsic is out of size limitation, event_id={}",
+                    in_block + 1,
+                );
+                std::thread::sleep(Duration::from_millis(10000));
+                continue;
+            }
+            match Self::submit_batch(&api, truncated) {
                 Ok(()) => {
-                    inner_counter = in_block;
+                    in_block = last_submit;
                     proved_event_id.store(in_block, Ordering::Relaxed);
                     log::debug!("rotate proved event to {}", in_block);
                 }
-                Err(e) => log::error!("{:?}", e),
+                Err(e) => log::error!("error occur while submitting proofs, {:?}", e),
             }
         });
         Ok(())

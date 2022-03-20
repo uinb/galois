@@ -48,8 +48,7 @@ const ONE_ONCHAIN: u128 = 1_000_000_000_000_000_000;
 const MILL: u32 = 1_000_000;
 const BILL: u32 = 1_000_000_000;
 const QUINTILL: u64 = 1_000_000_000_000_000_000;
-#[allow(dead_code)]
-const MAX_EXTRINSIC_BYTES: usize = 1_000_000;
+const MAX_EXTRINSIC_SIZE: usize = 3 * 1024 * 1024;
 #[allow(dead_code)]
 const MAX_EXTRINSIC_WEIGHT: u128 = 1_000_000_000_000_000_000;
 
@@ -255,7 +254,6 @@ fn u128le_to_h256(a0: u128, a1: u128) -> [u8; 32] {
 
 #[cfg(test)]
 pub mod test {
-    use rust_decimal_macros::dec;
 
     use super::*;
 

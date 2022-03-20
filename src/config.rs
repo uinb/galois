@@ -178,6 +178,9 @@ fn init_config(toml: &str) -> anyhow::Result<Config> {
     loggers
         .entry("ws".to_string())
         .or_insert_with(|| Logger::builder().build("ws".to_string(), log::LevelFilter::Error));
+    loggers.entry("ac_node_api".to_string()).or_insert_with(|| {
+        Logger::builder().build("ac_node_api".to_string(), log::LevelFilter::Error)
+    });
     loggers
         .entry("fusotao_rust_client".to_string())
         .or_insert_with(|| {
