@@ -1,3 +1,7 @@
+# v0.2.6-rc.1
+
+- add proof size limit
+
 # v0.2.5-rc.5
 
 - wait for proofs InBlock
