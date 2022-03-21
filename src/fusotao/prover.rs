@@ -254,7 +254,7 @@ impl Prover {
             .send(Proof {
                 event_id,
                 user_id: cmd.user_id,
-                cmd: cmd.into(),
+                cmd: (cmd, true).into(),
                 leaves,
                 maker_page_delta: 0,
                 maker_account_delta: 0,
@@ -290,7 +290,7 @@ impl Prover {
                 .send(Proof {
                     event_id,
                     user_id: cmd.user_id,
-                    cmd: cmd.into(),
+                    cmd: (cmd, false).into(),
                     leaves,
                     maker_page_delta: 0,
                     maker_account_delta: 0,
@@ -299,6 +299,26 @@ impl Prover {
                 })
                 .unwrap();
         }
+    }
+
+    pub fn prove_rejecting_no_reason(
+        &self,
+        merkle_tree: &GlobalStates,
+        event_id: u64,
+        cmd: AssetsCmd,
+    ) {
+        self.sender
+            .send(Proof {
+                event_id,
+                user_id: cmd.user_id,
+                cmd: (cmd, false).into(),
+                leaves: vec![],
+                maker_page_delta: 0,
+                maker_account_delta: 0,
+                merkle_proof: vec![],
+                root: merkle_tree.root().clone().into(),
+            })
+            .unwrap();
     }
 }
 
@@ -600,10 +620,20 @@ mod test {
     pub fn test_trade() {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let mut merkle_tree = GlobalStates::default();
-            let pp = Prover::new(tx, Arc::new(AtomicU64::new(0)));
-            let mut all = Accounts::new();
+            let merkle_tree = GlobalStates::default();
+            let all = Accounts::new();
             let orderbook = construct_pair();
+            let mut orderbooks = std::collections::HashMap::new();
+            let (mf, tf) = (orderbook.maker_fee, orderbook.taker_fee);
+            orderbooks.insert((1, 0), orderbook);
+            let mut data = Data {
+                orderbooks,
+                accounts: all,
+                merkle_tree,
+                current_event_id: 0,
+                tvl: Amount::zero(),
+            };
+            let pp = Prover::new(tx, Arc::new(AtomicU64::new(0)));
             let cmd0 = AssetsCmd {
                 user_id: UserId::from_low_u64_be(1),
                 in_or_out: InOrOut::In,
@@ -612,11 +642,15 @@ mod test {
                 block_number: 1,
                 extrinsic_hash: vec![0],
             };
-            let after =
-                assets::add_to_available(&mut all, &cmd0.user_id, cmd0.currency, cmd0.amount)
-                    .unwrap();
+            let after = assets::add_to_available(
+                &mut data.accounts,
+                &cmd0.user_id,
+                cmd0.currency,
+                cmd0.amount,
+            )
+            .unwrap();
             pp.prove_assets_cmd(
-                &mut merkle_tree,
+                &mut data.merkle_tree,
                 1,
                 cmd0,
                 &assets::Balance::default(),
@@ -630,20 +664,14 @@ mod test {
                 block_number: 1,
                 extrinsic_hash: vec![0],
             };
-            let transfer_again =
-                assets::add_to_available(&mut all, &cmd1.user_id, cmd1.currency, cmd1.amount)
-                    .unwrap();
-            pp.prove_assets_cmd(&mut merkle_tree, 1, cmd1, &after, &transfer_again);
-
-            let mut orderbooks = std::collections::HashMap::new();
-            let (mf, tf) = (orderbook.maker_fee, orderbook.taker_fee);
-            orderbooks.insert((1, 0), orderbook);
-            let mut data = Data {
-                orderbooks,
-                accounts: all,
-                merkle_tree,
-                current_event_id: 0,
-            };
+            let transfer_again = assets::add_to_available(
+                &mut data.accounts,
+                &cmd1.user_id,
+                cmd1.currency,
+                cmd1.amount,
+            )
+            .unwrap();
+            pp.prove_assets_cmd(&mut data.merkle_tree, 1, cmd1, &after, &transfer_again);
 
             let size = data.orderbooks.get(&(1, 0)).unwrap().size();
             let cmd2 = LimitCmd {
@@ -1080,6 +1108,7 @@ mod test {
                 accounts: all,
                 merkle_tree,
                 current_event_id: 0,
+                tvl: Amount::zero(),
             };
 
             // alice ask p=10, a=0.5
@@ -1434,6 +1463,7 @@ mod test {
                 accounts: all,
                 merkle_tree,
                 current_event_id: 0,
+                tvl: Amount::zero(),
             };
 
             // alice ask p=10, a=1.1
@@ -1637,11 +1667,11 @@ mod test {
         };
         let (b, q, p) = ml.try_get_orderpage().unwrap();
         assert_eq!(
-            super::to_decimal_represent(ml.split_old_to_sum()),
+            super::to_decimal_represent(ml.split_old_to_sum()).unwrap(),
             dec!(1476.5)
         );
         assert_eq!(
-            super::to_decimal_represent(ml.split_new_to_sum()),
+            super::to_decimal_represent(ml.split_new_to_sum()).unwrap(),
             dec!(1416.5)
         );
     }
