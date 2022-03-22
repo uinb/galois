@@ -1,3 +1,7 @@
+# v0.2.6-rc.2
+
+- enable rejecting authorizing
+
 # v0.2.5-rc.7
 
 - copy unit tests
