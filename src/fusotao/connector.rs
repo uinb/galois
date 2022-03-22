@@ -91,22 +91,39 @@ impl FusoConnector {
     pub fn start_submitting(&self) -> anyhow::Result<()> {
         let api = self.api.clone();
         let proved_event_id = self.proved_event_id.clone();
-        let mut inner_counter = proved_event_id.load(Ordering::Relaxed);
+        let mut in_block = proved_event_id.load(Ordering::Relaxed);
         std::thread::spawn(move || loop {
-            let proofs = persistence::fetch_raw_after(inner_counter);
+            let proofs = persistence::fetch_raw_after(in_block);
             if proofs.is_empty() {
                 std::thread::sleep(Duration::from_millis(1000));
                 continue;
             }
-            let in_block = proofs.last().unwrap().0;
-            let proofs = proofs.into_iter().map(|p| p.1).collect::<Vec<_>>();
-            match Self::submit_batch(&api, proofs) {
-                Ok(()) => {
-                    inner_counter = in_block;
-                    proved_event_id.store(in_block, Ordering::Relaxed);
-                    log::debug!("rotate proved event to {}", in_block);
+            let mut total_size = 0usize;
+            let mut last_submit = 0u64;
+            let mut truncated = vec![];
+            for (event_id, proof) in proofs.into_iter() {
+                if total_size + proof.0.len() >= super::MAX_EXTRINSIC_SIZE {
+                    break;
                 }
-                Err(e) => log::error!("{:?}", e),
+                total_size += proof.0.len();
+                last_submit = event_id;
+                truncated.push(proof);
+            }
+            if truncated.is_empty() {
+                log::error!(
+                    "A single extrinsic is out of size limitation, event_id={}",
+                    in_block + 1,
+                );
+                std::thread::sleep(Duration::from_millis(10000));
+                continue;
+            }
+            match Self::submit_batch(&api, truncated) {
+                Ok(()) => {
+                    in_block = last_submit;
+                    proved_event_id.store(in_block, Ordering::Relaxed);
+                    log::info!("rotate proved event to {}", in_block);
+                }
+                Err(e) => log::error!("error occur while submitting proofs, {:?}", e),
             }
         });
         Ok(())
@@ -169,7 +186,7 @@ impl FusoConnector {
                         from_block_number = sync;
                         blk[..].copy_from_slice(&sync.to_le_bytes()[..]);
                         blk.flush().unwrap();
-                        log::info!("no interested events found before block {:?}", sync);
+                        log::debug!("no interested events found before block {:?}", sync);
                     }
                 }
                 Err(e) => log::error!("sync blocks failed, {:?}", e),
@@ -201,7 +218,7 @@ impl FusoConnector {
                             let mut cmd = sequence::Command::default();
                             cmd.cmd = sequence::TRANSFER_IN;
                             cmd.currency = Some(decoded.token_id);
-                            cmd.amount = Some(to_decimal_represent(decoded.amount));
+                            cmd.amount = to_decimal_represent(decoded.amount);
                             cmd.user_id = Some(format!("{}", decoded.fund_owner));
                             cmd.block_number = at.or(Some(0));
                             cmd.extrinsic_hash =
@@ -215,7 +232,7 @@ impl FusoConnector {
                             let mut cmd = sequence::Command::default();
                             cmd.cmd = sequence::TRANSFER_OUT;
                             cmd.currency = Some(decoded.token_id);
-                            cmd.amount = Some(to_decimal_represent(decoded.amount));
+                            cmd.amount = to_decimal_represent(decoded.amount);
                             cmd.user_id = Some(format!("{}", decoded.fund_owner));
                             cmd.block_number = at.or(Some(0));
                             cmd.extrinsic_hash =

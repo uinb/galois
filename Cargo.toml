@@ -1,6 +1,6 @@
 [package]
 name = "galois"
-version = "0.2.5-dev"
+version = "0.2.6-dev"
 authors = ["UINB Technologies"]
 edition = "2021"
 license = "Apache-2.0"
@@ -12,17 +12,22 @@ readme = "README.md"
 name = "galois"
 path = "bin/galois.rs"
 
+[[bin]]
+name = "enc-config"
+path = "bin/enc.rs"
+required-features = ["enc-conf"]
+
 [features]
 default = []
 fusotao = ["sub-api", "parity-scale-codec", "smt", "memmap", "sp-core", "sp-runtime"]
 enc-conf = ["magic-crypt"]
 
 [dependencies.rust_decimal]
-version = "1.15"
+version = "1.22"
 features = ["serde-bincode"]
 
 [dev-dependencies.rust_decimal_macros]
-version = "1.15"
+version = "1.22"
 
 [dependencies.bincode]
 version = "1.3.1"
@@ -71,6 +76,7 @@ version = "2.2"
 
 [dependencies.log]
 version = "0.4"
+features = ["serde"]
 
 [dependencies.log4rs]
 version = "1.0"
@@ -107,7 +113,7 @@ optional = true
 
 [dependencies.smt]
 git = "https://github.com/uinb/sparse-merkle-tree"
-tag = "v0.1.7"
+tag = "v0.1.8"
 package = "sparse-merkle-tree"
 features = ["serde-rs", "blake2b"]
 optional = true

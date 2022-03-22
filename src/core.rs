@@ -19,7 +19,7 @@ use std::{
 };
 
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
-use rust_decimal::Decimal;
+use rust_decimal::{prelude::*, Decimal};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "fusotao")]
@@ -160,6 +160,8 @@ pub struct Data {
     #[cfg(feature = "fusotao")]
     pub merkle_tree: GlobalStates,
     pub current_event_id: u64,
+    #[cfg(feature = "fusotao")]
+    pub tvl: Amount,
 }
 
 unsafe impl Sync for Data {}
@@ -172,6 +174,8 @@ impl Data {
             #[cfg(feature = "fusotao")]
             merkle_tree: GlobalStates::default(),
             current_event_id: 0,
+            #[cfg(feature = "fusotao")]
+            tvl: Amount::zero(),
         }
     }
 

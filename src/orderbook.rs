@@ -363,18 +363,6 @@ impl OrderBook {
 }
 
 #[test]
-pub fn test_scale() {
-    use rust_decimal_macros::dec;
-
-    let mut price = dec!(1.26);
-    price.rescale(4);
-    assert_eq!("1.2600", price.to_string());
-    let mut amount = dec!(0.0001);
-    amount.rescale(2);
-    assert_eq!("0.00", amount.to_string());
-}
-
-#[test]
 pub fn test_orderbook() {
     use rust_decimal_macros::dec;
     let base_scale = 5;

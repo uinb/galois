@@ -16,14 +16,15 @@ use argparse::{ArgumentParser, Store};
 use cfg_if::cfg_if;
 use lazy_static::lazy_static;
 use log4rs::config::{Logger, RawConfig as LogConfig};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
     pub server: ServerConfig,
     pub sequence: SequenceConfig,
     pub mysql: MysqlConfig,
     pub redis: RedisConfig,
+    #[serde(skip_serializing)]
     pub log: LogConfig,
     pub fusotao: Option<FusotaoConfig>,
 }
@@ -31,14 +32,15 @@ pub struct Config {
 #[cfg(feature = "enc-conf")]
 pub trait EncryptedConfig {
     fn decrypt(&mut self, key: &str) -> anyhow::Result<()>;
+    fn encrypt(&mut self, key: &str) -> anyhow::Result<()>;
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ServerConfig {
     pub bind_addr: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct SequenceConfig {
     pub coredump_dir: String,
     pub checkpoint: usize,
@@ -48,7 +50,7 @@ pub struct SequenceConfig {
     pub enable_from_genesis: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct MysqlConfig {
     pub url: String,
 }
@@ -62,9 +64,17 @@ impl EncryptedConfig for MysqlConfig {
         self.url.replace_range(.., &dec);
         Ok(())
     }
+
+    fn encrypt(&mut self, key: &str) -> anyhow::Result<()> {
+        use magic_crypt::MagicCryptTrait;
+        let mc = magic_crypt::new_magic_crypt!(key, 64);
+        let enc = mc.encrypt_str_to_base64(&self.url);
+        self.url.replace_range(.., &enc);
+        Ok(())
+    }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct FusotaoConfig {
     pub node_url: String,
     pub key_seed: String,
@@ -94,9 +104,17 @@ impl EncryptedConfig for FusotaoConfig {
         self.key_seed.replace_range(.., &dec);
         Ok(())
     }
+
+    fn encrypt(&mut self, key: &str) -> anyhow::Result<()> {
+        use magic_crypt::MagicCryptTrait;
+        let mc = magic_crypt::new_magic_crypt!(key, 64);
+        let enc = mc.encrypt_str_to_base64(&self.key_seed);
+        self.key_seed.replace_range(.., &enc);
+        Ok(())
+    }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct RedisConfig {
     pub url: String,
 }
@@ -114,6 +132,26 @@ fn init_config_file() -> anyhow::Result<Config> {
         args.parse_args_or_exit();
     }
     init_config(&std::fs::read_to_string(file)?)
+}
+
+#[cfg(feature = "enc-conf")]
+pub fn print_enc_config_file() -> anyhow::Result<()> {
+    let mut file = String::new();
+    let mut key = String::new();
+    {
+        let mut args = ArgumentParser::new();
+        args.refer(&mut file)
+            .add_option(&["-c"], Store, "toml config file");
+        args.refer(&mut key).add_option(&["-k"], Store, "key");
+        args.parse_args_or_exit();
+    }
+    let mut cfg: Config = toml::from_str(&std::fs::read_to_string(file)?)?;
+    cfg.mysql.encrypt(&key)?;
+    if let Some(ref mut fuso) = cfg.fusotao {
+        fuso.encrypt(&key)?;
+    }
+    println!("{}", toml::to_string(&cfg)?);
+    Ok(())
 }
 
 fn init_config(toml: &str) -> anyhow::Result<Config> {
@@ -140,6 +178,9 @@ fn init_config(toml: &str) -> anyhow::Result<Config> {
     loggers
         .entry("ws".to_string())
         .or_insert_with(|| Logger::builder().build("ws".to_string(), log::LevelFilter::Error));
+    loggers.entry("ac_node_api".to_string()).or_insert_with(|| {
+        Logger::builder().build("ac_node_api".to_string(), log::LevelFilter::Error)
+    });
     loggers
         .entry("fusotao_rust_client".to_string())
         .or_insert_with(|| {

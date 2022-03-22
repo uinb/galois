@@ -254,7 +254,7 @@ impl Prover {
             .send(Proof {
                 event_id,
                 user_id: cmd.user_id,
-                cmd: cmd.into(),
+                cmd: (cmd, true).into(),
                 leaves,
                 maker_page_delta: 0,
                 maker_account_delta: 0,
@@ -290,7 +290,7 @@ impl Prover {
                 .send(Proof {
                     event_id,
                     user_id: cmd.user_id,
-                    cmd: cmd.into(),
+                    cmd: (cmd, false).into(),
                     leaves,
                     maker_page_delta: 0,
                     maker_account_delta: 0,
@@ -299,6 +299,26 @@ impl Prover {
                 })
                 .unwrap();
         }
+    }
+
+    pub fn prove_rejecting_no_reason(
+        &self,
+        merkle_tree: &GlobalStates,
+        event_id: u64,
+        cmd: AssetsCmd,
+    ) {
+        self.sender
+            .send(Proof {
+                event_id,
+                user_id: cmd.user_id,
+                cmd: (cmd, false).into(),
+                leaves: vec![],
+                maker_page_delta: 0,
+                maker_account_delta: 0,
+                merkle_proof: vec![],
+                root: merkle_tree.root().clone().into(),
+            })
+            .unwrap();
     }
 }
 
@@ -600,10 +620,20 @@ mod test {
     pub fn test_trade() {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let mut merkle_tree = GlobalStates::default();
-            let pp = Prover::new(tx, Arc::new(AtomicU64::new(0)));
-            let mut all = Accounts::new();
+            let merkle_tree = GlobalStates::default();
+            let all = Accounts::new();
             let orderbook = construct_pair();
+            let mut orderbooks = std::collections::HashMap::new();
+            let (mf, tf) = (orderbook.maker_fee, orderbook.taker_fee);
+            orderbooks.insert((1, 0), orderbook);
+            let mut data = Data {
+                orderbooks,
+                accounts: all,
+                merkle_tree,
+                current_event_id: 0,
+                tvl: Amount::zero(),
+            };
+            let pp = Prover::new(tx, Arc::new(AtomicU64::new(0)));
             let cmd0 = AssetsCmd {
                 user_id: UserId::from_low_u64_be(1),
                 in_or_out: InOrOut::In,
@@ -612,11 +642,15 @@ mod test {
                 block_number: 1,
                 extrinsic_hash: vec![0],
             };
-            let after =
-                assets::add_to_available(&mut all, &cmd0.user_id, cmd0.currency, cmd0.amount)
-                    .unwrap();
+            let after = assets::add_to_available(
+                &mut data.accounts,
+                &cmd0.user_id,
+                cmd0.currency,
+                cmd0.amount,
+            )
+            .unwrap();
             pp.prove_assets_cmd(
-                &mut merkle_tree,
+                &mut data.merkle_tree,
                 1,
                 cmd0,
                 &assets::Balance::default(),
@@ -630,20 +664,14 @@ mod test {
                 block_number: 1,
                 extrinsic_hash: vec![0],
             };
-            let transfer_again =
-                assets::add_to_available(&mut all, &cmd1.user_id, cmd1.currency, cmd1.amount)
-                    .unwrap();
-            pp.prove_assets_cmd(&mut merkle_tree, 1, cmd1, &after, &transfer_again);
-
-            let mut orderbooks = std::collections::HashMap::new();
-            let (mf, tf) = (orderbook.maker_fee, orderbook.taker_fee);
-            orderbooks.insert((1, 0), orderbook);
-            let mut data = Data {
-                orderbooks,
-                accounts: all,
-                merkle_tree,
-                current_event_id: 0,
-            };
+            let transfer_again = assets::add_to_available(
+                &mut data.accounts,
+                &cmd1.user_id,
+                cmd1.currency,
+                cmd1.amount,
+            )
+            .unwrap();
+            pp.prove_assets_cmd(&mut data.merkle_tree, 1, cmd1, &after, &transfer_again);
 
             let size = data.orderbooks.get(&(1, 0)).unwrap().size();
             let cmd2 = LimitCmd {
@@ -1080,6 +1108,7 @@ mod test {
                 accounts: all,
                 merkle_tree,
                 current_event_id: 0,
+                tvl: Amount::zero(),
             };
 
             // alice ask p=10, a=0.5
@@ -1434,6 +1463,7 @@ mod test {
                 accounts: all,
                 merkle_tree,
                 current_event_id: 0,
+                tvl: Amount::zero(),
             };
 
             // alice ask p=10, a=1.1
@@ -1637,11 +1667,11 @@ mod test {
         };
         let (b, q, p) = ml.try_get_orderpage().unwrap();
         assert_eq!(
-            super::to_decimal_represent(ml.split_old_to_sum()),
+            super::to_decimal_represent(ml.split_old_to_sum()).unwrap(),
             dec!(1476.5)
         );
         assert_eq!(
-            super::to_decimal_represent(ml.split_new_to_sum()),
+            super::to_decimal_represent(ml.split_new_to_sum()).unwrap(),
             dec!(1416.5)
         );
     }
@@ -1792,46 +1822,86 @@ mod test {
         let leaves = vec![
             MerkleLeaf::from_hex(
                 "010000000001000000",
-                "0080efab051761049c02000000000000008060b77606ab2f5b0f000000000000",
-                "00c0a5636d9a6fa99a02000000000000008060b77606ab2f5b0f000000000000",
+                "00c034bd2ec51119aa0200000000000000007b6bb331c0fc880c000000000000",
+                "00809fa295efd31ea00200000000000000007b6bb331c0fc880c000000000000",
             ),
             MerkleLeaf::from_hex(
-                "0016f6d1868f4ab0e070c4d7938c1bd552425804c6784a1ace659e162d44bdc56900000000",
-                "0000000000000000000000000000000000c04948987cf15a0100000000000000",
+                "00c2b3f03b624590e3faa9e510b9e02828e1323282e9ce2a332d4ffae3541ae33000000000",
+                "006011483cbb04bb02000000000000000000383c5699c74c0a00000000000000",
+                "006011483cbb04bb02000000000000000000b08a3feae3960700000000000000",
+            ),
+            MerkleLeaf::from_hex(
+                "00c2b3f03b624590e3faa9e510b9e02828e1323282e9ce2a332d4ffae3541ae33001000000",
+                "009c1a984b470000000000000000000000000000000000000000000000000000",
+                "009ccba7893e2f53000000000000000000000000000000000000000000000000",
+            ),
+            MerkleLeaf::from_hex(
+                "00920ad03fcf8cc96d6c2a559998a976201ac2d5f166eeb491e943ffab20e7f65c00000000",
+                "0000000000000000000000000000000000c0e59075e89e2f0600000000000000",
                 "0000000000000000000000000000000000000000000000000000000000000000",
             ),
             MerkleLeaf::from_hex(
-                "0016f6d1868f4ab0e070c4d7938c1bd552425804c6784a1ace659e162d44bdc56901000000",
-                "0060cdab71d92e1600000000000000000040beba547f712e0000000000000000",
-                "0016194132db712e00000000000000000040beba547f712e0000000000000000",
+                "00920ad03fcf8cc96d6c2a559998a976201ac2d5f166eeb491e943ffab20e7f65c01000000",
+                "004875f4569d4135010000000000000000000000000000000000000000000000",
+                "0000265e74cb19f3010000000000000000000000000000000000000000000000",
             ),
             MerkleLeaf::from_hex(
-                "00a0c2d5a09b2924eb27168d3a7f98779d65c73b7fd1f77c1cb7e21ed138461e3900000000",
-                "0038dec81916000000000000000000000000c7e0541072860400000000000000",
-                "00603c426bc1985a01000000000000000000c7e0541072860400000000000000",
+                "004a33a682a770ce905478806f7f16bdfd232a723d30f36b2240274d493dc8870400000000",
+                "0080a02ff09586bd0300000000000000000040763a6b0bde0000000000000000",
+                "0080a02ff09586bd030000000000000000809b4302a54c7a0000000000000000",
             ),
             MerkleLeaf::from_hex(
-                "00a0c2d5a09b2924eb27168d3a7f98779d65c73b7fd1f77c1cb7e21ed138461e3901000000",
-                "001787d6fc288b43000000000000000000000000000000000000000000000000",
-                "00871b42a0ef412b000000000000000000000000000000000000000000000000",
+                "004a33a682a770ce905478806f7f16bdfd232a723d30f36b2240274d493dc8870401000000",
+                "00c83dc5bd572c0c00000000000000000000187abaa654030000000000000000",
+                "00586a519473211800000000000000000000187abaa654030000000000000000",
+            ),
+            MerkleLeaf::from_hex(
+                "0026e6ae092d50d58b5705ebd721fda9dcfb7c8d6670c3c65b4dde62f23889843b00000000",
+                "00000000000000000000000000000000000088b116afe3b50200000000000000",
+                "000000000000000000000000000000000000a027128c1c2b0200000000000000",
+            ),
+            MerkleLeaf::from_hex(
+                "0026e6ae092d50d58b5705ebd721fda9dcfb7c8d6670c3c65b4dde62f23889843b01000000",
+                "004041df2370052e00000000000000000000b2d3595bf0060000000000000000",
+                "0040fe7b636ea83e00000000000000000000b2d3595bf0060000000000000000",
+            ),
+            MerkleLeaf::from_hex(
+                "003480a04c1318d0e6c0637f7e25a520f3c89aa5cbe4744898a9aa0836cde2f45900000000",
+                "0008f8ce9049255e00000000000000000080aa8677c8d0880000000000000000",
+                "0008f8ce9049255e000000000000000000800f6ba7739b620000000000000000",
+            ),
+            MerkleLeaf::from_hex(
+                "003480a04c1318d0e6c0637f7e25a520f3c89aa5cbe4744898a9aa0836cde2f45901000000",
+                "805ad44c45320915000000000000000000eca75ac794a8340000000000000000",
+                "80ba572749c89d19000000000000000000eca75ac794a8340000000000000000",
+            ),
+            MerkleLeaf::from_hex(
+                "00927df3f7ca107244f47017b13e26bfeff6877b83797479b1ab38b7a509e1f14000000000",
+                "00a879222f050000000000000000000000000000000000000000000000000000",
+                "0020893202f8aff7090000000000000000000000000000000000000000000000",
+            ),
+            MerkleLeaf::from_hex(
+                "00927df3f7ca107244f47017b13e26bfeff6877b83797479b1ab38b7a509e1f14001000000",
+                "806423e6e35e8232010000000000000000000000000000000000000000000000",
+                "80a46df70e120000000000000000000000000000000000000000000000000000",
             ),
             MerkleLeaf::from_hex(
                 "020000000001000000",
-                "0000470ea1b0f800000000000000000000009108c73695000000000000000000",
-                "008027461a740a01000000000000000000009108c73695000000000000000000",
+                "00000c3d5d53aa01000000000000000000400dedbf8592010000000000000000",
+                "00000c3d5d53aa01000000000000000000400dedbf8592010000000000000000",
             ),
             MerkleLeaf::from_hex(
-                "0300000000010000000000470ea1b0f8000000000000000000",
-                "0000000000000000000000000000000000c04948987cf15a0100000000000000",
-                "0000000000000000000000000000000000000000000000000000000000000000",
+                "03000000000100000000000c3d5d53aa010000000000000000",
+                "0000000000000000000000000000000000c03c1919e9262f0a00000000000000",
+                "000000000000000000000000000000000080a7fe7f13e9340000000000000000",
             ),
         ];
         let base = 0u32;
         let quote = 1u32;
-        let price = 90000000000000000u128;
-        let amount = 54077700000000000000u128;
+        let price = 120000000000000000u128;
+        let amount = 184052500000000000000u128;
         let pages = 1;
-        let maker_accounts = 2;
+        let maker_accounts = 10;
         let leaves_count = (4u8 + maker_accounts + pages) as usize;
         assert!(leaves.len() == leaves_count,);
         assert!(maker_accounts % 2 == 0,);
@@ -1932,6 +2002,71 @@ mod test {
                 let now_is_maker = taker_price_page.split_new_to_sum();
                 assert!(amount == now_is_maker - prv_is_maker,);
             }
+        }
+    }
+
+    #[test]
+    pub fn cancel_should_work() {
+        let leaves = vec![
+            MerkleLeaf::from_hex(
+                "010000000001000000",
+                "00000000000000000000000000000000000064a7b3b6e00d0000000000000000",
+                "000000000000000000000000000000000000b2d3595bf0060000000000000000",
+            ),
+            MerkleLeaf::from_hex(
+                "00f6938f092096ceddf7f5c15c94e9a50f375ba3b4b5653e50c00d1256bd7b052800000000",
+                "0000fa86365c73563c0400000000000000000000000000000000000000000000",
+                "0000fa86365c73563c0400000000000000000000000000000000000000000000",
+            ),
+            MerkleLeaf::from_hex(
+                "00f6938f092096ceddf7f5c15c94e9a50f375ba3b4b5653e50c00d1256bd7b052801000000",
+                "0000f716504203391c0200000000000000005e2c8cdd63890000000000000000",
+                "0000262d1631b57d1c0200000000000000002f16c6eeb1440000000000000000",
+            ),
+            MerkleLeaf::from_hex(
+                "020000000001000000",
+                "0000000000000000000000000000000000005e2c8cdd63890000000000000000",
+                "0000000000000000000000000000000000005e2c8cdd63890000000000000000",
+            ),
+            MerkleLeaf::from_hex(
+                "03000000000100000000005e2c8cdd63890000000000000000",
+                "00000000000000000000000000000000000064a7b3b6e00d0000000000000000",
+                "000000000000000000000000000000000000b2d3595bf0060000000000000000",
+            ),
+        ];
+        let base = 0u32;
+        let quote = 1u32;
+        assert!(leaves.len() == 5,);
+        let (b, q) = leaves[0].try_get_symbol().unwrap();
+        assert!(b == base && q == quote,);
+        let (ask0, bid0) = leaves[0].split_old_to_u128();
+        let (ask1, bid1) = leaves[0].split_new_to_u128();
+        let ask_delta = ask0 - ask1;
+        let bid_delta = bid0 - bid1;
+        assert!(ask_delta + bid_delta != 0,);
+        assert!(ask_delta & bid_delta == 0,);
+
+        let (b, id) = leaves[1].try_get_account().unwrap();
+        assert!(b == base,);
+        let (ba0, bf0) = leaves[1].split_old_to_u128();
+        let (ba1, bf1) = leaves[1].split_new_to_u128();
+        assert!(ba0 + bf0 == ba1 + bf1,);
+
+        let (q, id) = leaves[2].try_get_account().unwrap();
+        assert!(q == quote,);
+        let (qa0, qf0) = leaves[2].split_old_to_u128();
+        let (qa1, qf1) = leaves[2].split_new_to_u128();
+        assert!(qa0 + qf0 == qa1 + qf1,);
+
+        let (best_ask0, best_bid0) = leaves[3].split_old_to_u128();
+        let (b, q, cancel_at) = leaves[4].try_get_orderpage().unwrap();
+        assert!(b == base && q == quote && (cancel_at >= best_ask0 || cancel_at <= best_bid0),);
+        let before_cancel = leaves[4].split_old_to_sum();
+        let after_cancel = leaves[4].split_new_to_sum();
+        if cancel_at >= best_ask0 && best_ask0 != 0 {
+            assert!(ask_delta == before_cancel - after_cancel,);
+        } else {
+            assert!(bid_delta == before_cancel - after_cancel,);
         }
     }
 }

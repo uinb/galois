@@ -46,10 +46,8 @@ pub type FusoApi = sub_api::Api<Sr25519Key, sub_api::rpc::WsRpcClient>;
 
 const ONE_ONCHAIN: u128 = 1_000_000_000_000_000_000;
 const MILL: u32 = 1_000_000;
-const BILL: u32 = 1_000_000_000;
 const QUINTILL: u64 = 1_000_000_000_000_000_000;
-#[allow(dead_code)]
-const MAX_EXTRINSIC_BYTES: usize = 1_000_000;
+const MAX_EXTRINSIC_SIZE: usize = 3 * 1024 * 1024;
 #[allow(dead_code)]
 const MAX_EXTRINSIC_WEIGHT: u128 = 1_000_000_000_000_000_000;
 
@@ -154,6 +152,8 @@ pub enum FusoCommand {
     Cancel(Compact<u32>, Compact<u32>),
     TransferOut(Compact<u32>, Compact<u128>),
     TransferIn(Compact<u32>, Compact<u128>),
+    RejectTransferOut(Compact<u32>, Compact<u128>),
+    RejectTransferIn,
 }
 
 impl Into<FusoCommand> for (LimitCmd, Fee, Fee) {
@@ -185,26 +185,26 @@ impl Into<FusoCommand> for CancelCmd {
     }
 }
 
-impl Into<FusoCommand> for AssetsCmd {
+impl Into<FusoCommand> for (AssetsCmd, bool) {
     fn into(self) -> FusoCommand {
-        match self.in_or_out {
-            InOrOut::In => {
-                FusoCommand::TransferIn(self.currency.into(), self.amount.to_amount().into())
+        match (self.0.in_or_out, self.1) {
+            (InOrOut::In, true) => {
+                FusoCommand::TransferIn(self.0.currency.into(), self.0.amount.to_amount().into())
             }
-            InOrOut::Out => {
-                FusoCommand::TransferOut(self.currency.into(), self.amount.to_amount().into())
+            (InOrOut::In, false) => FusoCommand::RejectTransferIn,
+            (InOrOut::Out, true) => {
+                FusoCommand::TransferOut(self.0.currency.into(), self.0.amount.to_amount().into())
             }
+            (InOrOut::Out, false) => FusoCommand::RejectTransferOut(
+                self.0.currency.into(),
+                self.0.amount.to_amount().into(),
+            ),
         }
     }
 }
 
 fn d6() -> Amount {
     MILL.into()
-}
-
-#[allow(dead_code)]
-fn d9() -> Amount {
-    BILL.into()
 }
 
 fn d18() -> Amount {
@@ -214,9 +214,9 @@ fn d18() -> Amount {
 pub trait ToBlockChainNumeric {
     fn to_fee(self) -> u32;
 
-    fn to_price(self) -> (u64, u64);
-
     fn to_amount(self) -> u128;
+
+    fn validate(self) -> bool;
 }
 
 impl ToBlockChainNumeric for Decimal {
@@ -224,26 +224,30 @@ impl ToBlockChainNumeric for Decimal {
         (self * d6()).to_u32().unwrap()
     }
 
-    fn to_price(self) -> (u64, u64) {
-        let f = self.fract() * d18();
-        (self.trunc().to_u64().unwrap(), f.to_u64().unwrap())
-    }
-
     fn to_amount(self) -> u128 {
         let n = self.trunc().to_u128().unwrap();
-        let f = self.fract() * d18();
-        n * ONE_ONCHAIN + f.to_u128().unwrap()
+        let f = (self.fract() * d18()).to_u128().unwrap();
+        n * ONE_ONCHAIN + f
+    }
+
+    fn validate(mut self) -> bool {
+        self.rescale(18);
+        self.scale() == 18
     }
 }
 
-// FIXME
-pub fn to_decimal_represent(v: u128) -> Decimal {
+pub fn to_decimal_represent(v: u128) -> Option<Decimal> {
     let n = v / ONE_ONCHAIN;
     let f = v % ONE_ONCHAIN;
-    let n: Amount = n.try_into().unwrap();
-    let mut f: Amount = f.try_into().unwrap();
-    f.set_scale(18).unwrap();
-    n + f
+    let n: Amount = n.try_into().ok()?;
+    let mut f: Amount = f.try_into().ok()?;
+    f.set_scale(18).ok()?;
+    let r = n + f;
+    if r.scale() == 18 {
+        Some(r)
+    } else {
+        None
+    }
 }
 
 fn u128le_to_h256(a0: u128, a1: u128) -> [u8; 32] {
@@ -255,17 +259,16 @@ fn u128le_to_h256(a0: u128, a1: u128) -> [u8; 32] {
 
 #[cfg(test)]
 pub mod test {
-    use rust_decimal_macros::dec;
 
     use super::*;
+    use rust_decimal_macros::dec;
 
     #[test]
     pub fn test_numeric() {
         assert!(Decimal::MAX.to_u128().is_some());
-        // assert!(Decimal::MAX > dec!(340282366920938463463.374607431768211455));
-        // let p = dec!(38463463.374607431768211455);
-        // let (n, f) = p.to_price();
-        // assert_eq!(n, 38463463);
-        // assert_eq!(f, 374607431768211455);
+        let max = super::to_decimal_represent(u64::MAX.into());
+        assert!(max.is_some());
+        let v = dec!(340282366920938463463);
+        assert_eq!(v.to_amount(), 340282366920938463463000000000000000000);
     }
 }
