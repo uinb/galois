@@ -1,3 +1,15 @@
+# v0.2.6-rc.3
+
+- fixbug: force set scale of transfer_in/out to 18
+
+# v0.2.6-rc.2
+
+- enable rejecting authorizing
+
+# v0.2.5-rc.7
+
+- copy unit tests
+
 # v0.2.5-rc.5
 
 - wait for proofs InBlock
