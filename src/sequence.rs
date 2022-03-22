@@ -63,15 +63,19 @@ impl TryInto<Event> for Sequence {
                 let amount = self.cmd.amount.ok_or(anyhow!(""))?;
                 let price = self.cmd.price.ok_or(anyhow!(""))?;
                 ensure!(
-                    price.is_sign_positive() && price < max_number() && price.scale() <= 12,
+                    price.is_sign_positive() && price.scale() <= 7,
                     "invalid price numeric"
                 );
                 ensure!(
-                    amount.is_sign_positive() && amount < max_number() && amount.scale() <= 10,
+                    amount.is_sign_positive() && amount.scale() <= 7,
                     "invalid amount numeric"
                 );
-                let vol = amount.checked_mul(price).ok_or(anyhow!(""))?;
-                ensure!(vol < max_number(), "");
+                cfg_if::cfg_if! {
+                    if #[cfg(features = "fusotao")] {
+                        let mut vol = amount.checked_mul(price).ok_or(anyhow!(""))?;
+                        ensure!(vol.validate(), "overflow");
+                    }
+                }
                 let cmd = LimitCmd {
                     symbol: self.cmd.symbol().ok_or(anyhow!(""))?,
                     user_id: UserId::from_str(self.cmd.user_id.as_ref().ok_or(anyhow!(""))?)?,
@@ -99,7 +103,6 @@ impl TryInto<Event> for Sequence {
                 },
                 self.timestamp,
             )),
-            // TODO scale and max
             TRANSFER_OUT => Ok(Event::TransferOut(
                 self.id,
                 AssetsCmd {
@@ -141,11 +144,11 @@ impl TryInto<Event> for Sequence {
                 SymbolCmd {
                     symbol: self.cmd.symbol().ok_or(anyhow!(""))?,
                     open: self.cmd.open.ok_or(anyhow!(""))?,
-                    base_scale: self.cmd.base_scale.filter(|b| *b < 18).ok_or(anyhow!(""))?,
+                    base_scale: self.cmd.base_scale.filter(|b| *b <= 7).ok_or(anyhow!(""))?,
                     quote_scale: self
                         .cmd
                         .quote_scale
-                        .filter(|q| *q < 18)
+                        .filter(|q| *q <= 7)
                         .ok_or(anyhow!(""))?,
                     taker_fee: self
                         .cmd

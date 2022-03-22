@@ -259,7 +259,7 @@ fn handle_event(
                 ))?;
             cfg_if! {
                 if #[cfg(feature = "fusotao")] {
-                    log::info!("predicate root={:02x?} before applying {}", data.merkle_tree.root(), id);
+                    log::info!("predicate root=0x{} before applying {}", hex::encode(data.merkle_tree.root()), id);
                     let (ask_size, bid_size) = orderbook.size();
                     let (best_ask_before, best_bid_before) = orderbook.get_size_of_best();
                     let taker_base_before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.0);
@@ -324,7 +324,7 @@ fn handle_event(
                 .ok_or(EventsError::EventRejected(id, anyhow!("order not exists")))?;
             cfg_if! {
                 if #[cfg(feature = "fusotao")] {
-                    log::info!("predicate root={:02x?} before applying {}", data.merkle_tree.root(), id);
+                    log::debug!("predicate root=0x{} before applying {}", hex::encode(data.merkle_tree.root()), id);
                     let size = orderbook.size();
                     let (best_ask_before, best_bid_before) = orderbook.get_size_of_best();
                     let taker_base_before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.0);
@@ -395,8 +395,13 @@ fn handle_event(
         Event::TransferOut(id, cmd, _) => {
             cfg_if! {
                 if #[cfg(feature = "fusotao")] {
-                    log::info!("predicate root={:02x?} before applying {}", data.merkle_tree.root(), id);
+                    log::info!("predicate root=0x{} before applying {}", hex::encode(data.merkle_tree.root()), id);
                     let before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.currency);
+                    if data.tvl < cmd.amount {
+                        prover.prove_cmd_rejected(&mut data.merkle_tree, id, cmd, &before);
+                        log::error!("TVL less than transfer_out amount, event={}", id);
+                        return Err(EventsError::EventRejected(id, anyhow::anyhow!("LessThanTVL")));
+                    }
                     match assets::deduct_available(
                         &mut data.accounts,
                         &cmd.user_id,
@@ -404,6 +409,7 @@ fn handle_event(
                         cmd.amount,
                     ) {
                         Ok(after) => {
+                            data.tvl -= cmd.amount;
                             prover.prove_assets_cmd(&mut data.merkle_tree, id, cmd, &before, &after);
                             Ok(())
                         }
@@ -426,7 +432,12 @@ fn handle_event(
         Event::TransferIn(id, cmd, _) => {
             cfg_if! {
                 if #[cfg(feature = "fusotao")] {
-                    log::info!("predicate root={:02x?} before applying {}", data.merkle_tree.root(), id);
+                    if data.tvl + cmd.amount >= crate::core::max_number() {
+                        prover.prove_rejecting_no_reason(&mut data.merkle_tree, id, cmd);
+                        log::error!("TVL out of limit, event={}", id);
+                        return Err(EventsError::EventRejected(id, anyhow::anyhow!("TVLOutOfLimit")));
+                    }
+                    log::info!("predicate root=0x{} before applying {}", hex::encode(data.merkle_tree.root()), id);
                     let before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.currency);
                     let after = assets::add_to_available(
                         &mut data.accounts,
@@ -434,6 +445,7 @@ fn handle_event(
                         cmd.currency,
                         cmd.amount,
                     ).map_err(|e| EventsError::EventRejected(id, e))?;
+                    data.tvl = data.tvl + cmd.amount;
                     prover.prove_assets_cmd(&mut data.merkle_tree, id, cmd, &before, &after);
                     Ok(())
                 } else {

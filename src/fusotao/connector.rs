@@ -121,7 +121,7 @@ impl FusoConnector {
                 Ok(()) => {
                     in_block = last_submit;
                     proved_event_id.store(in_block, Ordering::Relaxed);
-                    log::debug!("rotate proved event to {}", in_block);
+                    log::info!("rotate proved event to {}", in_block);
                 }
                 Err(e) => log::error!("error occur while submitting proofs, {:?}", e),
             }
@@ -186,7 +186,7 @@ impl FusoConnector {
                         from_block_number = sync;
                         blk[..].copy_from_slice(&sync.to_le_bytes()[..]);
                         blk.flush().unwrap();
-                        log::info!("no interested events found before block {:?}", sync);
+                        log::debug!("no interested events found before block {:?}", sync);
                     }
                 }
                 Err(e) => log::error!("sync blocks failed, {:?}", e),
@@ -218,7 +218,7 @@ impl FusoConnector {
                             let mut cmd = sequence::Command::default();
                             cmd.cmd = sequence::TRANSFER_IN;
                             cmd.currency = Some(decoded.token_id);
-                            cmd.amount = Some(to_decimal_represent(decoded.amount));
+                            cmd.amount = to_decimal_represent(decoded.amount);
                             cmd.user_id = Some(format!("{}", decoded.fund_owner));
                             cmd.block_number = at.or(Some(0));
                             cmd.extrinsic_hash =
@@ -232,7 +232,7 @@ impl FusoConnector {
                             let mut cmd = sequence::Command::default();
                             cmd.cmd = sequence::TRANSFER_OUT;
                             cmd.currency = Some(decoded.token_id);
-                            cmd.amount = Some(to_decimal_represent(decoded.amount));
+                            cmd.amount = to_decimal_represent(decoded.amount);
                             cmd.user_id = Some(format!("{}", decoded.fund_owner));
                             cmd.block_number = at.or(Some(0));
                             cmd.extrinsic_hash =
