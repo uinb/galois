@@ -1,3 +1,7 @@
+# v0.2.6-rc.4
+
+- fixbug: prove transfer_out command
+
 # v0.2.6-rc.3
 
 - fixbug: force set scale of transfer_in/out to 18
