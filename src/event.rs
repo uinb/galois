@@ -433,7 +433,8 @@ fn handle_event(
             cfg_if! {
                 if #[cfg(feature = "fusotao")] {
                     if data.tvl + cmd.amount >= crate::core::max_number() {
-                        prover.prove_rejecting_no_reason(&mut data.merkle_tree, id, cmd);
+                        let before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.currency);
+                        prover.prove_rejecting_no_reason(&mut data.merkle_tree, id, cmd, &before);
                         log::error!("TVL out of limit, event={}", id);
                         return Err(EventsError::EventRejected(id, anyhow::anyhow!("TVLOutOfLimit")));
                     }
