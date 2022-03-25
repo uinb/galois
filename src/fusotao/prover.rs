@@ -283,30 +283,41 @@ impl Prover {
             old_available,
             old_frozen,
         )];
-        let old_root = merkle_tree.root().clone();
         let merkle_proof = gen_proofs(merkle_tree, &leaves);
-        if &old_root != merkle_tree.root() {
-            self.sender
-                .send(Proof {
-                    event_id,
-                    user_id: cmd.user_id,
-                    cmd: (cmd, false).into(),
-                    leaves,
-                    maker_page_delta: 0,
-                    maker_account_delta: 0,
-                    merkle_proof,
-                    root: merkle_tree.root().clone().into(),
-                })
-                .unwrap();
-        }
+        self.sender
+            .send(Proof {
+                event_id,
+                user_id: cmd.user_id,
+                cmd: (cmd, false).into(),
+                leaves,
+                maker_page_delta: 0,
+                maker_account_delta: 0,
+                merkle_proof,
+                root: merkle_tree.root().clone().into(),
+            })
+            .unwrap();
     }
 
     pub fn prove_rejecting_no_reason(
         &self,
-        merkle_tree: &GlobalStates,
+        merkle_tree: &mut GlobalStates,
         event_id: u64,
         cmd: AssetsCmd,
+        account_before: &Balance,
     ) {
+        let (old_available, old_frozen) = (
+            account_before.available.to_amount(),
+            account_before.frozen.to_amount(),
+        );
+        let leaves = vec![new_account_merkle_leaf(
+            &cmd.user_id,
+            cmd.currency,
+            old_available,
+            old_frozen,
+            old_available,
+            old_frozen,
+        )];
+        let merkle_proof = gen_proofs(merkle_tree, &leaves);
         self.sender
             .send(Proof {
                 event_id,
