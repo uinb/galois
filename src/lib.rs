@@ -20,8 +20,6 @@
 #![allow(clippy::wrong_self_convention)]
 #![allow(clippy::map_entry)]
 
-extern crate sp_core;
-
 pub mod assets;
 pub mod clearing;
 pub mod config;
