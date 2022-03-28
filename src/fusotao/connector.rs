@@ -123,17 +123,7 @@ impl FusoConnector {
                     proved_event_id.store(in_block, Ordering::Relaxed);
                     log::info!("rotate proved event to {}", in_block);
                 }
-                Err(e) => {
-                    log::error!("error occur while submitting proofs, {:?}", e);
-                    loop {
-                        let proved_event_id = Self::sync_proving_progress(self);
-                        if proved_event_id.is_ok() {
-                            in_block = proved_event_id.unwrap().into_inner();
-                            break;
-                        }
-                        thread::sleep(100);
-                    }
-                },
+                Err(e) => log::error!("error occur while submitting proofs, {:?}", e),
             }
         });
         Ok(())
