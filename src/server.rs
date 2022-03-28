@@ -55,11 +55,7 @@ pub struct Message {
 impl Message {
     #[must_use]
     pub fn with_payload(session: u64, req_id: u64, payload: Vec<u8>) -> Self {
-        Self {
-            session,
-            req_id,
-            payload,
-        }
+        Self { session, req_id, payload }
     }
 
     fn encode(self) -> Vec<u8> {
@@ -161,22 +157,14 @@ async fn handle_req(upstream: &mut Sender<Fusion>, session: u64, req_id: u64, js
     let cmd: Command = match serde_json::from_str(&json) {
         Ok(cmd) => cmd,
         Err(_) => {
-            send(Message::with_payload(session, req_id, vec![]))
-                .await
-                .unwrap();
+            send(Message::with_payload(session, req_id, vec![])).await.unwrap();
             return;
         }
     };
     if !cmd.is_read() {
         return;
     }
-    upstream
-        .send(Fusion::R(Watch {
-            session,
-            req_id,
-            cmd,
-        }))
-        .unwrap();
+    upstream.send(Fusion::R(Watch { session, req_id, cmd })).unwrap();
 }
 
 async fn read_loop(cmd_acc: Sender<Fusion>, session: u64, stream: Arc<TcpStream>) -> Result<()> {
@@ -206,9 +194,7 @@ async fn read_loop(cmd_acc: Sender<Fusion>, session: u64, stream: Arc<TcpStream>
             let json = match str::from_utf8(&buf[..]) {
                 Ok(json) => json.to_string(),
                 Err(_) => {
-                    send(Message::with_payload(session, req_id, vec![]))
-                        .await
-                        .unwrap();
+                    send(Message::with_payload(session, req_id, vec![])).await.unwrap();
                     buf.clear();
                     continue;
                 }

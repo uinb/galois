@@ -16,6 +16,7 @@ use crate::{config::C, fusotao::*, sequence};
 use anyhow::anyhow;
 use memmap::MmapMut;
 use parity_scale_codec::Decode;
+use sp_core::sr25519::Public;
 use sp_core::Pair;
 use std::{
     convert::TryInto,
@@ -30,9 +31,9 @@ use std::{
 use sub_api::events::{EventsDecoder, Raw};
 
 pub struct FusoConnector {
-    api: FusoApi,
-    signer: Sr25519Key,
-    proved_event_id: Arc<AtomicU64>,
+    pub api: FusoApi,
+    pub signer: Sr25519Key,
+    pub proved_event_id: Arc<AtomicU64>,
 }
 
 #[derive(Clone, Decode, Debug, Default)]
@@ -48,50 +49,37 @@ pub struct Dominator {
 impl FusoConnector {
     pub fn new() -> anyhow::Result<Self> {
         let signer = Sr25519Key::from_string(
-            &C.fusotao
-                .as_ref()
-                .ok_or(anyhow!("Invalid fusotao config"))?
-                .key_seed,
+            &C.fusotao.as_ref().ok_or(anyhow!("Invalid fusotao config"))?.key_seed,
             None,
         )
         .map_err(|_| anyhow!("Invalid fusotao config"))?;
         let client = sub_api::rpc::WsRpcClient::new(
-            &C.fusotao
-                .as_ref()
-                .ok_or(anyhow!("Invalid fusotao config"))?
-                .node_url,
+            &C.fusotao.as_ref().ok_or(anyhow!("Invalid fusotao config"))?.node_url,
         );
-        let api = FusoApi::new(client)
-            .map(|api| api.set_signer(signer.clone()))
-            .map_err(|e| {
-                log::error!("{:?}", e);
-                anyhow!("Fusotao node not available or runtime metadata check failed")
-            })?;
-        Ok(Self {
-            api,
-            signer,
-            proved_event_id: Arc::new(AtomicU64::new(0)),
-        })
+        let api = FusoApi::new(client).map(|api| api.set_signer(signer.clone())).map_err(|e| {
+            log::error!("{:?}", e);
+            anyhow!("Fusotao node not available or runtime metadata check failed")
+        })?;
+        Ok(Self { api, signer, proved_event_id: Arc::new(AtomicU64::new(0)) })
     }
 
-    pub fn sync_proving_progress(&self) -> anyhow::Result<Arc<AtomicU64>> {
-        let who = self.signer.public();
-        let key = self
-            .api
-            .metadata
-            .storage_map_key::<FusoAccountId, Option<Dominator>>("Verifier", "Dominators", who)?;
-        let payload = self.api.get_opaque_storage_by_key_hash(key, None)?.unwrap();
+    pub fn sync_proving_progress(who: &Public, api: &FusoApi) -> anyhow::Result<u64> {
+        let key = api.metadata.storage_map_key::<FusoAccountId, Option<Dominator>>(
+            "Verifier",
+            "Dominators",
+            *who,
+        )?;
+        let payload = api.get_opaque_storage_by_key_hash(key, None)?.unwrap();
         let result = Dominator::decode(&mut payload.as_slice()).unwrap();
-        self.proved_event_id
-            .store(result.sequence.0, Ordering::Relaxed);
         log::info!("synchronizing proving progress: {}", result.sequence.0);
-        Ok(self.proved_event_id.clone())
+        Ok(result.sequence.0)
     }
 
     pub fn start_submitting(&self) -> anyhow::Result<()> {
         let api = self.api.clone();
         let proved_event_id = self.proved_event_id.clone();
         let mut in_block = proved_event_id.load(Ordering::Relaxed);
+        let who = self.signer.public();
         std::thread::spawn(move || loop {
             let proofs = persistence::fetch_raw_after(in_block);
             if proofs.is_empty() {
@@ -123,7 +111,18 @@ impl FusoConnector {
                     proved_event_id.store(in_block, Ordering::Relaxed);
                     log::info!("rotate proved event to {}", in_block);
                 }
-                Err(e) => log::error!("error occur while submitting proofs, {:?}", e),
+                Err(e) => {
+                    log::error!("error occur while submitting proofs, {:?}", e);
+                    loop {
+                        let event_id = Self::sync_proving_progress(&who, &api);
+                        if event_id.is_ok() {
+                            in_block = event_id.unwrap();
+                            proved_event_id.store(in_block, Ordering::Relaxed);
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(100u64));
+                    }
+                }
             }
         });
         Ok(())
@@ -138,10 +137,7 @@ impl FusoConnector {
         if hash.is_none() {
             Err(anyhow::anyhow!("extrinsic executed failed"))
         } else {
-            log::info!(
-                "submitting proofs ok, extrinsic hash: {:?}",
-                hex::encode(hash.unwrap())
-            );
+            log::info!("submitting proofs ok, extrinsic hash: {:?}", hex::encode(hash.unwrap()));
             Ok(())
         }
     }
@@ -150,11 +146,7 @@ impl FusoConnector {
         let api = self.api.clone();
         let who = self.signer.public().clone();
         let path: PathBuf = [&C.sequence.coredump_dir, "fusotao.blk"].iter().collect();
-        let finalized_file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(&path)?;
+        let finalized_file = OpenOptions::new().read(true).write(true).create(true).open(&path)?;
         finalized_file.set_len(4)?;
         let mut blk = unsafe { MmapMut::map_mut(&finalized_file)? };
         let mut from_block_number = u32::from_le_bytes(blk.as_ref().try_into()?);
@@ -174,11 +166,7 @@ impl FusoConnector {
             match Self::sync_blocks_or_wait(from_block_number, &api, &who, &decoder) {
                 Ok((cmds, sync)) => {
                     if !cmds.is_empty() {
-                        log::info!(
-                            "prepare handle {} events before block {:?}",
-                            cmds.len(),
-                            sync
-                        );
+                        log::info!("prepare handle {} events before block {:?}", cmds.len(), sync);
                         match sequence::insert_sequences(&cmds) {
                             Ok(()) => {
                                 from_block_number = sync;
@@ -214,9 +202,8 @@ impl FusoConnector {
         let hash = api.get_block_hash(at)?;
         let key = api.metadata.storage_value_key("System", "Events")?;
         let payload = api.get_opaque_storage_by_key_hash(key, hash)?;
-        let events = decoder
-            .decode_events(&mut payload.unwrap_or(vec![]).as_slice())
-            .unwrap_or(vec![]);
+        let events =
+            decoder.decode_events(&mut payload.unwrap_or(vec![]).as_slice()).unwrap_or(vec![]);
         let mut cmds = vec![];
         for (_, event) in events.into_iter() {
             match event {
@@ -264,15 +251,11 @@ impl FusoConnector {
         who: &FusoAccountId,
         decoder: &EventsDecoder,
     ) -> anyhow::Result<(Vec<sequence::Command>, u32)> {
-        let finalized_block_hash = api
-            .get_finalized_head()?
-            .ok_or(anyhow!("finalized heads couldn't be found"))?;
+        let finalized_block_hash =
+            api.get_finalized_head()?.ok_or(anyhow!("finalized heads couldn't be found"))?;
         let finalized_block: sub_api::SignedBlock<FusoBlock> = api
             .get_signed_block(Some(finalized_block_hash))?
-            .ok_or(anyhow!(
-                "signed block {} couldn't be found",
-                finalized_block_hash
-            ))?;
+            .ok_or(anyhow!("signed block {} couldn't be found", finalized_block_hash))?;
         let finalized_block_number = finalized_block.block.header.number;
         log::info!(
             "current block: {}, finalized block: {}, {:?}",
@@ -287,12 +270,7 @@ impl FusoConnector {
         let mut f = vec![];
         let mut i = 0;
         while from_block_included + i <= finalized_block_number {
-            f.push(Self::resolve_block(
-                api,
-                who,
-                Some(from_block_included + i),
-                decoder,
-            ));
+            f.push(Self::resolve_block(api, who, Some(from_block_included + i), decoder));
             i += 1;
             if f.len() == 10 {
                 break;

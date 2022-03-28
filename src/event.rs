@@ -253,10 +253,7 @@ fn handle_event(
                 .get_mut(&cmd.symbol)
                 .filter(|b| b.should_accept(cmd.price, cmd.amount, cmd.order_id))
                 .filter(|b| b.find_order(cmd.order_id).is_none())
-                .ok_or(EventsError::EventRejected(
-                    id,
-                    anyhow!("order can't be accepted"),
-                ))?;
+                .ok_or(EventsError::EventRejected(id, anyhow!("order can't be accepted")))?;
             cfg_if! {
                 if #[cfg(feature = "fusotao")] {
                     log::info!("predicate root=0x{} before applying {}", hex::encode(data.merkle_tree.root()), id);
@@ -311,13 +308,10 @@ fn handle_event(
         Event::Cancel(id, cmd, time) => {
             // 0. symbol exsits
             // 1. check order's owner
-            let orderbook =
-                data.orderbooks
-                    .get_mut(&cmd.symbol)
-                    .ok_or(EventsError::EventRejected(
-                        id,
-                        anyhow!("orderbook not exists"),
-                    ))?;
+            let orderbook = data
+                .orderbooks
+                .get_mut(&cmd.symbol)
+                .ok_or(EventsError::EventRejected(id, anyhow!("orderbook not exists")))?;
             orderbook
                 .find_order(cmd.order_id)
                 .filter(|o| o.user == cmd.user_id)
@@ -368,15 +362,10 @@ fn handle_event(
             let orderbook = data
                 .orderbooks
                 .get_mut(&symbol)
-                .ok_or(EventsError::EventRejected(
-                    id,
-                    anyhow!("orderbook not exists"),
-                ))?;
+                .ok_or(EventsError::EventRejected(id, anyhow!("orderbook not exists")))?;
             let ids = orderbook.indices.keys().copied().collect::<Vec<_>>();
-            let matches = ids
-                .into_iter()
-                .filter_map(|id| matcher::cancel(orderbook, id))
-                .collect::<Vec<_>>();
+            let matches =
+                ids.into_iter().filter_map(|id| matcher::cancel(orderbook, id)).collect::<Vec<_>>();
             let (taker_fee, maker_fee) = (orderbook.taker_fee, orderbook.maker_fee);
             matches.iter().for_each(|mr| {
                 let out = clearing::clear(
@@ -514,17 +503,9 @@ fn gen_adjust_fee_cmds(delta: u64, fee_adjust_threshold: u64, data: &Data) -> Ve
             cmd.base_maker_fee = Some(v.base_maker_fee);
             let fee_rate_limit = Decimal::from_str("0.02").unwrap();
             let maker_fee = v.base_maker_fee * Decimal::from(times);
-            let maker_fee = if maker_fee > fee_rate_limit {
-                fee_rate_limit
-            } else {
-                maker_fee
-            };
+            let maker_fee = if maker_fee > fee_rate_limit { fee_rate_limit } else { maker_fee };
             let taker_fee = v.base_taker_fee * Decimal::from(times);
-            let taker_fee = if taker_fee > fee_rate_limit {
-                fee_rate_limit
-            } else {
-                taker_fee
-            };
+            let taker_fee = if taker_fee > fee_rate_limit { fee_rate_limit } else { taker_fee };
             cmd.maker_fee = Some(maker_fee);
             cmd.taker_fee = Some(taker_fee);
             cmd.min_amount = Some(v.min_amount);
@@ -538,11 +519,7 @@ fn gen_adjust_fee_cmds(delta: u64, fee_adjust_threshold: u64, data: &Data) -> Ve
 
 #[cfg(feature = "fusotao")]
 fn update_exchange_fee(delta: u64, data: &Data) {
-    let cmds = gen_adjust_fee_cmds(
-        delta,
-        C.fusotao.as_ref().unwrap().fee_adjust_threshold,
-        data,
-    );
+    let cmds = gen_adjust_fee_cmds(delta, C.fusotao.as_ref().unwrap().fee_adjust_threshold, data);
     if !cmds.is_empty() {
         let _ = sequence::insert_sequences(&cmds);
     }
@@ -556,9 +533,9 @@ fn do_inspect(
     match inspection {
         Inspection::QueryOrder(symbol, order_id, session, req_id) => {
             let v = match data.orderbooks.get(&symbol) {
-                Some(orderbook) => orderbook.find_order(order_id).map_or(vec![], |order| {
-                    serde_json::to_vec(order).unwrap_or_default()
-                }),
+                Some(orderbook) => orderbook
+                    .find_order(order_id)
+                    .map_or(vec![], |order| serde_json::to_vec(order).unwrap_or_default()),
                 None => vec![],
             };
             server::publish(server::Message::with_payload(session, req_id, v));
@@ -574,11 +551,8 @@ fn do_inspect(
             server::publish(server::Message::with_payload(session, req_id, v));
         }
         Inspection::UpdateDepth => {
-            let writing = data
-                .orderbooks
-                .iter()
-                .map(|(k, v)| v.as_depth(32, *k))
-                .collect::<Vec<_>>();
+            let writing =
+                data.orderbooks.iter().map(|(k, v)| v.as_depth(32, *k)).collect::<Vec<_>>();
             output::write_depth(writing);
         }
         Inspection::ConfirmAll(from, exclude) => {
@@ -639,13 +613,8 @@ pub fn test_serialize() {
 
     assert_eq!("{}", serde_json::to_string(&Accounts::new()).unwrap());
     let mut account = Account::default();
-    account.insert(
-        100,
-        assets::Balance {
-            available: Amount::new(200, 1),
-            frozen: Amount::new(0, 0),
-        },
-    );
+    account
+        .insert(100, assets::Balance { available: Amount::new(200, 1), frozen: Amount::new(0, 0) });
     assert_eq!(
         r#"{"100":{"available":"20.0","frozen":"0"}}"#,
         serde_json::to_string(&account).unwrap()

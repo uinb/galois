@@ -31,10 +31,7 @@ pub fn dump(id: u64, time: u64, data: &core::Data) {
         let f = path::Path::new(&config::C.sequence.coredump_dir)
             .join(id.to_string())
             .with_extension(format!("{}.gz", format));
-        let file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(f)?;
+        let file = fs::OpenOptions::new().write(true).create_new(true).open(f)?;
         data.into_raw(file)?;
         log::info!("snapshot dumped at sequence {}", id);
         Ok(())
@@ -42,11 +39,8 @@ pub fn dump(id: u64, time: u64, data: &core::Data) {
 }
 
 fn get_id(path: &path::Path) -> u64 {
-    let file_stem = path::Path::new(path.file_stem().unwrap())
-        .file_stem()
-        .unwrap()
-        .to_str()
-        .unwrap();
+    let file_stem =
+        path::Path::new(path.file_stem().unwrap()).file_stem().unwrap().to_str().unwrap();
     file_stem.parse::<u64>().unwrap()
 }
 
@@ -62,11 +56,7 @@ pub fn load() -> anyhow::Result<(u64, core::Data)> {
     match file_path {
         Some(f) => {
             let event_id = get_id(&f);
-            log::info!(
-                "loading snapshot at {}, execute from {}",
-                event_id,
-                event_id + 1
-            );
+            log::info!("loading snapshot at {}, execute from {}", event_id, event_id + 1);
             Ok((event_id + 1, core::Data::from_raw(fs::File::open(f)?)?))
         }
         None => match config::C.sequence.enable_from_genesis {
@@ -92,10 +82,8 @@ mod test {
         let timestamp = UNIX_EPOCH + Duration::from_secs(1524885322);
         let datetime = DateTime::<Utc>::from(timestamp);
         let format = datetime.format("%Y-%m-%dT%H:%M:%S").to_string();
-        let f = Path::new("/tmp/snapshot/")
-            .join("2980")
-            .with_extension(format)
-            .with_extension("gz");
+        let f =
+            Path::new("/tmp/snapshot/").join("2980").with_extension(format).with_extension("gz");
         assert_eq!("gz", f.extension().unwrap());
         let filename = Path::new(f.file_stem().unwrap()).file_stem().unwrap();
         assert_eq!("2980", filename);
@@ -107,17 +95,10 @@ mod test {
         let timestamp = UNIX_EPOCH + Duration::from_secs(1524885322);
         let datetime = DateTime::<Utc>::from(timestamp);
         let format = datetime.format("%Y-%m-%dT%H:%M:%S").to_string();
-        let f0 = Path::new("/tmp/snapshot/")
-            .join("2980")
-            .with_extension(&format)
-            .with_extension("gz");
-        let f1 = Path::new("/tmp/snapshot/")
-            .join("310")
-            .with_extension(&format)
-            .with_extension("gz");
-        assert_eq!(
-            std::cmp::Ordering::Greater,
-            super::get_id(&f0).cmp(&super::get_id(&f1))
-        );
+        let f0 =
+            Path::new("/tmp/snapshot/").join("2980").with_extension(&format).with_extension("gz");
+        let f1 =
+            Path::new("/tmp/snapshot/").join("310").with_extension(&format).with_extension("gz");
+        assert_eq!(std::cmp::Ordering::Greater, super::get_id(&f0).cmp(&super::get_id(&f1)));
     }
 }

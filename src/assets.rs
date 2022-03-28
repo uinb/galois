@@ -31,17 +31,12 @@ pub fn get_account_to_owned(accounts: &Accounts, user: &UserId) -> Account {
 pub fn get_balance_to_owned(accounts: &Accounts, user: &UserId, currency: Currency) -> Balance {
     match accounts.get(user) {
         None => Balance::default(),
-        Some(account) => account
-            .get(&currency)
-            .map_or(Balance::default(), |a| a.clone()),
+        Some(account) => account.get(&currency).map_or(Balance::default(), |a| a.clone()),
     }
 }
 
 fn init_balance(available: Amount) -> Balance {
-    Balance {
-        available,
-        frozen: Amount::zero(),
-    }
+    Balance { available, frozen: Amount::zero() }
 }
 
 pub fn add_to_available(
@@ -78,10 +73,7 @@ pub fn deduct_available(
 ) -> anyhow::Result<Balance> {
     let account = accounts.get_mut(user).ok_or(anyhow!(""))?;
     let balance = account.get_mut(&currency).ok_or(anyhow!(""))?;
-    ensure!(
-        balance.available >= amount,
-        "Insufficient available balance"
-    );
+    ensure!(balance.available >= amount, "Insufficient available balance");
     balance.available -= amount;
     Ok(balance.clone())
 }
@@ -160,21 +152,12 @@ mod test {
         add_to_available(&mut all, &UserId::zero(), 101, dec!(1.11111));
         add_to_available(&mut all, &UserId::zero(), 101, dec!(1.11111));
         add_to_available(&mut all, &UserId::zero(), 101, dec!(1.11111));
-        assert_eq!(
-            get_balance_to_owned(&all, &UserId::zero(), 101).available,
-            dec!(7.77777)
-        );
+        assert_eq!(get_balance_to_owned(&all, &UserId::zero(), 101).available, dec!(7.77777));
         deduct_available(&mut all, &UserId::zero(), 101, dec!(7.67777)).unwrap();
-        assert_eq!(
-            get_balance_to_owned(&all, &UserId::zero(), 101).available,
-            dec!(0.1)
-        );
+        assert_eq!(get_balance_to_owned(&all, &UserId::zero(), 101).available, dec!(0.1));
         let ok = deduct_available(&mut all, &UserId::zero(), 101, dec!(1.0));
         assert!(ok.is_err());
-        assert_eq!(
-            get_balance_to_owned(&all, &UserId::zero(), 101).available,
-            dec!(0.1)
-        );
+        assert_eq!(get_balance_to_owned(&all, &UserId::zero(), 101).available, dec!(0.1));
     }
 
     #[test]

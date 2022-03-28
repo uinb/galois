@@ -260,8 +260,5 @@ pub fn test_debug_b256_on_fusotao() {
     use std::str::FromStr;
     let u = B256::from_str("0x0ae466861e8397f1e3beadac1a49dc111beea3b62d34a6eb4b5be370f5aada30")
         .unwrap();
-    assert_eq!(
-        "5CJzBh1SeBJ5qKzEpz1yzk8dF45erM5VWzwz4Ef2Zs1y2nKQ",
-        format!("{:?}", u)
-    );
+    assert_eq!("5CJzBh1SeBJ5qKzEpz1yzk8dF45erM5VWzwz4Ef2Zs1y2nKQ", format!("{:?}", u));
 }

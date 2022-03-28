@@ -77,12 +77,7 @@ pub struct Order {
 
 impl Order {
     pub const fn new(id: OrderId, user: UserId, price: Price, unfilled: Amount) -> Self {
-        Self {
-            id,
-            user,
-            price,
-            unfilled,
-        }
+        Self { id, user, price, unfilled }
     }
 
     pub fn fill(&mut self, delta: Amount) {
@@ -109,11 +104,7 @@ impl OrderPage {
         let price = order.price;
         let mut orders = LinkedHashMap::<OrderId, Order>::new();
         orders.insert(order.id, order);
-        Self {
-            orders,
-            amount,
-            price,
-        }
+        Self { orders, amount, price }
     }
 
     pub fn as_level(&self, base_scale: u32, quote_scale: u32, total: Amount) -> Level {
@@ -234,12 +225,7 @@ impl OrderBook {
             bid_total = level.2;
             bids.push(level);
         }
-        Depth {
-            asks,
-            bids,
-            depth: level,
-            symbol,
-        }
+        Depth { asks, bids, depth: level, symbol }
     }
 
     pub fn insert(&mut self, order: Order, ask_or_bid: AskOrBid) {
@@ -328,12 +314,8 @@ impl OrderBook {
 
     pub fn get_size_of_best(&self) -> (Option<(Price, Amount)>, Option<(Price, Amount)>) {
         (
-            self.asks
-                .first_key_value()
-                .map(|(price, v)| (*price, v.amount)),
-            self.bids
-                .last_key_value()
-                .map(|(price, v)| (*price, v.amount)),
+            self.asks.first_key_value().map(|(price, v)| (*price, v.amount)),
+            self.bids.last_key_value().map(|(price, v)| (*price, v.amount)),
         )
     }
 
@@ -384,10 +366,7 @@ pub fn test_orderbook() {
         true,
         true,
     );
-    book.insert(
-        Order::new(1, UserId::zero(), dec!(100), dec!(1)),
-        AskOrBid::Bid,
-    );
+    book.insert(Order::new(1, UserId::zero(), dec!(100), dec!(1)), AskOrBid::Bid);
     assert!(book.indices.contains_key(&1));
     assert_eq!(book.size(), (dec!(0), dec!(1)));
     assert!(!book.bids.is_empty());
@@ -395,10 +374,7 @@ pub fn test_orderbook() {
     assert_eq!(book.get_best_bid().unwrap(), dec!(100));
     assert!(book.get_best_ask().is_none());
     assert!(book.find_order(1).is_some());
-    book.insert(
-        Order::new(2, UserId::zero(), dec!(105), dec!(1)),
-        AskOrBid::Ask,
-    );
+    book.insert(Order::new(2, UserId::zero(), dec!(105), dec!(1)), AskOrBid::Ask);
     assert!(book.indices.contains_key(&2));
     assert_eq!(book.size().0, dec!(1));
     assert!(book.find_order(2).is_some());

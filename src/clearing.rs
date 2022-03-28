@@ -350,23 +350,10 @@ pub mod test {
 
         let symbol = (101, 100);
         let mr = Match {
-            maker: vec![Maker::maker_filled(
-                UserId::from_low_u64_be(2),
-                1,
-                dec!(9999),
-                dec!(1),
-            )],
+            maker: vec![Maker::maker_filled(UserId::from_low_u64_be(2), 1, dec!(9999), dec!(1))],
             taker: Taker::taker_filled(UserId::from_low_u64_be(1), 2, dec!(10000), AskOrBid::Bid),
         };
-        super::clear(
-            &mut accounts,
-            1,
-            &symbol,
-            Decimal::zero(),
-            Decimal::zero(),
-            &mr,
-            0,
-        );
+        super::clear(&mut accounts, 1, &symbol, Decimal::zero(), Decimal::zero(), &mr, 0);
         let b1_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 100);
         assert_eq!(dec!(1), b1_100.available,);
         assert_eq!(dec!(0), b1_100.frozen);
@@ -400,23 +387,10 @@ pub mod test {
 
         let symbol = (101, 100);
         let mr = Match {
-            maker: vec![Maker::maker_filled(
-                UserId::from_low_u64_be(1),
-                1,
-                dec!(10000),
-                dec!(1),
-            )],
+            maker: vec![Maker::maker_filled(UserId::from_low_u64_be(1), 1, dec!(10000), dec!(1))],
             taker: Taker::taker_filled(UserId::from_low_u64_be(2), 2, dec!(9999), AskOrBid::Ask),
         };
-        super::clear(
-            &mut accounts,
-            1,
-            &symbol,
-            Decimal::zero(),
-            Decimal::zero(),
-            &mr,
-            0,
-        );
+        super::clear(&mut accounts, 1, &symbol, Decimal::zero(), Decimal::zero(), &mr, 0);
         let b1_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 100);
         assert_eq!(Decimal::zero(), b1_100.available);
         assert_eq!(Decimal::zero(), b1_100.frozen);
@@ -443,23 +417,10 @@ pub mod test {
         assets::try_freeze(&mut accounts, &UserId::from_low_u64_be(2), 101, dec!(0.5)).unwrap();
         let symbol = (101, 100);
         let mr = Match {
-            maker: vec![Maker::maker_filled(
-                UserId::from_low_u64_be(1),
-                1,
-                dec!(10000),
-                dec!(0.5),
-            )],
+            maker: vec![Maker::maker_filled(UserId::from_low_u64_be(1), 1, dec!(10000), dec!(0.5))],
             taker: Taker::taker_filled(UserId::from_low_u64_be(2), 2, dec!(9999), AskOrBid::Ask),
         };
-        super::clear(
-            &mut accounts,
-            1,
-            &symbol,
-            Decimal::zero(),
-            Decimal::zero(),
-            &mr,
-            0,
-        );
+        super::clear(&mut accounts, 1, &symbol, Decimal::zero(), Decimal::zero(), &mr, 0);
         let b1_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 100);
         assert_eq!(Decimal::zero(), b1_100.available);
         assert_eq!(dec!(5000), b1_100.frozen);
@@ -483,15 +444,7 @@ pub mod test {
                 AskOrBid::Bid,
             ),
         };
-        super::clear(
-            &mut accounts,
-            2,
-            &symbol,
-            Decimal::zero(),
-            Decimal::zero(),
-            &mr,
-            0,
-        );
+        super::clear(&mut accounts, 2, &symbol, Decimal::zero(), Decimal::zero(), &mr, 0);
         let b1_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 100);
         assert_eq!(dec!(5000), b1_100.available);
         assert_eq!(Decimal::zero(), b1_100.frozen);
@@ -511,12 +464,7 @@ pub mod test {
         assets::try_freeze(&mut accounts, &UserId::from_low_u64_be(2), 101, dec!(1.5)).unwrap();
         let symbol = (101, 100);
         let mr = Match {
-            maker: vec![Maker::maker_filled(
-                UserId::from_low_u64_be(1),
-                1,
-                dec!(10000),
-                dec!(1),
-            )],
+            maker: vec![Maker::maker_filled(UserId::from_low_u64_be(1), 1, dec!(10000), dec!(1))],
             taker: Taker::taker_placed(
                 UserId::from_low_u64_be(2),
                 2,
@@ -525,15 +473,7 @@ pub mod test {
                 AskOrBid::Ask,
             ),
         };
-        super::clear(
-            &mut accounts,
-            2,
-            &symbol,
-            Decimal::zero(),
-            Decimal::zero(),
-            &mr,
-            0,
-        );
+        super::clear(&mut accounts, 2, &symbol, Decimal::zero(), Decimal::zero(), &mr, 0);
         let b1_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 100);
         assert_eq!(Decimal::zero(), b1_100.available);
         assert_eq!(Decimal::zero(), b1_100.frozen);
@@ -559,15 +499,7 @@ pub mod test {
                 AskOrBid::Ask,
             ),
         };
-        super::clear(
-            &mut accounts,
-            2,
-            &symbol,
-            Decimal::zero(),
-            Decimal::zero(),
-            &mr,
-            0,
-        );
+        super::clear(&mut accounts, 2, &symbol, Decimal::zero(), Decimal::zero(), &mr, 0);
 
         let b2_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(2), 100);
         assert_eq!(dec!(10000), b2_100.available);
@@ -588,12 +520,7 @@ pub mod test {
         assets::try_freeze(&mut accounts, &UserId::from_low_u64_be(2), 101, dec!(1)).unwrap();
         let symbol = (101, 100);
         let mr = Match {
-            maker: vec![Maker::maker_filled(
-                UserId::from_low_u64_be(1),
-                1,
-                dec!(10000),
-                dec!(1),
-            )],
+            maker: vec![Maker::maker_filled(UserId::from_low_u64_be(1), 1, dec!(10000), dec!(1))],
             taker: Taker::taker_filled(UserId::from_low_u64_be(2), 2, dec!(9999), AskOrBid::Ask),
         };
         super::clear(&mut accounts, 2, &symbol, dec!(0.001), dec!(0.001), &mr, 0);
@@ -641,35 +568,17 @@ pub mod test {
         let price = dec!(13333);
         let amount = dec!(0.1);
         assets::try_freeze(&mut accounts, &UserId::from_low_u64_be(1), 101, amount).unwrap();
-        execute_limit(
-            &mut book,
-            UserId::from_low_u64_be(1),
-            1,
-            price,
-            amount,
-            AskOrBid::Ask,
-        );
+        execute_limit(&mut book, UserId::from_low_u64_be(1), 1, price, amount, AskOrBid::Ask);
 
         let price = dec!(13333);
         let amount = dec!(0.5);
-        assets::try_freeze(
-            &mut accounts,
-            &UserId::from_low_u64_be(1),
-            100,
-            price * amount,
-        )
-        .unwrap();
+        assets::try_freeze(&mut accounts, &UserId::from_low_u64_be(1), 100, price * amount)
+            .unwrap();
         let b1_100 = assets::get_balance_to_owned(&accounts, &UserId::from_low_u64_be(1), 100);
         assert_eq!(b1_100.frozen, dec!(6666.5));
         assert_eq!(b1_100.available, dec!(3333.5));
-        let mr = execute_limit(
-            &mut book,
-            UserId::from_low_u64_be(1),
-            2,
-            price,
-            amount,
-            AskOrBid::Bid,
-        );
+        let mr =
+            execute_limit(&mut book, UserId::from_low_u64_be(1), 2, price, amount, AskOrBid::Bid);
 
         let symbol = (101, 100);
         let out = super::clear(&mut accounts, 2, &symbol, taker_fee, maker_fee, &mr, 0);
@@ -719,32 +628,14 @@ pub mod test {
         let price = dec!(10000);
         let amount = dec!(0.1);
         assets::try_freeze(&mut accounts, &UserId::from_low_u64_be(1), 101, amount).unwrap();
-        execute_limit(
-            &mut book,
-            UserId::from_low_u64_be(1),
-            1,
-            price,
-            amount,
-            AskOrBid::Ask,
-        );
+        execute_limit(&mut book, UserId::from_low_u64_be(1), 1, price, amount, AskOrBid::Ask);
 
         let price = dec!(13333);
         let amount = dec!(0.5);
-        assets::try_freeze(
-            &mut accounts,
-            &UserId::from_low_u64_be(2),
-            100,
-            price * amount,
-        )
-        .unwrap();
-        let mr = execute_limit(
-            &mut book,
-            UserId::from_low_u64_be(2),
-            2,
-            price,
-            amount,
-            AskOrBid::Bid,
-        );
+        assets::try_freeze(&mut accounts, &UserId::from_low_u64_be(2), 100, price * amount)
+            .unwrap();
+        let mr =
+            execute_limit(&mut book, UserId::from_low_u64_be(2), 2, price, amount, AskOrBid::Bid);
 
         let symbol = (101, 100);
         let out = super::clear(&mut accounts, 2, &symbol, taker_fee, maker_fee, &mr, 0);
@@ -803,33 +694,15 @@ pub mod test {
 
         let price = dec!(13333);
         let amount = dec!(0.5);
-        assets::try_freeze(
-            &mut accounts,
-            &UserId::from_low_u64_be(2),
-            100,
-            price * amount,
-        )
-        .unwrap();
-        execute_limit(
-            &mut book,
-            UserId::from_low_u64_be(2),
-            1,
-            price,
-            amount,
-            AskOrBid::Bid,
-        );
+        assets::try_freeze(&mut accounts, &UserId::from_low_u64_be(2), 100, price * amount)
+            .unwrap();
+        execute_limit(&mut book, UserId::from_low_u64_be(2), 1, price, amount, AskOrBid::Bid);
 
         let price = dec!(10000);
         let amount = dec!(0.1);
         assets::try_freeze(&mut accounts, &UserId::from_low_u64_be(1), 101, amount).unwrap();
-        let mr = execute_limit(
-            &mut book,
-            UserId::from_low_u64_be(1),
-            2,
-            price,
-            amount,
-            AskOrBid::Ask,
-        );
+        let mr =
+            execute_limit(&mut book, UserId::from_low_u64_be(1), 2, price, amount, AskOrBid::Ask);
 
         let symbol = (101, 100);
         let out = super::clear(&mut accounts, 2, &symbol, taker_fee, maker_fee, &mr, 0);

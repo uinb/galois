@@ -81,14 +81,7 @@ impl Taker {
         price: Price,
         ask_or_bid: AskOrBid,
     ) -> Self {
-        Self {
-            user_id,
-            order_id,
-            price,
-            unfilled: Amount::ZERO,
-            ask_or_bid,
-            state: State::Filled,
-        }
+        Self { user_id, order_id, price, unfilled: Amount::ZERO, ask_or_bid, state: State::Filled }
     }
 
     pub const fn taker_placed(
@@ -98,14 +91,7 @@ impl Taker {
         unfilled: Amount,
         ask_or_bid: AskOrBid,
     ) -> Self {
-        Self {
-            user_id,
-            order_id,
-            price,
-            unfilled,
-            ask_or_bid,
-            state: State::PartiallyFilled,
-        }
+        Self { user_id, order_id, price, unfilled, ask_or_bid, state: State::PartiallyFilled }
     }
 
     pub const fn cancel(
@@ -115,14 +101,7 @@ impl Taker {
         unfilled: Amount,
         ask_or_bid: AskOrBid,
     ) -> Self {
-        Self {
-            user_id,
-            order_id,
-            price,
-            unfilled,
-            ask_or_bid,
-            state: State::Canceled,
-        }
+        Self { user_id, order_id, price, unfilled, ask_or_bid, state: State::Canceled }
     }
 }
 
@@ -142,13 +121,7 @@ impl Maker {
         price: Price,
         filled: Amount,
     ) -> Self {
-        Self {
-            user_id,
-            order_id,
-            price,
-            filled,
-            state: State::Filled,
-        }
+        Self { user_id, order_id, price, filled, state: State::Filled }
     }
 
     pub const fn maker_so_far(
@@ -157,13 +130,7 @@ impl Maker {
         price: Price,
         filled: Amount,
     ) -> Self {
-        Self {
-            user_id,
-            order_id,
-            price,
-            filled,
-            state: State::PartiallyFilled,
-        }
+        Self { user_id, order_id, price, filled, state: State::PartiallyFilled }
     }
 }
 
@@ -227,12 +194,9 @@ pub fn execute_limit(
             if page.is_empty() {
                 best.remove();
             }
-            traded
-                .iter()
-                .filter(|m| m.state == State::Filled)
-                .for_each(|m| {
-                    book.indices.remove(&m.order_id);
-                });
+            traded.iter().filter(|m| m.state == State::Filled).for_each(|m| {
+                book.indices.remove(&m.order_id);
+            });
             makers.append(&mut traded);
             if interrupted {
                 return Match {
@@ -362,23 +326,14 @@ mod test {
         );
         assert_eq!(State::Placed, mr.taker.state);
         assert!(mr.maker.is_empty());
-        assert_eq!(
-            dec!(0.1),
-            *book
-                .get_best_if_match(AskOrBid::Ask, &dec!(0.1))
-                .unwrap()
-                .key()
-        );
+        assert_eq!(dec!(0.1), *book.get_best_if_match(AskOrBid::Ask, &dec!(0.1)).unwrap().key());
         // best bid = 0.1, now ask with 0.11, no matches
         assert!(book.get_best_if_match(AskOrBid::Ask, &dec!(0.11)).is_none());
         // best bid = 0.1, now ask with 0.09, matches
         assert!(book.get_best_if_match(AskOrBid::Ask, &dec!(0.09)).is_some());
         assert_eq!(
             dec!(100),
-            book.get_best_if_match(AskOrBid::Ask, &dec!(0.1))
-                .unwrap()
-                .get()
-                .amount
+            book.get_best_if_match(AskOrBid::Ask, &dec!(0.1)).unwrap().get().amount
         );
         assert!(book.indices.contains_key(&1001));
     }
@@ -457,19 +412,10 @@ mod test {
             Taker::taker_filled(UserId::from_low_u64_be(2), 1003, price, AskOrBid::Ask),
             mr.taker
         );
-        assert_eq!(
-            dec!(0.1),
-            *book
-                .get_best_if_match(AskOrBid::Ask, &dec!(0.1))
-                .unwrap()
-                .key()
-        );
+        assert_eq!(dec!(0.1), *book.get_best_if_match(AskOrBid::Ask, &dec!(0.1)).unwrap().key());
         assert_eq!(
             dec!(900),
-            book.get_best_if_match(AskOrBid::Ask, &dec!(0.1))
-                .unwrap()
-                .get()
-                .amount
+            book.get_best_if_match(AskOrBid::Ask, &dec!(0.1)).unwrap().get().amount
         );
 
         let price = dec!(0.12);
@@ -484,19 +430,10 @@ mod test {
         );
         assert_eq!(State::Placed, mr.taker.state);
         assert!(book.get_best_if_match(AskOrBid::Bid, &dec!(0.11)).is_none());
-        assert_eq!(
-            dec!(0.12),
-            *book
-                .get_best_if_match(AskOrBid::Bid, &dec!(0.12))
-                .unwrap()
-                .key()
-        );
+        assert_eq!(dec!(0.12), *book.get_best_if_match(AskOrBid::Bid, &dec!(0.12)).unwrap().key());
         assert_eq!(
             dec!(100),
-            book.get_best_if_match(AskOrBid::Bid, &dec!(0.12))
-                .unwrap()
-                .get()
-                .amount
+            book.get_best_if_match(AskOrBid::Bid, &dec!(0.12)).unwrap().get().amount
         );
         assert!(book.indices.contains_key(&1004));
 
@@ -504,13 +441,7 @@ mod test {
         let price = dec!(0.1);
         let unfilled = dec!(900);
         assert_eq!(
-            Taker::cancel(
-                UserId::from_low_u64_be(1),
-                1002,
-                price,
-                unfilled,
-                AskOrBid::Bid,
-            ),
+            Taker::cancel(UserId::from_low_u64_be(1), 1002, price, unfilled, AskOrBid::Bid,),
             mr.unwrap().taker
         );
         assert!(!book.indices.contains_key(&1002));
@@ -521,13 +452,7 @@ mod test {
         let mr = cancel(&mut book, 1004);
         assert!(mr.is_some());
         assert_eq!(
-            Taker::cancel(
-                UserId::from_low_u64_be(2),
-                1004,
-                price,
-                unfilled,
-                AskOrBid::Ask,
-            ),
+            Taker::cancel(UserId::from_low_u64_be(2), 1004, price, unfilled, AskOrBid::Ask,),
             mr.unwrap().taker
         );
         assert!(!book.indices.contains_key(&1004));
@@ -568,14 +493,7 @@ mod test {
 
         let price = dec!(0.1);
         let amount = dec!(100);
-        execute_limit(
-            &mut book,
-            UserId::from_low_u64_be(1),
-            1001,
-            price,
-            amount,
-            AskOrBid::Bid,
-        );
+        execute_limit(&mut book, UserId::from_low_u64_be(1), 1001, price, amount, AskOrBid::Bid);
         let mr = execute_limit(
             &mut book,
             UserId::from_low_u64_be(1),
@@ -614,22 +532,8 @@ mod test {
 
         let price = dec!(0.1);
         let amount = dec!(100);
-        execute_limit(
-            &mut book,
-            UserId::from_low_u64_be(2),
-            1001,
-            price,
-            amount,
-            AskOrBid::Bid,
-        );
-        execute_limit(
-            &mut book,
-            UserId::from_low_u64_be(1),
-            1002,
-            price,
-            amount,
-            AskOrBid::Bid,
-        );
+        execute_limit(&mut book, UserId::from_low_u64_be(2), 1001, price, amount, AskOrBid::Bid);
+        execute_limit(&mut book, UserId::from_low_u64_be(1), 1002, price, amount, AskOrBid::Bid);
         let mr = execute_limit(
             &mut book,
             UserId::from_low_u64_be(1),
