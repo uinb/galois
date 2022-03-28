@@ -137,8 +137,22 @@ pub fn init(rx: Receiver<Proof>) -> anyhow::Result<Arc<AtomicU64>> {
 #[derive(Clone, Encode, Decode, Eq, PartialEq, Debug)]
 pub enum FusoCommand {
     // price, amounnt, maker_fee, taker_fee, base, quote
-    AskLimit(Compact<u128>, Compact<u128>, Compact<u32>, Compact<u32>, Compact<u32>, Compact<u32>),
-    BidLimit(Compact<u128>, Compact<u128>, Compact<u32>, Compact<u32>, Compact<u32>, Compact<u32>),
+    AskLimit(
+        Compact<u128>,
+        Compact<u128>,
+        Compact<u32>,
+        Compact<u32>,
+        Compact<u32>,
+        Compact<u32>,
+    ),
+    BidLimit(
+        Compact<u128>,
+        Compact<u128>,
+        Compact<u32>,
+        Compact<u32>,
+        Compact<u32>,
+        Compact<u32>,
+    ),
     Cancel(Compact<u32>, Compact<u32>),
     TransferOut(Compact<u32>, Compact<u128>),
     TransferIn(Compact<u32>, Compact<u128>),

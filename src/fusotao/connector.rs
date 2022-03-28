@@ -49,26 +49,36 @@ pub struct Dominator {
 impl FusoConnector {
     pub fn new() -> anyhow::Result<Self> {
         let signer = Sr25519Key::from_string(
-            &C.fusotao.as_ref().ok_or(anyhow!("Invalid fusotao config"))?.key_seed,
+            &C.fusotao
+                .as_ref()
+                .ok_or(anyhow!("Invalid fusotao config"))?
+                .key_seed,
             None,
         )
         .map_err(|_| anyhow!("Invalid fusotao config"))?;
         let client = sub_api::rpc::WsRpcClient::new(
-            &C.fusotao.as_ref().ok_or(anyhow!("Invalid fusotao config"))?.node_url,
+            &C.fusotao
+                .as_ref()
+                .ok_or(anyhow!("Invalid fusotao config"))?
+                .node_url,
         );
-        let api = FusoApi::new(client).map(|api| api.set_signer(signer.clone())).map_err(|e| {
-            log::error!("{:?}", e);
-            anyhow!("Fusotao node not available or runtime metadata check failed")
-        })?;
-        Ok(Self { api, signer, proved_event_id: Arc::new(AtomicU64::new(0)) })
+        let api = FusoApi::new(client)
+            .map(|api| api.set_signer(signer.clone()))
+            .map_err(|e| {
+                log::error!("{:?}", e);
+                anyhow!("Fusotao node not available or runtime metadata check failed")
+            })?;
+        Ok(Self {
+            api,
+            signer,
+            proved_event_id: Arc::new(AtomicU64::new(0)),
+        })
     }
 
     pub fn sync_proving_progress(who: &Public, api: &FusoApi) -> anyhow::Result<u64> {
-        let key = api.metadata.storage_map_key::<FusoAccountId, Option<Dominator>>(
-            "Verifier",
-            "Dominators",
-            *who,
-        )?;
+        let key = api
+            .metadata
+            .storage_map_key::<FusoAccountId, Option<Dominator>>("Verifier", "Dominators", *who)?;
         let payload = api.get_opaque_storage_by_key_hash(key, None)?.unwrap();
         let result = Dominator::decode(&mut payload.as_slice()).unwrap();
         log::info!("synchronizing proving progress: {}", result.sequence.0);
@@ -137,7 +147,10 @@ impl FusoConnector {
         if hash.is_none() {
             Err(anyhow::anyhow!("extrinsic executed failed"))
         } else {
-            log::info!("submitting proofs ok, extrinsic hash: {:?}", hex::encode(hash.unwrap()));
+            log::info!(
+                "submitting proofs ok, extrinsic hash: {:?}",
+                hex::encode(hash.unwrap())
+            );
             Ok(())
         }
     }
@@ -146,7 +159,11 @@ impl FusoConnector {
         let api = self.api.clone();
         let who = self.signer.public().clone();
         let path: PathBuf = [&C.sequence.coredump_dir, "fusotao.blk"].iter().collect();
-        let finalized_file = OpenOptions::new().read(true).write(true).create(true).open(&path)?;
+        let finalized_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(&path)?;
         finalized_file.set_len(4)?;
         let mut blk = unsafe { MmapMut::map_mut(&finalized_file)? };
         let mut from_block_number = u32::from_le_bytes(blk.as_ref().try_into()?);
@@ -166,7 +183,11 @@ impl FusoConnector {
             match Self::sync_blocks_or_wait(from_block_number, &api, &who, &decoder) {
                 Ok((cmds, sync)) => {
                     if !cmds.is_empty() {
-                        log::info!("prepare handle {} events before block {:?}", cmds.len(), sync);
+                        log::info!(
+                            "prepare handle {} events before block {:?}",
+                            cmds.len(),
+                            sync
+                        );
                         match sequence::insert_sequences(&cmds) {
                             Ok(()) => {
                                 from_block_number = sync;
@@ -202,8 +223,9 @@ impl FusoConnector {
         let hash = api.get_block_hash(at)?;
         let key = api.metadata.storage_value_key("System", "Events")?;
         let payload = api.get_opaque_storage_by_key_hash(key, hash)?;
-        let events =
-            decoder.decode_events(&mut payload.unwrap_or(vec![]).as_slice()).unwrap_or(vec![]);
+        let events = decoder
+            .decode_events(&mut payload.unwrap_or(vec![]).as_slice())
+            .unwrap_or(vec![]);
         let mut cmds = vec![];
         for (_, event) in events.into_iter() {
             match event {
@@ -251,11 +273,15 @@ impl FusoConnector {
         who: &FusoAccountId,
         decoder: &EventsDecoder,
     ) -> anyhow::Result<(Vec<sequence::Command>, u32)> {
-        let finalized_block_hash =
-            api.get_finalized_head()?.ok_or(anyhow!("finalized heads couldn't be found"))?;
+        let finalized_block_hash = api
+            .get_finalized_head()?
+            .ok_or(anyhow!("finalized heads couldn't be found"))?;
         let finalized_block: sub_api::SignedBlock<FusoBlock> = api
             .get_signed_block(Some(finalized_block_hash))?
-            .ok_or(anyhow!("signed block {} couldn't be found", finalized_block_hash))?;
+            .ok_or(anyhow!(
+                "signed block {} couldn't be found",
+                finalized_block_hash
+            ))?;
         let finalized_block_number = finalized_block.block.header.number;
         log::info!(
             "current block: {}, finalized block: {}, {:?}",
@@ -270,7 +296,12 @@ impl FusoConnector {
         let mut f = vec![];
         let mut i = 0;
         while from_block_included + i <= finalized_block_number {
-            f.push(Self::resolve_block(api, who, Some(from_block_included + i), decoder));
+            f.push(Self::resolve_block(
+                api,
+                who,
+                Some(from_block_included + i),
+                decoder,
+            ));
             i += 1;
             if f.len() == 10 {
                 break;

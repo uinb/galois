@@ -32,7 +32,10 @@ pub struct Prover {
 
 impl Prover {
     pub fn new(tx: Sender<Proof>, proved_event_id: Arc<AtomicU64>) -> Self {
-        Self { sender: tx, proved_event_id }
+        Self {
+            sender: tx,
+            proved_event_id,
+        }
     }
 
     pub fn prove_trade_cmd(
@@ -79,21 +82,24 @@ impl Prover {
             new_bid_size,
         ));
         let mut maker_accounts = HashMap::<UserId, Output>::new();
-        outputs.iter().take_while(|o| o.role == Role::Maker).for_each(|r| {
-            maker_accounts
-                .entry(r.user_id.clone())
-                .and_modify(|out| {
-                    out.quote_charge += r.quote_charge;
-                    out.quote_delta += r.quote_delta;
-                    out.quote_available = r.quote_available;
-                    out.quote_frozen = r.quote_frozen;
-                    out.base_charge += r.base_charge;
-                    out.base_delta += r.base_delta;
-                    out.base_available = r.base_available;
-                    out.base_frozen = r.base_frozen;
-                })
-                .or_insert_with(|| r.clone());
-        });
+        outputs
+            .iter()
+            .take_while(|o| o.role == Role::Maker)
+            .for_each(|r| {
+                maker_accounts
+                    .entry(r.user_id.clone())
+                    .and_modify(|out| {
+                        out.quote_charge += r.quote_charge;
+                        out.quote_delta += r.quote_delta;
+                        out.quote_available = r.quote_available;
+                        out.quote_frozen = r.quote_frozen;
+                        out.base_charge += r.base_charge;
+                        out.base_delta += r.base_delta;
+                        out.base_available = r.base_available;
+                        out.base_frozen = r.base_frozen;
+                    })
+                    .or_insert_with(|| r.clone());
+            });
         maker_accounts.values().for_each(|r| {
             log::debug!("{:?}", r);
             let (ba, bf, qa, qf) = match r.ask_or_bid {
@@ -265,8 +271,10 @@ impl Prover {
         cmd: AssetsCmd,
         account_before: &Balance,
     ) {
-        let (old_available, old_frozen) =
-            (account_before.available.to_amount(), account_before.frozen.to_amount());
+        let (old_available, old_frozen) = (
+            account_before.available.to_amount(),
+            account_before.frozen.to_amount(),
+        );
         let leaves = vec![new_account_merkle_leaf(
             &cmd.user_id,
             cmd.currency,
@@ -297,8 +305,10 @@ impl Prover {
         cmd: AssetsCmd,
         account_before: &Balance,
     ) {
-        let (old_available, old_frozen) =
-            (account_before.available.to_amount(), account_before.frozen.to_amount());
+        let (old_available, old_frozen) = (
+            account_before.available.to_amount(),
+            account_before.frozen.to_amount(),
+        );
         let leaves = vec![new_account_merkle_leaf(
             &cmd.user_id,
             cmd.currency,
@@ -324,10 +334,15 @@ impl Prover {
 }
 
 fn gen_proofs(merkle_tree: &mut GlobalStates, leaves: &Vec<MerkleLeaf>) -> Vec<u8> {
-    let keys = leaves.iter().map(|leaf| BlakeTwo256::digest(&leaf.key).into()).collect::<Vec<_>>();
+    let keys = leaves
+        .iter()
+        .map(|leaf| BlakeTwo256::digest(&leaf.key).into())
+        .collect::<Vec<_>>();
     // TODO merge origin to support update all
     leaves.iter().for_each(|leaf| {
-        merkle_tree.update(BlakeTwo256::digest(&leaf.key).into(), leaf.new_v.into()).unwrap();
+        merkle_tree
+            .update(BlakeTwo256::digest(&leaf.key).into(), leaf.new_v.into())
+            .unwrap();
     });
     merkle_tree
         .merkle_proof(keys.clone())
@@ -399,7 +414,11 @@ fn new_orderpage_merkle_leaf(
     key[1..5].copy_from_slice(&symbol.0.to_le_bytes()[..]);
     key[5..9].copy_from_slice(&symbol.1.to_le_bytes()[..]);
     key[9..].copy_from_slice(&price.to_le_bytes()[..]);
-    MerkleLeaf { key, old_v: u128le_to_h256(0, old_size), new_v: u128le_to_h256(0, new_size) }
+    MerkleLeaf {
+        key,
+        old_v: u128le_to_h256(0, old_size),
+        new_v: u128le_to_h256(0, new_size),
+    }
 }
 
 #[cfg(test)]
@@ -548,7 +567,13 @@ mod test {
                 assets::add_to_available(&mut all, &cmd0.user_id, cmd0.currency, cmd0.amount)
                     .unwrap();
             let cmd1 = cmd0.clone();
-            pp.prove_assets_cmd(&mut merkle_tree, 1, cmd0, &assets::Balance::default(), &after);
+            pp.prove_assets_cmd(
+                &mut merkle_tree,
+                1,
+                cmd0,
+                &assets::Balance::default(),
+                &after,
+            );
             let transfer_again =
                 assets::add_to_available(&mut all, &cmd1.user_id, cmd1.currency, cmd1.amount)
                     .unwrap();
@@ -570,7 +595,10 @@ mod test {
             .collect::<Vec<_>>();
         let r = mp.verify::<Blake2bHasher>(&proof.root.into(), new).unwrap();
         assert!(r);
-        assert_eq!(split_h256_u128(&proof.leaves[0].new_v), (1111110000000000000, 0));
+        assert_eq!(
+            split_h256_u128(&proof.leaves[0].new_v),
+            (1111110000000000000, 0)
+        );
         assert_eq!(split_h256_u128(&proof.leaves[0].old_v), (0, 0));
         let new_root = proof.root.clone();
         let proof = rx.recv().unwrap();
@@ -589,8 +617,14 @@ mod test {
             .collect::<Vec<_>>();
         let r = mp.verify::<Blake2bHasher>(&proof.root.into(), new).unwrap();
         assert!(r);
-        assert_eq!(split_h256_u128(&proof.leaves[0].new_v), (2222220000000000000, 0));
-        assert_eq!(split_h256_u128(&proof.leaves[0].old_v), (1111110000000000000, 0));
+        assert_eq!(
+            split_h256_u128(&proof.leaves[0].new_v),
+            (2222220000000000000, 0)
+        );
+        assert_eq!(
+            split_h256_u128(&proof.leaves[0].old_v),
+            (1111110000000000000, 0)
+        );
     }
 
     #[test]
@@ -880,9 +914,15 @@ mod test {
             assert_eq!(proof.leaves.len(), 5);
             // ask,bid
             assert_eq!(split_h256_u128(&proof.leaves[0].old_v), (0, 0));
-            assert_eq!(split_h256_u128(&proof.leaves[0].new_v), (110000000000000000, 0));
+            assert_eq!(
+                split_h256_u128(&proof.leaves[0].new_v),
+                (110000000000000000, 0)
+            );
             // base
-            assert_eq!(split_h256_u128(&proof.leaves[1].old_v), (1111110000000000000, 0));
+            assert_eq!(
+                split_h256_u128(&proof.leaves[1].old_v),
+                (1111110000000000000, 0)
+            );
             assert_eq!(
                 split_h256_u128(&proof.leaves[1].new_v),
                 (1001110000000000000, 110000000000000000)
@@ -892,16 +932,25 @@ mod test {
             assert_eq!(split_h256_u128(&proof.leaves[2].new_v), (0, 0));
             // best price a,b
             assert_eq!(split_h256_u128(&proof.leaves[3].old_v), (0, 0));
-            assert_eq!(split_h256_u128(&proof.leaves[3].new_v), (100_000000000000000000, 0));
+            assert_eq!(
+                split_h256_u128(&proof.leaves[3].new_v),
+                (100_000000000000000000, 0)
+            );
             // orderpage at 100 = 0.11
             assert_eq!(split_h256_u128_sum(&proof.leaves[4].old_v), 0);
-            assert_eq!(split_h256_u128_sum(&proof.leaves[4].new_v), 110000000000000000);
+            assert_eq!(
+                split_h256_u128_sum(&proof.leaves[4].new_v),
+                110000000000000000
+            );
         }
         // bid 0.01, 90
         {
             let proof = rx.recv().unwrap();
             // ask,bid
-            assert_eq!(split_h256_u128(&proof.leaves[0].old_v), (110000000000000000, 0));
+            assert_eq!(
+                split_h256_u128(&proof.leaves[0].old_v),
+                (110000000000000000, 0)
+            );
             assert_eq!(
                 split_h256_u128(&proof.leaves[0].new_v),
                 (110000000000000000, 10000000000000000)
@@ -910,7 +959,10 @@ mod test {
             assert_eq!(split_h256_u128(&proof.leaves[1].old_v), (0, 0));
             assert_eq!(split_h256_u128(&proof.leaves[1].new_v), (0, 0));
             // quote
-            assert_eq!(split_h256_u128(&proof.leaves[2].old_v), (99990000000000000000, 0));
+            assert_eq!(
+                split_h256_u128(&proof.leaves[2].old_v),
+                (99990000000000000000, 0)
+            );
             assert_eq!(
                 split_h256_u128(&proof.leaves[2].new_v),
                 (99090000000000000000, 900000000000000000)
@@ -949,19 +1001,31 @@ mod test {
                 split_h256_u128(&proof.leaves[0].old_v),
                 (220000000000000000, 10000000000000000)
             );
-            assert_eq!(split_h256_u128(&proof.leaves[0].new_v), (0, 290000000000000000));
+            assert_eq!(
+                split_h256_u128(&proof.leaves[0].new_v),
+                (0, 290000000000000000)
+            );
             // maker - base
             assert_eq!(
                 split_h256_u128(&proof.leaves[1].old_v),
                 (891110000000000000, 220000000000000000)
             );
-            assert_eq!(split_h256_u128(&proof.leaves[1].new_v), (891110000000000000, 0));
+            assert_eq!(
+                split_h256_u128(&proof.leaves[1].new_v),
+                (891110000000000000, 0)
+            );
             // maker - quote
             assert_eq!(split_h256_u128(&proof.leaves[2].old_v), (0, 0));
-            assert_eq!(split_h256_u128(&proof.leaves[2].new_v), (21978000000000000000, 0));
+            assert_eq!(
+                split_h256_u128(&proof.leaves[2].new_v),
+                (21978000000000000000, 0)
+            );
             // taker - base
             assert_eq!(split_h256_u128(&proof.leaves[3].old_v), (0, 0));
-            assert_eq!(split_h256_u128(&proof.leaves[3].new_v), (219780000000000000, 0));
+            assert_eq!(
+                split_h256_u128(&proof.leaves[3].new_v),
+                (219780000000000000, 0)
+            );
             // taker - quote
             assert_eq!(
                 split_h256_u128(&proof.leaves[4].old_v),
@@ -974,8 +1038,14 @@ mod test {
         {
             let proof = rx.recv().unwrap();
             // ask,bid
-            assert_eq!(split_h256_u128(&proof.leaves[0].old_v), (0, 290000000000000000));
-            assert_eq!(split_h256_u128(&proof.leaves[0].new_v), (10000000000000000, 0));
+            assert_eq!(
+                split_h256_u128(&proof.leaves[0].old_v),
+                (0, 290000000000000000)
+            );
+            assert_eq!(
+                split_h256_u128(&proof.leaves[0].new_v),
+                (10000000000000000, 0)
+            );
             // maker - base
             let mb0 = split_h256_u128_sum(&proof.leaves[1].old_v);
             let mb1 = split_h256_u128_sum(&proof.leaves[1].new_v);
@@ -1021,7 +1091,13 @@ mod test {
             let after =
                 assets::add_to_available(&mut all, &cmd0.user_id, cmd0.currency, cmd0.amount)
                     .unwrap();
-            pp.prove_assets_cmd(&mut merkle_tree, 1, cmd0, &assets::Balance::default(), &after);
+            pp.prove_assets_cmd(
+                &mut merkle_tree,
+                1,
+                cmd0,
+                &assets::Balance::default(),
+                &after,
+            );
             let cmd1 = AssetsCmd {
                 user_id: UserId::from_low_u64_be(2),
                 in_or_out: InOrOut::In,
@@ -1248,7 +1324,10 @@ mod test {
             let proof = rx.recv().unwrap();
             assert_eq!(proof.leaves.len(), 7);
             // best price a,b
-            assert_eq!(split_h256_u128(&proof.leaves[5].old_v), (dec!(9.9).to_amount(), 0));
+            assert_eq!(
+                split_h256_u128(&proof.leaves[5].old_v),
+                (dec!(9.9).to_amount(), 0)
+            );
             assert_eq!(
                 split_h256_u128(&proof.leaves[5].new_v),
                 (dec!(10).to_amount(), dec!(9.9).to_amount())
@@ -1264,8 +1343,14 @@ mod test {
                     .unwrap()[..]
             );
             // p=9.9
-            assert_eq!(split_h256_u128_sum(&proof.leaves[6].old_v), dec!(0.1).to_amount());
-            assert_eq!(split_h256_u128_sum(&proof.leaves[6].new_v), dec!(0.4).to_amount());
+            assert_eq!(
+                split_h256_u128_sum(&proof.leaves[6].old_v),
+                dec!(0.1).to_amount()
+            );
+            assert_eq!(
+                split_h256_u128_sum(&proof.leaves[6].new_v),
+                dec!(0.4).to_amount()
+            );
 
             let maker_accounts = 2u8;
             let pages = 1u8;
@@ -1361,7 +1446,13 @@ mod test {
             let after =
                 assets::add_to_available(&mut all, &cmd0.user_id, cmd0.currency, cmd0.amount)
                     .unwrap();
-            pp.prove_assets_cmd(&mut merkle_tree, 1, cmd0, &assets::Balance::default(), &after);
+            pp.prove_assets_cmd(
+                &mut merkle_tree,
+                1,
+                cmd0,
+                &assets::Balance::default(),
+                &after,
+            );
             let cmd1 = AssetsCmd {
                 user_id: UserId::from_low_u64_be(2),
                 in_or_out: InOrOut::In,
@@ -1586,8 +1677,14 @@ mod test {
             .unwrap()),
         };
         let (b, q, p) = ml.try_get_orderpage().unwrap();
-        assert_eq!(super::to_decimal_represent(ml.split_old_to_sum()).unwrap(), dec!(1476.5));
-        assert_eq!(super::to_decimal_represent(ml.split_new_to_sum()).unwrap(), dec!(1416.5));
+        assert_eq!(
+            super::to_decimal_represent(ml.split_old_to_sum()).unwrap(),
+            dec!(1476.5)
+        );
+        assert_eq!(
+            super::to_decimal_represent(ml.split_new_to_sum()).unwrap(),
+            dec!(1416.5)
+        );
     }
 
     #[test]
@@ -1713,15 +1810,21 @@ mod test {
                 ((key, v.old_v.into()), (key, v.new_v.into()))
             })
             .unzip();
-        let known_root: [u8; 32] =
-            cv(hex::decode("328305a5f766959084694f439196b41d3731e4532ef9ad5fb5327868af154f4e")
-                .unwrap());
-        let r = mp.verify::<smt::blake2b::Blake2bHasher>(&known_root.into(), old).unwrap();
+        let known_root: [u8; 32] = cv(hex::decode(
+            "328305a5f766959084694f439196b41d3731e4532ef9ad5fb5327868af154f4e",
+        )
+        .unwrap());
+        let r = mp
+            .verify::<smt::blake2b::Blake2bHasher>(&known_root.into(), old)
+            .unwrap();
         assert!(r);
-        let new_root: [u8; 32] =
-            cv(hex::decode("f545a8eabcd8fe7ee07c7c3100b896d40b83f07dc66198a3280354d48f602bdb")
-                .unwrap());
-        let r = mp.verify::<smt::blake2b::Blake2bHasher>(&new_root.into(), new).unwrap();
+        let new_root: [u8; 32] = cv(hex::decode(
+            "f545a8eabcd8fe7ee07c7c3100b896d40b83f07dc66198a3280354d48f602bdb",
+        )
+        .unwrap());
+        let r = mp
+            .verify::<smt::blake2b::Blake2bHasher>(&new_root.into(), new)
+            .unwrap();
         assert!(r);
     }
 

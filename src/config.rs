@@ -127,7 +127,8 @@ fn init_config_file() -> anyhow::Result<Config> {
     let mut file = String::new();
     {
         let mut args = ArgumentParser::new();
-        args.refer(&mut file).add_option(&["-c"], Store, "toml config file");
+        args.refer(&mut file)
+            .add_option(&["-c"], Store, "toml config file");
         args.parse_args_or_exit();
     }
     init_config(&std::fs::read_to_string(file)?)
@@ -139,7 +140,8 @@ pub fn print_enc_config_file() -> anyhow::Result<()> {
     let mut key = String::new();
     {
         let mut args = ArgumentParser::new();
-        args.refer(&mut file).add_option(&["-c"], Store, "toml config file");
+        args.refer(&mut file)
+            .add_option(&["-c"], Store, "toml config file");
         args.refer(&mut key).add_option(&["-k"], Store, "key");
         args.parse_args_or_exit();
     }
@@ -179,9 +181,11 @@ fn init_config(toml: &str) -> anyhow::Result<Config> {
     loggers.entry("ac_node_api".to_string()).or_insert_with(|| {
         Logger::builder().build("ac_node_api".to_string(), log::LevelFilter::Error)
     });
-    loggers.entry("fusotao_rust_client".to_string()).or_insert_with(|| {
-        Logger::builder().build("fusotao_rust_client".to_string(), log::LevelFilter::Error)
-    });
+    loggers
+        .entry("fusotao_rust_client".to_string())
+        .or_insert_with(|| {
+            Logger::builder().build("fusotao_rust_client".to_string(), log::LevelFilter::Error)
+        });
     let log = log4rs::Config::builder()
         .loggers::<Vec<_>>(loggers.into_values().collect())
         .appenders(cfg.log.appenders_lossy(&Default::default()).0)

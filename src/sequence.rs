@@ -62,8 +62,14 @@ impl TryInto<Event> for Sequence {
             ASK_LIMIT | BID_LIMIT => {
                 let amount = self.cmd.amount.ok_or(anyhow!(""))?;
                 let price = self.cmd.price.ok_or(anyhow!(""))?;
-                ensure!(price.is_sign_positive() && price.scale() <= 7, "invalid price numeric");
-                ensure!(amount.is_sign_positive() && amount.scale() <= 7, "invalid amount numeric");
+                ensure!(
+                    price.is_sign_positive() && price.scale() <= 7,
+                    "invalid price numeric"
+                );
+                ensure!(
+                    amount.is_sign_positive() && amount.scale() <= 7,
+                    "invalid amount numeric"
+                );
                 cfg_if::cfg_if! {
                     if #[cfg(features = "fusotao")] {
                         let mut vol = amount.checked_mul(price).ok_or(anyhow!(""))?;
@@ -103,7 +109,11 @@ impl TryInto<Event> for Sequence {
                     user_id: UserId::from_str(self.cmd.user_id.as_ref().ok_or(anyhow!(""))?)?,
                     in_or_out: InOrOut::Out,
                     currency: self.cmd.currency.ok_or(anyhow!(""))?,
-                    amount: self.cmd.amount.filter(|a| a.is_sign_positive()).ok_or(anyhow!(""))?,
+                    amount: self
+                        .cmd
+                        .amount
+                        .filter(|a| a.is_sign_positive())
+                        .ok_or(anyhow!(""))?,
                     #[cfg(feature = "fusotao")]
                     block_number: self.cmd.block_number.ok_or(anyhow!(""))?,
                     #[cfg(feature = "fusotao")]
@@ -117,7 +127,11 @@ impl TryInto<Event> for Sequence {
                     user_id: UserId::from_str(self.cmd.user_id.as_ref().ok_or(anyhow!(""))?)?,
                     in_or_out: InOrOut::In,
                     currency: self.cmd.currency.ok_or(anyhow!(""))?,
-                    amount: self.cmd.amount.filter(|a| a.is_sign_positive()).ok_or(anyhow!(""))?,
+                    amount: self
+                        .cmd
+                        .amount
+                        .filter(|a| a.is_sign_positive())
+                        .ok_or(anyhow!(""))?,
                     #[cfg(feature = "fusotao")]
                     block_number: self.cmd.block_number.ok_or(anyhow!(""))?,
                     #[cfg(feature = "fusotao")]
@@ -131,7 +145,11 @@ impl TryInto<Event> for Sequence {
                     symbol: self.cmd.symbol().ok_or(anyhow!(""))?,
                     open: self.cmd.open.ok_or(anyhow!(""))?,
                     base_scale: self.cmd.base_scale.filter(|b| *b <= 7).ok_or(anyhow!(""))?,
-                    quote_scale: self.cmd.quote_scale.filter(|q| *q <= 7).ok_or(anyhow!(""))?,
+                    quote_scale: self
+                        .cmd
+                        .quote_scale
+                        .filter(|q| *q <= 7)
+                        .ok_or(anyhow!(""))?,
                     taker_fee: self
                         .cmd
                         .maker_fee
@@ -172,9 +190,11 @@ impl TryInto<Event> for Sequence {
                 self.timestamp,
             )),
             #[cfg(not(feature = "fusotao"))]
-            CANCEL_ALL => {
-                Ok(Event::CancelAll(self.id, self.cmd.symbol().ok_or(anyhow!(""))?, self.timestamp))
-            }
+            CANCEL_ALL => Ok(Event::CancelAll(
+                self.id,
+                self.cmd.symbol().ok_or(anyhow!(""))?,
+                self.timestamp,
+            )),
             _ => Err(anyhow!("Unsupported Command")),
         }
     }
@@ -235,9 +255,9 @@ impl TryInto<Inspection> for Watch {
                 self.cmd.timestamp.ok_or(anyhow!(""))?,
             )),
             #[cfg(feature = "fusotao")]
-            PROVING_PERF_INDEX_CHECK => {
-                Ok(Inspection::ProvingPerfIndexCheck(self.cmd.event_id.ok_or(anyhow!(""))?))
-            }
+            PROVING_PERF_INDEX_CHECK => Ok(Inspection::ProvingPerfIndexCheck(
+                self.cmd.event_id.ok_or(anyhow!(""))?,
+            )),
             _ => Err(anyhow!("Invalid Inspection")),
         }
     }
@@ -247,7 +267,11 @@ impl Watch {
     pub fn new_update_depth_watch() -> Self {
         let mut cmd = Command::default();
         cmd.cmd = UPDATE_DEPTH;
-        Self { session: 0, req_id: 0, cmd }
+        Self {
+            session: 0,
+            req_id: 0,
+            cmd,
+        }
     }
 
     pub fn new_dump_watch(at: u64, time: u64) -> Self {
@@ -255,14 +279,22 @@ impl Watch {
         cmd.cmd = DUMP;
         cmd.event_id = Some(at);
         cmd.timestamp = Some(time);
-        Self { session: 0, req_id: 0, cmd }
+        Self {
+            session: 0,
+            req_id: 0,
+            cmd,
+        }
     }
 
     pub fn new_proving_perf_check_watch(at: u64) -> Self {
         let mut cmd = Command::default();
         cmd.cmd = PROVING_PERF_INDEX_CHECK;
         cmd.event_id = Some(at);
-        Self { session: 0, req_id: 0, cmd }
+        Self {
+            session: 0,
+            req_id: 0,
+            cmd,
+        }
     }
 
     pub fn new_confirm_watch(from: u64, exclude: u64) -> Self {
@@ -270,7 +302,11 @@ impl Watch {
         cmd.cmd = CONFIRM_ALL;
         cmd.from.replace(from);
         cmd.exclude.replace(exclude);
-        Self { session: 0, req_id: 0, cmd }
+        Self {
+            session: 0,
+            req_id: 0,
+            cmd,
+        }
     }
 }
 
@@ -402,17 +438,25 @@ pub fn init(sender: Sender<Fusion>, id: u64, startup: Arc<AtomicBool>) {
                 counter += 1;
                 if counter >= C.sequence.checkpoint {
                     counter = 0;
-                    let t =
-                        SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
-                    event_sender.send(Fusion::R(Watch::new_dump_watch(id, t))).unwrap();
+                    let t = SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs();
+                    event_sender
+                        .send(Fusion::R(Watch::new_dump_watch(id, t)))
+                        .unwrap();
                 }
                 //check system busy
                 if counter != 0 && counter % 1000 == 0 {
-                    event_sender.send(Fusion::R(Watch::new_proving_perf_check_watch(id))).unwrap();
+                    event_sender
+                        .send(Fusion::R(Watch::new_proving_perf_check_watch(id)))
+                        .unwrap();
                 }
                 id += 1;
             }
-            event_sender.send(Fusion::R(Watch::new_confirm_watch(from, id))).unwrap();
+            event_sender
+                .send(Fusion::R(Watch::new_confirm_watch(from, id)))
+                .unwrap();
         }
     });
     std::thread::spawn(move || loop {
@@ -507,10 +551,22 @@ pub const ERROR: u32 = 2;
 pub fn test_deserialize_cmd() {
     let transfer_in = r#"{"currency":100, "amount":"100.0", "user_id":"0x0000000000000000000000000000000000000000000000000000000000000001", "cmd":11}"#;
     let e = serde_json::from_str::<Command>(transfer_in).unwrap();
-    let s: anyhow::Result<Event> = Sequence { id: 1, cmd: e, status: 0, timestamp: 0 }.try_into();
+    let s: anyhow::Result<Event> = Sequence {
+        id: 1,
+        cmd: e,
+        status: 0,
+        timestamp: 0,
+    }
+    .try_into();
     assert!(s.is_ok());
     let bid_limit = r#"{"quote":100, "base":101, "cmd":1, "price":"10.0", "amount":"0.5", "order_id":1, "user_id":"0x0000000000000000000000000000000000000000000000000000000000000001"}"#;
     let e = serde_json::from_str::<Command>(bid_limit).unwrap();
-    let s: anyhow::Result<Event> = Sequence { id: 2, cmd: e, status: 0, timestamp: 0 }.try_into();
+    let s: anyhow::Result<Event> = Sequence {
+        id: 2,
+        cmd: e,
+        status: 0,
+        timestamp: 0,
+    }
+    .try_into();
     assert!(s.is_ok());
 }
