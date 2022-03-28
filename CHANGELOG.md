@@ -1,3 +1,7 @@
+# v0.2.6-rc.5
+
+- fixbug: sync proved event id from chain when submit proofs failed
+
 # v0.2.6-rc.3
 
 - fixbug: force set scale of transfer_in/out to 18
