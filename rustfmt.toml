@@ -1,0 +1,5 @@
+edition = "2021"
+unstable_features = true
+use_field_init_shorthand = true
+reorder_impl_items = true
+newline_style = "Unix"

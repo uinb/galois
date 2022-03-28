@@ -27,7 +27,10 @@ use std::{
 
 pub use prover::Prover;
 
+use crate::fusotao::connector::FusoConnector;
 use crate::{config::C, core::*, event::*};
+use sp_core::Pair;
+use std::sync::atomic::Ordering;
 
 mod connector;
 mod persistence;
@@ -122,12 +125,13 @@ impl WrapperTypeEncode for UserId {}
 /// 2. new or from public
 pub fn init(rx: Receiver<Proof>) -> anyhow::Result<Arc<AtomicU64>> {
     persistence::init(rx);
-    let connector = connector::FusoConnector::new()?;
-    let proved = connector.sync_proving_progress()?;
+    let connector = FusoConnector::new()?;
+    let proved = FusoConnector::sync_proving_progress(&connector.signer.public(), &connector.api)?;
+    connector.proved_event_id.store(proved, Ordering::Relaxed);
     connector.start_submitting()?;
     connector.start_scanning()?;
     log::info!("fusotao prover initialized");
-    Ok(proved)
+    Ok(connector.proved_event_id.clone())
 }
 
 #[derive(Clone, Encode, Decode, Eq, PartialEq, Debug)]

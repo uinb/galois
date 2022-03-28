@@ -16,6 +16,7 @@ use crate::{config::C, fusotao::*, sequence};
 use anyhow::anyhow;
 use memmap::MmapMut;
 use parity_scale_codec::Decode;
+use sp_core::sr25519::Public;
 use sp_core::Pair;
 use std::{
     convert::TryInto,
@@ -30,9 +31,9 @@ use std::{
 use sub_api::events::{EventsDecoder, Raw};
 
 pub struct FusoConnector {
-    api: FusoApi,
-    signer: Sr25519Key,
-    proved_event_id: Arc<AtomicU64>,
+    pub api: FusoApi,
+    pub signer: Sr25519Key,
+    pub proved_event_id: Arc<AtomicU64>,
 }
 
 #[derive(Clone, Decode, Debug, Default)]
@@ -74,24 +75,21 @@ impl FusoConnector {
         })
     }
 
-    pub fn sync_proving_progress(&self) -> anyhow::Result<Arc<AtomicU64>> {
-        let who = self.signer.public();
-        let key = self
-            .api
+    pub fn sync_proving_progress(who: &Public, api: &FusoApi) -> anyhow::Result<u64> {
+        let key = api
             .metadata
-            .storage_map_key::<FusoAccountId, Option<Dominator>>("Verifier", "Dominators", who)?;
-        let payload = self.api.get_opaque_storage_by_key_hash(key, None)?.unwrap();
+            .storage_map_key::<FusoAccountId, Option<Dominator>>("Verifier", "Dominators", *who)?;
+        let payload = api.get_opaque_storage_by_key_hash(key, None)?.unwrap();
         let result = Dominator::decode(&mut payload.as_slice()).unwrap();
-        self.proved_event_id
-            .store(result.sequence.0, Ordering::Relaxed);
         log::info!("synchronizing proving progress: {}", result.sequence.0);
-        Ok(self.proved_event_id.clone())
+        Ok(result.sequence.0)
     }
 
     pub fn start_submitting(&self) -> anyhow::Result<()> {
         let api = self.api.clone();
         let proved_event_id = self.proved_event_id.clone();
         let mut in_block = proved_event_id.load(Ordering::Relaxed);
+        let who = self.signer.public();
         std::thread::spawn(move || loop {
             let proofs = persistence::fetch_raw_after(in_block);
             if proofs.is_empty() {
@@ -123,7 +121,18 @@ impl FusoConnector {
                     proved_event_id.store(in_block, Ordering::Relaxed);
                     log::info!("rotate proved event to {}", in_block);
                 }
-                Err(e) => log::error!("error occur while submitting proofs, {:?}", e),
+                Err(e) => {
+                    log::error!("error occur while submitting proofs, {:?}", e);
+                    loop {
+                        let event_id = Self::sync_proving_progress(&who, &api);
+                        if event_id.is_ok() {
+                            in_block = event_id.unwrap();
+                            proved_event_id.store(in_block, Ordering::Relaxed);
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(100u64));
+                    }
+                }
             }
         });
         Ok(())
