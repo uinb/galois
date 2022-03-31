@@ -14,6 +14,8 @@
 
 use crate::{config::C, fusotao::*, sequence};
 use anyhow::anyhow;
+use chrono::prelude::*;
+use chrono::Local;
 use memmap::MmapMut;
 use parity_scale_codec::Decode;
 use sp_core::sr25519::Public;
@@ -90,7 +92,17 @@ impl FusoConnector {
         let proved_event_id = self.proved_event_id.clone();
         let mut in_block = proved_event_id.load(Ordering::Relaxed);
         let who = self.signer.public();
+        let mut last_proved_check_time = Local::now().timestamp();
         std::thread::spawn(move || loop {
+            let now = Local::now().timestamp();
+            if now - last_proved_check_time >= 300 {
+                let event_id = Self::sync_proving_progress(&who, &api);
+                if event_id.is_ok() {
+                    in_block = event_id.unwrap();
+                    proved_event_id.store(in_block, Ordering::Relaxed);
+                }
+                last_proved_check_time = now;
+            }
             let proofs = persistence::fetch_raw_after(in_block);
             if proofs.is_empty() {
                 std::thread::sleep(Duration::from_millis(1000));
