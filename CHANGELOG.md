@@ -1,3 +1,5 @@
+# v0.2.6-rc.6
+- fixbug: force update proved_event_id from chain fixed time
 # v0.2.6-rc.5
 
 - fixbug: sync proved event id from chain when submit proofs failed
