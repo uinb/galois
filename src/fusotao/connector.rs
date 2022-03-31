@@ -146,7 +146,7 @@ impl FusoConnector {
                         std::thread::sleep(Duration::from_millis(100u64));
                     }
                 }
-            };
+            }
         });
         Ok(())
     }
