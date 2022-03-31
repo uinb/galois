@@ -100,7 +100,6 @@ impl FusoConnector {
                 if event_id.is_ok() {
                     in_block = event_id.unwrap();
                     proved_event_id.store(in_block, Ordering::Relaxed);
-                    break;
                 }
                 last_proved_check_time = now;
             }
