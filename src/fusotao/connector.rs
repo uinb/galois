@@ -45,7 +45,7 @@ pub struct Dominator {
     pub merkle_root: [u8; 32],
     pub start_from: u32,
     pub sequence: (u64, u32),
-    pub active: bool,
+    pub status: u8,
 }
 
 impl FusoConnector {
