@@ -512,7 +512,7 @@ fn gen_adjust_fee_cmds(delta: u64, fee_adjust_threshold: u64, data: &Data) -> Ve
             cmd.fee_times = Some(times);
             cmd.base_taker_fee = Some(v.base_taker_fee);
             cmd.base_maker_fee = Some(v.base_maker_fee);
-            let fee_rate_limit = Decimal::from_str("0.02").unwrap();
+            let fee_rate_limit = Decimal::from_str("0.01").unwrap();
             let maker_fee = v.base_maker_fee * Decimal::from(times);
             let maker_fee = if maker_fee > fee_rate_limit {
                 fee_rate_limit
