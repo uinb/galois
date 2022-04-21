@@ -1,4 +1,7 @@
 # v0.2.6-rc.7
+- fixbug about submitting proofs
+
+# v0.2.6-rc.7
 - update dominator status
 
 # v0.2.6-rc.6
