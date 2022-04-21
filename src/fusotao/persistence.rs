@@ -85,7 +85,7 @@ fn append(proof: Option<Proof>, pending: &mut Vec<Proof>) {
         }
         Some(p) => {
             pending.push(p);
-            if pending.len() >= 100 {
+            if pending.len() >= 50 {
                 flush(pending);
             }
         }

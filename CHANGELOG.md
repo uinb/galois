@@ -1,5 +1,13 @@
-# v0.2.6-rc.3
+# v0.2.6-rc.7
+- update dominator status
 
+# v0.2.6-rc.6
+- fixbug: force update proved_event_id from chain fixed time
+
+# v0.2.6-rc.5
+- fixbug: sync proved event id from chain when submit proofs failed
+
+# v0.2.6-rc.3
 - fixbug: force set scale of transfer_in/out to 18
 
 # v0.2.6-rc.2

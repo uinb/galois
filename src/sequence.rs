@@ -447,7 +447,7 @@ pub fn init(sender: Sender<Fusion>, id: u64, startup: Arc<AtomicBool>) {
                         .unwrap();
                 }
                 //check system busy
-                if counter != 0 && counter % 1000 == 0 {
+                if counter != 0 && counter % 200 == 0 {
                     event_sender
                         .send(Fusion::R(Watch::new_proving_perf_check_watch(id)))
                         .unwrap();
