@@ -577,7 +577,7 @@ fn do_inspect(
             let writing = data
                 .orderbooks
                 .iter()
-                .map(|(k, v)| v.as_depth(100, *k))
+                .map(|(k, v)| v.as_depth(32, *k))
                 .collect::<Vec<_>>();
             output::write_depth(writing);
         }
