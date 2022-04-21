@@ -1,4 +1,4 @@
-# v0.2.6-rc.7
+# v0.2.6-rc.8
 - fixbug about submitting proofs
 
 # v0.2.6-rc.7
