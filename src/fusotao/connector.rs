@@ -82,7 +82,7 @@ impl FusoConnector {
             .metadata
             .storage_map_key::<FusoAccountId, Option<Dominator>>("Verifier", "Dominators", *who)?;
         let payload = api.get_opaque_storage_by_key_hash(key, None)?.unwrap();
-        let result = Dominator::decode(&mut payload.as_slice()).unwrap();
+        let result = Dominator::decode(&mut payload.as_slice())?;
         log::info!("synchronizing proving progress: {}", result.sequence.0);
         Ok(result.sequence.0)
     }
@@ -95,13 +95,16 @@ impl FusoConnector {
         let mut last_proved_check_time = Local::now().timestamp();
         std::thread::spawn(move || loop {
             let now = Local::now().timestamp();
-            if now - last_proved_check_time >= 300 {
-                let event_id = Self::sync_proving_progress(&who, &api);
-                if event_id.is_ok() {
-                    in_block = event_id.unwrap();
-                    proved_event_id.store(in_block, Ordering::Relaxed);
+            if now - last_proved_check_time >= 60 {
+                for _i in 0..5 {
+                    let event_id = Self::sync_proving_progress(&who, &api);
+                    if event_id.is_ok() {
+                        in_block = event_id.unwrap();
+                        proved_event_id.store(in_block, Ordering::Relaxed);
+                        last_proved_check_time = now;
+                        break;
+                    }
                 }
-                last_proved_check_time = now;
             }
             let proofs = persistence::fetch_raw_after(in_block);
             if proofs.is_empty() {
