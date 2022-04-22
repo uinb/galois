@@ -95,16 +95,16 @@ impl FusoConnector {
         let mut last_proved_check_time = Local::now().timestamp();
         std::thread::spawn(move || loop {
             let r = std::panic::catch_unwind( || -> (u64, i64){
-                let mut max_submitted_id = 0u64;
-                let mut last_check = 0i64;
+                let mut max_submitted_id = in_block;
+                let mut last_check = last_proved_check_time;
                 let now = Local::now().timestamp();
-                if now - last_proved_check_time >= 60 {
+                if now - last_check >= 60 {
                     for _i in 0..5 {
 
                         let event_id = Self::sync_proving_progress(&who, &api);
                         if event_id.is_ok() {
-                            proved_event_id.store(in_block, Ordering::Relaxed);
                             max_submitted_id = event_id.unwrap();
+                            proved_event_id.store(max_submitted_id, Ordering::Relaxed);
                             last_check = now;
                             break;
                         }
@@ -129,7 +129,7 @@ impl FusoConnector {
                 if truncated.is_empty() {
                     log::error!(
                     "A single extrinsic is out of size limitation, event_id={}",
-                    in_block + 1,
+                    max_submitted_id + 1,
                 );
                     std::thread::sleep(Duration::from_millis(10000));
                     return (max_submitted_id, last_check);
@@ -137,8 +137,8 @@ impl FusoConnector {
                 match Self::submit_batch(&api, truncated) {
                     Ok(()) => {
                         max_submitted_id = last_submit;
-                        proved_event_id.store(in_block, Ordering::Relaxed);
-                        log::info!("rotate proved event to {}", in_block);
+                        proved_event_id.store(max_submitted_id, Ordering::Relaxed);
+                        log::info!("rotate proved event to {}", max_submitted_id);
                     }
                     Err(e) => {
                         log::error!("error occur while submitting proofs, {:?}", e);
@@ -146,7 +146,7 @@ impl FusoConnector {
                             let event_id = Self::sync_proving_progress(&who, &api);
                             if event_id.is_ok() {
                                 max_submitted_id = event_id.unwrap();
-                                proved_event_id.store(in_block, Ordering::Relaxed);
+                                proved_event_id.store(max_submitted_id, Ordering::Relaxed);
                                 break;
                             }
                             std::thread::sleep(Duration::from_millis(100u64));
