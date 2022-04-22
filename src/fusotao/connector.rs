@@ -14,12 +14,13 @@
 
 use crate::{config::C, fusotao::*, sequence};
 use anyhow::anyhow;
-use chrono::prelude::*;
 use chrono::Local;
 use memmap::MmapMut;
 use parity_scale_codec::Decode;
 use sp_core::sr25519::Public;
 use sp_core::Pair;
+use std::sync::atomic::AtomicI64;
+use std::sync::atomic::Ordering::Relaxed;
 use std::{
     convert::TryInto,
     fs::OpenOptions,
@@ -90,65 +91,69 @@ impl FusoConnector {
     pub fn start_submitting(&self) -> anyhow::Result<()> {
         let api = self.api.clone();
         let proved_event_id = self.proved_event_id.clone();
-        let mut in_block = proved_event_id.load(Ordering::Relaxed);
+        let in_block = Arc::new(AtomicU64::new(proved_event_id.load(Ordering::Relaxed)));
+        let last_proved_check_time = Arc::new(AtomicI64::new(Local::now().timestamp()));
         let who = self.signer.public();
-        let mut last_proved_check_time = Local::now().timestamp();
         std::thread::spawn(move || loop {
-            let now = Local::now().timestamp();
-            if now - last_proved_check_time >= 60 {
-                for _i in 0..5 {
-                    let event_id = Self::sync_proving_progress(&who, &api);
-                    if event_id.is_ok() {
-                        in_block = event_id.unwrap();
-                        proved_event_id.store(in_block, Ordering::Relaxed);
-                        last_proved_check_time = now;
-                        break;
-                    }
-                }
-            }
-            let proofs = persistence::fetch_raw_after(in_block);
-            if proofs.is_empty() {
-                std::thread::sleep(Duration::from_millis(1000));
-                continue;
-            }
-            let mut total_size = 0usize;
-            let mut last_submit = 0u64;
-            let mut truncated = vec![];
-            for (event_id, proof) in proofs.into_iter() {
-                if total_size + proof.0.len() >= super::MAX_EXTRINSIC_SIZE {
-                    break;
-                }
-                total_size += proof.0.len();
-                last_submit = event_id;
-                truncated.push(proof);
-            }
-            if truncated.is_empty() {
-                log::error!(
-                    "A single extrinsic is out of size limitation, event_id={}",
-                    in_block + 1,
-                );
-                std::thread::sleep(Duration::from_millis(10000));
-                continue;
-            }
-            match Self::submit_batch(&api, truncated) {
-                Ok(()) => {
-                    in_block = last_submit;
-                    proved_event_id.store(in_block, Ordering::Relaxed);
-                    log::info!("rotate proved event to {}", in_block);
-                }
-                Err(e) => {
-                    log::error!("error occur while submitting proofs, {:?}", e);
-                    loop {
+            let _r = std::panic::catch_unwind(|| loop {
+                let now = Local::now().timestamp();
+                if now - last_proved_check_time.load(Ordering::Relaxed) >= 60 {
+                    for _i in 0..5 {
                         let event_id = Self::sync_proving_progress(&who, &api);
                         if event_id.is_ok() {
-                            in_block = event_id.unwrap();
-                            proved_event_id.store(in_block, Ordering::Relaxed);
+                            let last_event = event_id.unwrap();
+                            in_block.store(last_event, Ordering::Relaxed);
+                            proved_event_id.store(last_event, Ordering::Relaxed);
+                            last_proved_check_time.store(now, Ordering::Relaxed);
                             break;
                         }
-                        std::thread::sleep(Duration::from_millis(100u64));
                     }
                 }
-            }
+                let proofs = persistence::fetch_raw_after(in_block.load(Relaxed));
+                if proofs.is_empty() {
+                    std::thread::sleep(Duration::from_millis(1000));
+                    continue;
+                }
+                let mut total_size = 0usize;
+                let mut last_submit = 0u64;
+                let mut truncated = vec![];
+                for (event_id, proof) in proofs.into_iter() {
+                    if total_size + proof.0.len() >= super::MAX_EXTRINSIC_SIZE {
+                        break;
+                    }
+                    total_size += proof.0.len();
+                    last_submit = event_id;
+                    truncated.push(proof);
+                }
+                if truncated.is_empty() {
+                    log::error!(
+                        "A single extrinsic is out of size limitation, event_id={}",
+                        in_block.load(Relaxed) + 1,
+                    );
+                    std::thread::sleep(Duration::from_millis(10000));
+                    continue;
+                }
+                match Self::submit_batch(&api, truncated) {
+                    Ok(()) => {
+                        in_block.store(last_submit, Relaxed);
+                        proved_event_id.store(last_submit, Ordering::Relaxed);
+                        log::info!("rotate proved event to {}", last_submit);
+                    }
+                    Err(e) => {
+                        log::error!("error occur while submitting proofs, {:?}", e);
+                        loop {
+                            let event_id = Self::sync_proving_progress(&who, &api);
+                            if event_id.is_ok() {
+                                let last_event = event_id.unwrap();
+                                in_block.store(last_event, Relaxed);
+                                proved_event_id.store(last_event, Ordering::Relaxed);
+                                break;
+                            }
+                            std::thread::sleep(Duration::from_millis(100u64));
+                        }
+                    }
+                }
+            });
         });
         Ok(())
     }

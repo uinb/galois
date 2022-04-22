@@ -41,8 +41,8 @@ impl Prover {
     pub fn prove_trade_cmd(
         &self,
         data: &mut Data,
-        nonce: u32,
-        signature: Vec<u8>,
+        _nonce: u32,
+        _signature: Vec<u8>,
         encoded_cmd: FusoCommand,
         ask_size_before: Amount,
         bid_size_before: Amount,
@@ -317,7 +317,7 @@ impl Prover {
             old_available,
             old_frozen,
         )];
-        let merkle_proof = gen_proofs(merkle_tree, &leaves);
+        let _merkle_proof = gen_proofs(merkle_tree, &leaves);
         self.sender
             .send(Proof {
                 event_id,
