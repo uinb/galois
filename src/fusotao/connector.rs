@@ -94,13 +94,12 @@ impl FusoConnector {
         let who = self.signer.public();
         let mut last_proved_check_time = Local::now().timestamp();
         std::thread::spawn(move || loop {
-            let r = std::panic::catch_unwind( || -> (u64, i64){
+            let r = std::panic::catch_unwind(|| -> (u64, i64) {
                 let mut max_submitted_id = in_block;
                 let mut last_check = last_proved_check_time;
                 let now = Local::now().timestamp();
                 if now - last_check >= 60 {
                     for _i in 0..5 {
-
                         let event_id = Self::sync_proving_progress(&who, &api);
                         if event_id.is_ok() {
                             max_submitted_id = event_id.unwrap();
@@ -128,9 +127,9 @@ impl FusoConnector {
                 }
                 if truncated.is_empty() {
                     log::error!(
-                    "A single extrinsic is out of size limitation, event_id={}",
-                    max_submitted_id + 1,
-                );
+                        "A single extrinsic is out of size limitation, event_id={}",
+                        max_submitted_id + 1,
+                    );
                     std::thread::sleep(Duration::from_millis(10000));
                     return (max_submitted_id, last_check);
                 }
@@ -159,7 +158,7 @@ impl FusoConnector {
             if r.0 > in_block {
                 in_block = r.0;
             }
-            if r.1 >last_proved_check_time {
+            if r.1 > last_proved_check_time {
                 last_proved_check_time = r.1;
             }
         });
