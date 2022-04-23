@@ -106,7 +106,7 @@ impl FusoConnector {
                         last_check = now;
                     }
                 }
-                let proofs = persistence::fetch_raw_after(in_block);
+                let proofs = persistence::fetch_raw_after(max_submitted_id);
                 if proofs.is_empty() {
                     std::thread::sleep(Duration::from_millis(1000));
                     return (max_submitted_id, last_check);
