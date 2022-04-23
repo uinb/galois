@@ -99,14 +99,11 @@ impl FusoConnector {
                 let mut last_check = last_proved_check_time;
                 let now = Local::now().timestamp();
                 if now - last_check >= 60 {
-                    for _i in 0..5 {
-                        let event_id = Self::sync_proving_progress(&who, &api);
-                        if event_id.is_ok() {
-                            max_submitted_id = event_id.unwrap();
-                            proved_event_id.store(max_submitted_id, Ordering::Relaxed);
-                            last_check = now;
-                            break;
-                        }
+                    let event_id = Self::sync_proving_progress(&who, &api);
+                    if event_id.is_ok() {
+                        max_submitted_id = event_id.unwrap();
+                        proved_event_id.store(max_submitted_id, Ordering::Relaxed);
+                        last_check = now;
                     }
                 }
                 let proofs = persistence::fetch_raw_after(in_block);
