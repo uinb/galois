@@ -94,60 +94,69 @@ impl FusoConnector {
         let who = self.signer.public();
         let mut last_proved_check_time = Local::now().timestamp();
         std::thread::spawn(move || loop {
-            let now = Local::now().timestamp();
-            if now - last_proved_check_time >= 60 {
-                for _i in 0..5 {
+            let r = std::panic::catch_unwind(|| -> (u64, i64) {
+                let mut max_submitted_id = in_block;
+                let mut last_check = last_proved_check_time;
+                let now = Local::now().timestamp();
+                if now - last_check >= 60 {
                     let event_id = Self::sync_proving_progress(&who, &api);
                     if event_id.is_ok() {
-                        in_block = event_id.unwrap();
-                        proved_event_id.store(in_block, Ordering::Relaxed);
-                        last_proved_check_time = now;
+                        max_submitted_id = event_id.unwrap();
+                        proved_event_id.store(max_submitted_id, Ordering::Relaxed);
+                        last_check = now;
+                    }
+                }
+                let proofs = persistence::fetch_raw_after(max_submitted_id);
+                if proofs.is_empty() {
+                    std::thread::sleep(Duration::from_millis(1000));
+                    return (max_submitted_id, last_check);
+                }
+                let mut total_size = 0usize;
+                let mut last_submit = 0u64;
+                let mut truncated = vec![];
+                for (event_id, proof) in proofs.into_iter() {
+                    if total_size + proof.0.len() >= super::MAX_EXTRINSIC_SIZE {
                         break;
                     }
+                    total_size += proof.0.len();
+                    last_submit = event_id;
+                    truncated.push(proof);
                 }
-            }
-            let proofs = persistence::fetch_raw_after(in_block);
-            if proofs.is_empty() {
-                std::thread::sleep(Duration::from_millis(1000));
-                continue;
-            }
-            let mut total_size = 0usize;
-            let mut last_submit = 0u64;
-            let mut truncated = vec![];
-            for (event_id, proof) in proofs.into_iter() {
-                if total_size + proof.0.len() >= super::MAX_EXTRINSIC_SIZE {
-                    break;
+                if truncated.is_empty() {
+                    log::error!(
+                        "A single extrinsic is out of size limitation, event_id={}",
+                        max_submitted_id + 1,
+                    );
+                    std::thread::sleep(Duration::from_millis(10000));
+                    return (max_submitted_id, last_check);
                 }
-                total_size += proof.0.len();
-                last_submit = event_id;
-                truncated.push(proof);
-            }
-            if truncated.is_empty() {
-                log::error!(
-                    "A single extrinsic is out of size limitation, event_id={}",
-                    in_block + 1,
-                );
-                std::thread::sleep(Duration::from_millis(10000));
-                continue;
-            }
-            match Self::submit_batch(&api, truncated) {
-                Ok(()) => {
-                    in_block = last_submit;
-                    proved_event_id.store(in_block, Ordering::Relaxed);
-                    log::info!("rotate proved event to {}", in_block);
-                }
-                Err(e) => {
-                    log::error!("error occur while submitting proofs, {:?}", e);
-                    loop {
-                        let event_id = Self::sync_proving_progress(&who, &api);
-                        if event_id.is_ok() {
-                            in_block = event_id.unwrap();
-                            proved_event_id.store(in_block, Ordering::Relaxed);
-                            break;
+                match Self::submit_batch(&api, truncated) {
+                    Ok(()) => {
+                        max_submitted_id = last_submit;
+                        proved_event_id.store(max_submitted_id, Ordering::Relaxed);
+                        log::info!("rotate proved event to {}", max_submitted_id);
+                    }
+                    Err(e) => {
+                        log::error!("error occur while submitting proofs, {:?}", e);
+                        loop {
+                            let event_id = Self::sync_proving_progress(&who, &api);
+                            if event_id.is_ok() {
+                                max_submitted_id = event_id.unwrap();
+                                proved_event_id.store(max_submitted_id, Ordering::Relaxed);
+                                break;
+                            }
+                            std::thread::sleep(Duration::from_millis(100u64));
                         }
-                        std::thread::sleep(Duration::from_millis(100u64));
                     }
                 }
+                return (max_submitted_id, last_check);
+            });
+            let r = r.unwrap_or((0u64, 0i64));
+            if r.0 > in_block {
+                in_block = r.0;
+            }
+            if r.1 > last_proved_check_time {
+                last_proved_check_time = r.1;
             }
         });
         Ok(())
