@@ -1,3 +1,9 @@
+# v0.2.6-rc.10
+- catch unwind panic when submit proofs
+
+# v0.2.6-rc.9
+- update depth level
+
 # v0.2.6-rc.8
 - fixbug about submitting proofs
 
