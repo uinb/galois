@@ -17,6 +17,7 @@ use anyhow::anyhow;
 use chrono::prelude::*;
 use chrono::Local;
 use memmap::MmapMut;
+use node_api::events::{EventsDecoder, Raw};
 use parity_scale_codec::Decode;
 use sp_core::sr25519::Public;
 use sp_core::Pair;
@@ -30,7 +31,6 @@ use std::{
     },
     time::Duration,
 };
-use sub_api::events::{EventsDecoder, Raw};
 
 pub struct FusoConnector {
     pub api: FusoApi,
@@ -80,7 +80,7 @@ impl FusoConnector {
     pub fn sync_proving_progress(who: &Public, api: &FusoApi) -> anyhow::Result<u64> {
         let key = api
             .metadata
-            .storage_map_key::<FusoAccountId, Option<Dominator>>("Verifier", "Dominators", *who)?;
+            .storage_map_key::<FusoAccountId>("Verifier", "Dominators", *who)?;
         let payload = api.get_opaque_storage_by_key_hash(key, None)?.unwrap();
         let result = Dominator::decode(&mut payload.as_slice())?;
         log::info!("synchronizing proving progress: {}", result.sequence.0);

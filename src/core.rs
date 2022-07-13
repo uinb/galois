@@ -21,6 +21,8 @@ use std::{
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use rust_decimal::{prelude::*, Decimal};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "fusotao")]
+use sp_core::ByteArray;
 
 #[cfg(feature = "fusotao")]
 use crate::fusotao::GlobalStates;
@@ -140,6 +142,25 @@ impl AsMut<[u8; 32]> for B256 {
 impl From<[u8; 32]> for B256 {
     fn from(x: [u8; 32]) -> Self {
         Self::new(x)
+    }
+}
+
+#[cfg(feature = "fusotao")]
+impl ByteArray for B256 {
+    const LEN: usize = 32;
+}
+
+#[cfg(feature = "fusotao")]
+impl<'a> TryFrom<&'a [u8]> for B256 {
+    type Error = ();
+
+    fn try_from(value: &'a [u8]) -> Result<Self, Self::Error> {
+        if value.len() != 32 {
+            return Err(());
+        }
+        let mut out = [0u8; 32];
+        out.copy_from_slice(&value[..]);
+        return Ok(B256::new(out));
     }
 }
 
