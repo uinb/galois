@@ -21,6 +21,7 @@ use std::{
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use rust_decimal::{prelude::*, Decimal};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "fusotao")]
 use sp_core::ByteArray;
 
 #[cfg(feature = "fusotao")]
@@ -158,9 +159,7 @@ impl<'a> TryFrom<&'a [u8]> for B256 {
             return Err(());
         }
         let mut out = [0u8; 32];
-        for (i, b) in out.iter_mut().enumerate() {
-            *b = value[i];
-        }
+        out.copy_from_slice(&value[0..]);
         return Ok(B256::new(out));
     }
 }
