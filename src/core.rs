@@ -159,7 +159,7 @@ impl<'a> TryFrom<&'a [u8]> for B256 {
             return Err(());
         }
         let mut out = [0u8; 32];
-        out.copy_from_slice(&value[0..]);
+        out.copy_from_slice(&value[..]);
         return Ok(B256::new(out));
     }
 }
