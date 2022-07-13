@@ -74,6 +74,9 @@ version = "0.3"
 [dependencies.chashmap]
 version = "2.2"
 
+[dependencies.syn]
+version = "= 1.0.97"
+
 [dependencies.log]
 version = "0.4"
 features = ["serde"]
@@ -119,25 +122,30 @@ features = ["serde-rs", "blake2b"]
 optional = true
 
 [dependencies.sub-api]
-package = "fusotao-rust-client"
+package = "substrate-api-client"
 git = "https://github.com/uinb/fusotao-rust-client.git"
-branch = "polkadot-v0.9.13"
+branch = "polkadot-v0.9.18"
 optional = true
 
+[dependencies.node-api]
+package = "ac-node-api"
+git = "https://github.com/uinb/fusotao-rust-client.git"
+branch = "polkadot-v0.9.18"
+
 [dependencies.parity-scale-codec]
-version = '2'
+version = '3'
 features = ['derive']
 optional = true
 
 [dependencies.sp-core]
 git = "https://github.com/paritytech/substrate.git"
-branch = "polkadot-v0.9.13"
+branch = "polkadot-v0.9.18"
 package = "sp-core"
 optional = true
 
 [dependencies.sp-runtime]
 git = "https://github.com/paritytech/substrate.git"
-branch = "polkadot-v0.9.13"
+branch = "polkadot-v0.9.18"
 package = "sp-runtime"
 optional = true
 
