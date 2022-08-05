@@ -49,6 +49,8 @@ version = "18.2"
 
 [dependencies.redis]
 version = "0.17"
+default-features=false
+features = ["tls"]
 
 [dependencies.argparse]
 version = "0.2"
