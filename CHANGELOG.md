@@ -1,3 +1,6 @@
+# v0.3.1-rc.1
+- first prd rc
+
 # v0.2.6-rc.8
 - fixbug about submitting proofs
 
