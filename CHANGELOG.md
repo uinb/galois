@@ -1,4 +1,4 @@
-#v0.3.1-rc.3
+# v0.3.1-rc.4
 - update redis tls config
 
 # v0.3.1-rc.2
