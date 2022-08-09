@@ -1,3 +1,6 @@
+#v0.3.1-rc.3
+- update redis tls config
+
 # v0.3.1-rc.2
 - first prd rc
 
