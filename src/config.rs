@@ -181,6 +181,7 @@ fn init_config(toml: &str) -> anyhow::Result<Config> {
                 .ok_or(anyhow::anyhow!("env MAGIC_KEY not set"))?;
             let key = key.to_str().ok_or_else(||anyhow::anyhow!("env MAGIC_KEY not set"))?;
             cfg.mysql.decrypt(&key)?;
+            cfg.redis.decrypt(&key)?;
             if let Some(ref mut fuso) = cfg.fusotao {
                 fuso.decrypt(&key)?;
             }

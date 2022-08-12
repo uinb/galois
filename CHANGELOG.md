@@ -1,3 +1,12 @@
+# v0.3.1-rc.4
+- update redis tls config
+
+# v0.3.1-rc.2
+- first prd rc
+
+# v0.3.1-rc.1
+- first prd rc
+
 # v0.2.6-rc.8
 - fixbug about submitting proofs
 
