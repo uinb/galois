@@ -152,10 +152,10 @@ impl FusoConnector {
                 return (max_submitted_id, last_check);
             });
             let r = r.unwrap_or((0u64, 0i64));
-            if r.0 > in_block {
+            if r.0 != 0 {
                 in_block = r.0;
             }
-            if r.1 > last_proved_check_time {
+            if r.1 != 0 {
                 last_proved_check_time = r.1;
             }
         });
