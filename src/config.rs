@@ -27,6 +27,10 @@ pub struct Config {
     #[serde(skip_serializing)]
     pub log: LogConfig,
     pub fusotao: Option<FusotaoConfig>,
+    #[serde(skip_deserializing, skip_serializing)]
+    pub dry_run: bool,
+    #[serde(skip_deserializing, skip_serializing)]
+    pub run_to: u64,
 }
 
 #[cfg(feature = "enc-conf")]
@@ -144,13 +148,22 @@ lazy_static! {
 
 fn init_config_file() -> anyhow::Result<Config> {
     let mut file = String::new();
+    let mut dry_run_to = 0;
     {
         let mut args = ArgumentParser::new();
         args.refer(&mut file)
             .add_option(&["-c"], Store, "toml config file");
+        args.refer(&mut dry_run_to).add_option(
+            &["--dry-run"],
+            Store,
+            "Execute in dry-run mode until the given event_id",
+        );
         args.parse_args_or_exit();
     }
-    init_config(&std::fs::read_to_string(file)?)
+    let mut config = init_config(&std::fs::read_to_string(file)?)?;
+    config.dry_run = dry_run_to != 0;
+    config.run_to = dry_run_to;
+    Ok(config)
 }
 
 #[cfg(feature = "enc-conf")]

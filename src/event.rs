@@ -233,6 +233,16 @@ pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data, ready: A
                             sequence::update_sequence_status(id, sequence::ERROR).unwrap();
                         }
                     }
+                    cfg_if! {
+                        if #[cfg(feature = "fusotao")] {
+                            if C.dry_run {
+                                println!("running to {}, merkle root = 0x{:?}", id, hex::encode(data.merkle_tree.root()));
+                                if C.run_to == id {
+                                    return;
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

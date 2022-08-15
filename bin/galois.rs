@@ -20,8 +20,8 @@ fn main() {
     lazy_static::initialize(&config::C);
     let (id, coredump) = snapshot::load().unwrap();
     let (output_tx, output_rx) = mpsc::channel();
-    let (event_tx, event_rx) = mpsc::channel();
     output::init(output_tx.clone(), output_rx);
+    let (event_tx, event_rx) = mpsc::channel();
     let handler_ready = Arc::new(atomic::AtomicBool::new(false));
     event::init(event_rx, output_tx, coredump, handler_ready.clone());
     while !handler_ready.load(atomic::Ordering::Relaxed) {

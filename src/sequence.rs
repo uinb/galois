@@ -511,15 +511,18 @@ pub fn insert_nop(id: u64) -> Option<bool> {
 }
 
 pub fn update_sequence_status(id: u64, status: u32) -> anyhow::Result<()> {
-    let sql = "UPDATE t_sequence SET f_status=? WHERE f_id=?";
+    if C.dry_run {
+        return Ok(());
+    }
+    let sql = "UPDATE t_sequence SET f_status=? WHERE f_id=? and f_status=?";
     let mut conn = DB.get_conn()?;
-    conn.exec_drop(sql, (status, id))
+    conn.exec_drop(sql, (status, id, PENDING))
         .map_err(|_| anyhow!("retrieve mysql connection failed while update_sequence_status"))
 }
 
 #[cfg(feature = "fusotao")]
 pub fn insert_sequences(seq: &Vec<Command>) -> anyhow::Result<()> {
-    if seq.is_empty() {
+    if seq.is_empty() || C.dry_run {
         return Ok(());
     }
     let sql = r#"INSERT INTO t_sequence(f_cmd) VALUES (:cmd)"#;
@@ -536,6 +539,9 @@ pub fn insert_sequences(seq: &Vec<Command>) -> anyhow::Result<()> {
 }
 
 pub fn confirm(from: u64, exclude: u64) -> anyhow::Result<()> {
+    if C.dry_run {
+        return Ok(());
+    }
     let sql = "UPDATE t_sequence SET f_status=? WHERE f_status=? AND f_id>=? AND f_id<?";
     let mut conn = DB.get_conn()?;
     conn.exec_drop(sql, (ACCEPTED, PENDING, from, exclude))

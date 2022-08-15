@@ -317,6 +317,7 @@ impl Prover {
             old_available,
             old_frozen,
         )];
+        // TODO
         let merkle_proof = gen_proofs(merkle_tree, &leaves);
         self.sender
             .send(Proof {

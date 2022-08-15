@@ -24,6 +24,7 @@ use mysql::{prelude::*, *};
 use redis::Commands;
 
 use crate::{
+    config::C,
     core::*,
     db::{DB, REDIS},
     matcher::*,
@@ -52,6 +53,9 @@ pub struct Output {
 }
 
 pub fn write_depth(depth: Vec<Depth>) {
+    if C.dry_run {
+        return;
+    }
     let redis = REDIS.get_connection();
     match redis {
         Ok(mut conn) => {
@@ -72,6 +76,10 @@ pub fn write_depth(depth: Vec<Depth>) {
 }
 
 pub fn init(sender: Sender<Vec<Output>>, recv: Receiver<Vec<Output>>) {
+    if C.dry_run {
+        log::info!("Running in dry-run mode, skip any outputs");
+        return;
+    }
     let mut buf = HashMap::<Symbol, (u64, Vec<Output>)>::new();
     thread::spawn(move || loop {
         let cr = recv.recv().unwrap();

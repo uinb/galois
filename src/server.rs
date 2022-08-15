@@ -110,6 +110,9 @@ const fn has_next_frame(header: u64) -> bool {
 }
 
 pub fn init(sender: Sender<Fusion>, ready: Arc<AtomicBool>) {
+    if C.dry_run {
+        return;
+    }
     let future = accept(&C.server.bind_addr, sender, ready);
     task::block_on(future).unwrap();
 }
@@ -227,10 +230,16 @@ fn close(session: u64) {
 }
 
 pub fn publish(output: Message) {
+    if C.dry_run {
+        return;
+    }
     let _ = task::block_on(send(output));
 }
 
 async fn send(output: Message) -> std::result::Result<(), mpsc::SendError> {
+    if C.dry_run {
+        return Ok(());
+    }
     match CHAN.get_mut(&output.session) {
         None => Ok(()),
         Some(mut channel) => channel.borrow_mut().send(output).await,

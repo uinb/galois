@@ -124,6 +124,9 @@ impl WrapperTypeEncode for UserId {}
 /// 1. from_ss58check() or from_ss58check_with_version()
 /// 2. new or from public
 pub fn init(rx: Receiver<Proof>) -> anyhow::Result<Arc<AtomicU64>> {
+    if C.dry_run {
+        return Ok(Arc::new(AtomicU64::new(0)));
+    }
     persistence::init(rx);
     let connector = FusoConnector::new()?;
     let proved = FusoConnector::sync_proving_progress(&connector.signer.public(), &connector.api)?;
@@ -246,7 +249,7 @@ pub fn to_decimal_represent(v: u128) -> Option<Decimal> {
     let n: Amount = n.try_into().ok()?;
     let mut f: Amount = f.try_into().ok()?;
     f.set_scale(18).ok()?;
-    let mut r = n + f;
+    let r = n + f;
     if r.validate() {
         Some(r)
     } else {
