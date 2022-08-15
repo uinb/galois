@@ -119,6 +119,25 @@ pub struct RedisConfig {
     pub url: String,
 }
 
+#[cfg(feature = "enc-conf")]
+impl EncryptedConfig for RedisConfig {
+    fn decrypt(&mut self, key: &str) -> anyhow::Result<()> {
+        use magic_crypt::MagicCryptTrait;
+        let mc = magic_crypt::new_magic_crypt!(key, 64);
+        let dec = mc.decrypt_base64_to_string(&self.url)?;
+        self.url.replace_range(.., &dec);
+        Ok(())
+    }
+
+    fn encrypt(&mut self, key: &str) -> anyhow::Result<()> {
+        use magic_crypt::MagicCryptTrait;
+        let mc = magic_crypt::new_magic_crypt!(key, 64);
+        let enc = mc.encrypt_str_to_base64(&self.url);
+        self.url.replace_range(.., &enc);
+        Ok(())
+    }
+}
+
 lazy_static! {
     pub static ref C: Config = init_config_file().unwrap();
 }
@@ -162,6 +181,7 @@ fn init_config(toml: &str) -> anyhow::Result<Config> {
                 .ok_or(anyhow::anyhow!("env MAGIC_KEY not set"))?;
             let key = key.to_str().ok_or_else(||anyhow::anyhow!("env MAGIC_KEY not set"))?;
             cfg.mysql.decrypt(&key)?;
+            cfg.redis.decrypt(&key)?;
             if let Some(ref mut fuso) = cfg.fusotao {
                 fuso.decrypt(&key)?;
             }

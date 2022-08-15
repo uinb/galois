@@ -49,6 +49,7 @@ version = "18.2"
 
 [dependencies.redis]
 version = "0.17"
+features = ["tls", "tokio-rt-core", "tokio-tls-comp", "native-tls","async-native-tls", "async-std-tls-comp"]
 
 [dependencies.argparse]
 version = "0.2"
