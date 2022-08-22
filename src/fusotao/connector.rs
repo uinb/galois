@@ -152,7 +152,7 @@ impl FusoConnector {
                 return (max_submitted_id, last_check);
             });
             let r = r.unwrap_or((0u64, 0i64));
-            if r.0 != 0 {
+            if r.0 != 0  && r.0 != in_block {
                 in_block = r.0;
             }
             if r.1 != 0 {
