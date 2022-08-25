@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fs::OpenOptions;
+use std::panic::catch_unwind;
+use std::path::PathBuf;
 use std::{
     collections::HashMap,
     convert::TryInto,
@@ -24,10 +27,12 @@ use std::{
 
 use anyhow::anyhow;
 use cfg_if::cfg_if;
+use memmap::Mmap;
 use rust_decimal::{prelude::*, Decimal};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::fusotao::{FusoApi, FusoBlock};
 use crate::{
     assets, clearing,
     config::C,
@@ -153,6 +158,8 @@ pub enum Inspection {
     #[cfg(feature = "fusotao")]
     QueryProvingPerfIndex(u64, u64),
     QueryExchangeFee(Symbol, u64, u64),
+    #[cfg(feature = "fusotao")]
+    QueryScanHeight(u64, u64),
     // special: `EventId` means dump at `EventId`
     Dump(EventId, Timestamp),
     #[cfg(feature = "fusotao")]
@@ -588,13 +595,22 @@ fn do_inspect(
         Inspection::QueryProvingPerfIndex(session, req_id) => {
             let current_proved_event = prover.proved_event_id.load(Ordering::Relaxed);
             let mut v: HashMap<String, u64> = HashMap::new();
-
             let ppi = if data.current_event_id > current_proved_event {
                 data.current_event_id - current_proved_event
             } else {
                 current_proved_event - data.current_event_id
             };
             v.insert(String::from("proving_perf_index"), ppi);
+            let v = serde_json::to_vec(&v).unwrap_or_default();
+            server::publish(server::Message::with_payload(session, req_id, v));
+        }
+        #[cfg(feature = "fusotao")]
+        Inspection::QueryScanHeight(session, req_id) => {
+            let scaned_height = scaned_height();
+            let chain_height = chain_height();
+            let mut v: HashMap<String, u32> = HashMap::new();
+            v.insert(String::from("scaned_height"), scaned_height);
+            v.insert(String::from("chain_height"), chain_height);
             let v = serde_json::to_vec(&v).unwrap_or_default();
             server::publish(server::Message::with_payload(session, req_id, v));
         }
@@ -631,6 +647,41 @@ fn do_inspect(
         }
     }
     Ok(())
+}
+
+#[cfg(feature = "fusotao")]
+fn scaned_height() -> u32 {
+    let mut scaned_height = 0u32;
+    let path: PathBuf = [&C.sequence.coredump_dir, "fusotao.blk"].iter().collect();
+    let finalized_file = OpenOptions::new()
+        .read(true)
+        .write(false)
+        .create(false)
+        .open(&path);
+    if let Ok(f) = finalized_file {
+        let blk = unsafe { Mmap::map(&f) };
+        scaned_height = match blk {
+            Ok(b) => u32::from_le_bytes(b.as_ref().try_into().unwrap_or_default()),
+            Err(_) => 0u32,
+        };
+    }
+    scaned_height
+}
+
+#[cfg(feature = "fusotao")]
+fn chain_height() -> u32 {
+    catch_unwind(|| {
+        let client = sub_api::rpc::WsRpcClient::new(&C.fusotao.as_ref().unwrap().node_url);
+        let api = FusoApi::new(client)
+            .map_err(|e| {
+                log::error!("{:?}", e);
+                anyhow!("Fusotao node not available or runtime metadata check failed")
+            })
+            .unwrap();
+        let r: Option<FusoBlock> = api.get_block(None).unwrap_or(None);
+        r.map_or(0u32, |b| b.header.number)
+    })
+    .unwrap_or(0u32)
 }
 
 #[test]

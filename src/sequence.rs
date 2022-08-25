@@ -45,6 +45,7 @@ pub const CONFIRM_ALL: u32 = 19;
 pub const PROVING_PERF_INDEX_CHECK: u32 = 20;
 pub const QUERY_EXCHANGE_FEE: u32 = 21;
 pub const QUERY_PROVING_PERF_INDEX: u32 = 22;
+pub const QUERY_SCAN_HEIGHT: u32 = 23;
 
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
 pub struct Sequence {
@@ -250,6 +251,8 @@ impl TryInto<Inspection> for Watch {
             QUERY_PROVING_PERF_INDEX => {
                 Ok(Inspection::QueryProvingPerfIndex(self.session, self.req_id))
             }
+            #[cfg(feature = "fusotao")]
+            QUERY_SCAN_HEIGHT => Ok(Inspection::QueryScanHeight(self.session, self.req_id)),
             DUMP => Ok(Inspection::Dump(
                 self.cmd.event_id.ok_or(anyhow!(""))?,
                 self.cmd.timestamp.ok_or(anyhow!(""))?,
@@ -397,6 +400,7 @@ impl Command {
                 | QUERY_EXCHANGE_FEE
                 | QUERY_PROVING_PERF_INDEX
                 | PROVING_PERF_INDEX_CHECK
+                | QUERY_SCAN_HEIGHT
         )
     }
 }
