@@ -81,17 +81,16 @@ impl FusoConnector {
     pub fn start_submitting(&self) -> anyhow::Result<()> {
         let api = self.api.clone();
         let proved_event_id = self.proved_event_id.clone();
-        let mut in_block = proved_event_id.load(Ordering::Relaxed);
         let who = self.signer.public();
         let mut last_proved_check_time = Local::now().timestamp();
         std::thread::spawn(move || loop {
+            let start_from = proved_event_id.load(Relaxed);
             let mut new_max_submitted = std::panic::catch_unwind(|| -> u64 {
-                let start_from = in_block;
                 let (end_to, truncated) = Self::fetch_proofs(start_from);
                 let submit_result = Self::submit_batch(&api, truncated);
                 Self::handle_submit_result(submit_result, (start_from, end_to))
             })
-            .unwrap_or(in_block);
+            .unwrap_or(start_from);
             let now = Local::now().timestamp();
             if now - last_proved_check_time > 60 {
                 new_max_submitted = catch_unwind(|| -> u64 {
@@ -101,7 +100,6 @@ impl FusoConnector {
                 last_proved_check_time = now;
             }
             proved_event_id.store(new_max_submitted, Relaxed);
-            in_block = new_max_submitted;
         });
         Ok(())
     }
