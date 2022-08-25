@@ -14,13 +14,13 @@
 
 use crate::{config::C, fusotao::*, sequence};
 use anyhow::anyhow;
-use chrono::prelude::*;
 use chrono::Local;
 use memmap::MmapMut;
 use node_api::events::{EventsDecoder, Raw};
 use parity_scale_codec::Decode;
 use sp_core::sr25519::Public;
 use sp_core::Pair;
+use std::panic::catch_unwind;
 use std::sync::atomic::Ordering::Relaxed;
 use std::{
     convert::TryInto,
@@ -32,7 +32,6 @@ use std::{
     },
     time::Duration,
 };
-use syn::token::And;
 
 pub struct FusoConnector {
     pub api: FusoApi,
@@ -79,34 +78,6 @@ impl FusoConnector {
         })
     }
 
-    pub fn sync_proving_progress(who: &Public, api: &FusoApi) -> anyhow::Result<u64> {
-        let key = api
-            .metadata
-            .storage_map_key::<FusoAccountId>("Verifier", "Dominators", *who)?;
-        let payload = api.get_opaque_storage_by_key_hash(key, None)?.unwrap();
-        let result = Dominator::decode(&mut payload.as_slice())?;
-        log::info!("synchronizing proving progress: {}", result.sequence.0);
-        Ok(result.sequence.0)
-    }
-
-    pub fn fetch_proofs(start_from: u64) -> (u64, Vec<RawParameter>) {
-        let proofs = persistence::fetch_raw_after(start_from);
-        let mut total_size = 0usize;
-        let mut last_submit = start_from;
-        let mut truncated = vec![];
-        if !proofs.is_empty() {
-            for (event_id, proof) in proofs.into_iter() {
-                if total_size + proof.0.len() >= super::MAX_EXTRINSIC_SIZE {
-                    break;
-                }
-                total_size += proof.0.len();
-                last_submit = event_id;
-                truncated.push(proof);
-            }
-        }
-        (last_submit, truncated)
-    }
-
     pub fn start_submitting(&self) -> anyhow::Result<()> {
         let api = self.api.clone();
         let proved_event_id = self.proved_event_id.clone();
@@ -123,47 +94,16 @@ impl FusoConnector {
             .unwrap_or(in_block);
             let now = Local::now().timestamp();
             if now - last_proved_check_time > 60 {
+                new_max_submitted = catch_unwind(|| -> u64 {
+                    Self::sync_proving_progress(&who, &api).unwrap_or(new_max_submitted)
+                })
+                .unwrap_or(new_max_submitted);
                 last_proved_check_time = now;
-                new_max_submitted =
-                    Self::sync_proving_progress(&who, &api).unwrap_or(new_max_submitted);
             }
             proved_event_id.store(new_max_submitted, Relaxed);
             in_block = new_max_submitted;
         });
         Ok(())
-    }
-
-    fn handle_submit_result(result: anyhow::Result<()>, (start_from, end_to): (u64, u64)) -> u64 {
-        match result {
-            Ok(()) => {
-                log::info!("rotate proved event to {}", end_to);
-                end_to
-            }
-            Err(e) => {
-                log::error!("error occur while submitting proofs, {:?}", e);
-                start_from
-            }
-        }
-    }
-
-    fn submit_batch(api: &FusoApi, batch: Vec<RawParameter>) -> anyhow::Result<()> {
-        if batch.is_empty() {
-            return Ok(());
-        }
-        let xt: sub_api::UncheckedExtrinsicV4<_> =
-            sub_api::compose_extrinsic!(api, "Verifier", "verify", batch);
-        let hash = api
-            .send_extrinsic(xt.hex_encode(), sub_api::XtStatus::InBlock)
-            .map_err(|e| anyhow::anyhow!("submit proofs failed, {:?}", e))?;
-        if hash.is_none() {
-            Err(anyhow::anyhow!("extrinsic executed failed"))
-        } else {
-            log::info!(
-                "submitting proofs ok, extrinsic hash: {:?}",
-                hex::encode(hash.unwrap())
-            );
-            Ok(())
-        }
     }
 
     pub fn start_scanning(&self) -> anyhow::Result<()> {
@@ -224,6 +164,29 @@ impl FusoConnector {
         Ok(())
     }
 
+    pub fn sync_proving_progress(who: &Public, api: &FusoApi) -> anyhow::Result<u64> {
+        let key = api
+            .metadata
+            .storage_map_key::<FusoAccountId>("Verifier", "Dominators", *who)?;
+        let payload = api.get_opaque_storage_by_key_hash(key, None)?.unwrap();
+        let result = Dominator::decode(&mut payload.as_slice())?;
+        log::info!("synchronizing proving progress: {}", result.sequence.0);
+        Ok(result.sequence.0)
+    }
+
+    fn handle_submit_result(result: anyhow::Result<()>, (start_from, end_to): (u64, u64)) -> u64 {
+        match result {
+            Ok(()) => {
+                log::info!("rotate proved event to {}", end_to);
+                end_to
+            }
+            Err(e) => {
+                log::error!("error occur while submitting proofs, {:?}", e);
+                start_from
+            }
+        }
+    }
+
     async fn resolve_block(
         api: &FusoApi,
         signer: &FusoAccountId,
@@ -278,6 +241,29 @@ impl FusoConnector {
         Ok(cmds)
     }
 
+    fn fetch_proofs(start_from: u64) -> (u64, Vec<RawParameter>) {
+        let proofs = persistence::fetch_raw_after(start_from);
+        let mut total_size = 0usize;
+        let mut last_submit = start_from;
+        let mut truncated = vec![];
+        if !proofs.is_empty() {
+            for (event_id, proof) in proofs.into_iter() {
+                if total_size + proof.0.len() >= super::MAX_EXTRINSIC_SIZE {
+                    break;
+                }
+                total_size += proof.0.len();
+                last_submit = event_id;
+                truncated.push(proof);
+            }
+        }
+        log::info!(
+            "found proofs for submitting: from {} to {}",
+            start_from,
+            last_submit
+        );
+        (last_submit, truncated)
+    }
+
     fn sync_blocks_or_wait(
         from_block_included: u32,
         api: &FusoApi,
@@ -323,5 +309,25 @@ impl FusoConnector {
             .flatten()
             .collect();
         Ok((r, from_block_included + i))
+    }
+
+    fn submit_batch(api: &FusoApi, batch: Vec<RawParameter>) -> anyhow::Result<()> {
+        if batch.is_empty() {
+            return Ok(());
+        }
+        let xt: sub_api::UncheckedExtrinsicV4<_> =
+            sub_api::compose_extrinsic!(api, "Verifier", "verify", batch);
+        let hash = api
+            .send_extrinsic(xt.hex_encode(), sub_api::XtStatus::InBlock)
+            .map_err(|e| anyhow::anyhow!("submit proofs failed, {:?}", e))?;
+        if hash.is_none() {
+            Err(anyhow::anyhow!("extrinsic executed failed"))
+        } else {
+            log::info!(
+                "submitting proofs ok, extrinsic hash: {:?}",
+                hex::encode(hash.unwrap())
+            );
+            Ok(())
+        }
     }
 }
