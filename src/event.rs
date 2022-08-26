@@ -25,14 +25,6 @@ use std::{
     },
 };
 
-use anyhow::anyhow;
-use cfg_if::cfg_if;
-use memmap::Mmap;
-use rust_decimal::{prelude::*, Decimal};
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
-
-use crate::fusotao::{FusoApi, FusoBlock};
 use crate::{
     assets, clearing,
     config::C,
@@ -43,6 +35,11 @@ use crate::{
     sequence::{Command, UPDATE_SYMBOL},
     server, snapshot,
 };
+use anyhow::anyhow;
+use cfg_if::cfg_if;
+use rust_decimal::{prelude::*, Decimal};
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum Event {
@@ -651,6 +648,7 @@ fn do_inspect(
 
 #[cfg(feature = "fusotao")]
 fn scaned_height() -> u32 {
+    use memmap::Mmap;
     let mut scaned_height = 0u32;
     let path: PathBuf = [&C.sequence.coredump_dir, "fusotao.blk"].iter().collect();
     let finalized_file = OpenOptions::new()
@@ -670,6 +668,7 @@ fn scaned_height() -> u32 {
 
 #[cfg(feature = "fusotao")]
 fn chain_height() -> u32 {
+    use crate::fusotao::{FusoApi, FusoBlock};
     catch_unwind(|| {
         let client = sub_api::rpc::WsRpcClient::new(&C.fusotao.as_ref().unwrap().node_url);
         let api = FusoApi::new(client)
