@@ -163,12 +163,20 @@ impl FusoConnector {
     }
 
     pub fn sync_proving_progress(who: &Public, api: &FusoApi) -> anyhow::Result<u64> {
+        log::info!(
+            "start to synchroize proving progress, time is {} now",
+            Local::now().timestamp_millis()
+        );
         let key = api
             .metadata
             .storage_map_key::<FusoAccountId>("Verifier", "Dominators", *who)?;
         let payload = api.get_opaque_storage_by_key_hash(key, None)?.unwrap();
         let result = Dominator::decode(&mut payload.as_slice())?;
-        log::info!("synchronizing proving progress: {}", result.sequence.0);
+        log::info!(
+            "synchronizing proving progress: {}, time is {} now",
+            result.sequence.0,
+            Local::now().timestamp_millis()
+        );
         Ok(result.sequence.0)
     }
 
@@ -313,11 +321,19 @@ impl FusoConnector {
         if batch.is_empty() {
             return Ok(());
         }
+        log::info!(
+            "start submit_proofs, time is {} now",
+            Local::now().timestamp_millis()
+        );
         let xt: sub_api::UncheckedExtrinsicV4<_> =
             sub_api::compose_extrinsic!(api, "Verifier", "verify", batch);
         let hash = api
             .send_extrinsic(xt.hex_encode(), sub_api::XtStatus::InBlock)
             .map_err(|e| anyhow::anyhow!("submit proofs failed, {:?}", e))?;
+        log::info!(
+            "end submit_proofs time is {} now",
+            Local::now().timestamp_millis()
+        );
         if hash.is_none() {
             Err(anyhow::anyhow!("extrinsic executed failed"))
         } else {
