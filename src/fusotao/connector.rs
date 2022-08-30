@@ -20,8 +20,6 @@ use node_api::events::{EventsDecoder, Raw};
 use parity_scale_codec::Decode;
 use sp_core::sr25519::Public;
 use sp_core::Pair;
-use std::panic::catch_unwind;
-use std::sync::atomic::Ordering::Relaxed;
 use std::{
     convert::TryInto,
     fs::OpenOptions,
@@ -32,6 +30,8 @@ use std::{
     },
     time::Duration,
 };
+use thiserror::Error;
+use crate::orderbook::Order;
 
 pub struct FusoConnector {
     pub api: FusoApi,
@@ -84,7 +84,7 @@ impl FusoConnector {
         let who = self.signer.public();
         let mut last_proved_check_time = Local::now().timestamp();
         std::thread::spawn(move || loop {
-            let start_from = proved_event_id.load(Relaxed);
+            let start_from = proved_event_id.load(Ordering::Relaxed);
             let mut new_max_submitted = std::panic::catch_unwind(|| -> u64 {
                 let (end_to, truncated) = Self::fetch_proofs(start_from);
                 let submit_result = Self::submit_batch(&api, truncated);
@@ -93,13 +93,13 @@ impl FusoConnector {
             .unwrap_or(start_from);
             let now = Local::now().timestamp();
             if now - last_proved_check_time > 60 {
-                new_max_submitted = catch_unwind(|| -> u64 {
+                new_max_submitted = std::panic::catch_unwind(|| -> u64 {
                     Self::sync_proving_progress(&who, &api).unwrap_or(new_max_submitted)
                 })
                 .unwrap_or(new_max_submitted);
                 last_proved_check_time = now;
             }
-            proved_event_id.store(new_max_submitted, Relaxed);
+            proved_event_id.store(new_max_submitted, Ordering::Relaxed);
         });
         Ok(())
     }
@@ -164,13 +164,13 @@ impl FusoConnector {
 
     pub fn sync_proving_progress(who: &Public, api: &FusoApi) -> anyhow::Result<u64> {
         log::info!(
-            "start to synchroize proving progress, time is {} now",
+            "start to synchronize proving progress, time is {} now",
             Local::now().timestamp_millis()
         );
         let key = api
             .metadata
             .storage_map_key::<FusoAccountId>("Verifier", "Dominators", *who)?;
-        let payload = api.get_opaque_storage_by_key_hash(key, None)?.unwrap();
+        let payload = api.get_opaque_storage_by_key_hash(key, None)?.ok_or(anyhow!(""))?;
         let result = Dominator::decode(&mut payload.as_slice())?;
         log::info!(
             "synchronizing proving progress: {}, time is {} now",
