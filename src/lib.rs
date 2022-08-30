@@ -15,7 +15,6 @@
 #![feature(type_ascription)]
 #![feature(map_first_last)]
 #![feature(drain_filter)]
-#![feature(available_parallelism)]
 #![allow(clippy::from_over_into)]
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::wrong_self_convention)]
