@@ -547,9 +547,6 @@ fn update_exchange_fee(delta: u64, data: &Data) {
         C.fusotao.as_ref().unwrap().fee_adjust_threshold,
         data,
     );
-    if !cmds.is_empty() {
-        let _ = sequence::insert_sequences(&cmds);
-    }
 }
 
 fn do_inspect(
