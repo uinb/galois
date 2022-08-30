@@ -30,8 +30,6 @@ use std::{
     },
     time::Duration,
 };
-use thiserror::Error;
-use crate::orderbook::Order;
 
 pub struct FusoConnector {
     pub api: FusoApi,
@@ -170,7 +168,9 @@ impl FusoConnector {
         let key = api
             .metadata
             .storage_map_key::<FusoAccountId>("Verifier", "Dominators", *who)?;
-        let payload = api.get_opaque_storage_by_key_hash(key, None)?.ok_or(anyhow!(""))?;
+        let payload = api
+            .get_opaque_storage_by_key_hash(key, None)?
+            .ok_or(anyhow!(""))?;
         let result = Dominator::decode(&mut payload.as_slice())?;
         log::info!(
             "synchronizing proving progress: {}, time is {} now",
