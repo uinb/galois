@@ -1,6 +1,8 @@
+# v0.3.1-test.2
+- update submit proof
+
 # v0.3.1-rc.10
 - add query scan height
-
 # v0.3.1-rc.4
 - update redis tls config
 

@@ -20,6 +20,7 @@
 #![allow(clippy::wrong_self_convention)]
 #![allow(clippy::map_entry)]
 
+
 pub mod assets;
 pub mod clearing;
 pub mod config;
