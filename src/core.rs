@@ -18,12 +18,6 @@ use std::{
     io::{BufReader, BufWriter},
 };
 
-use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
-use rust_decimal::{prelude::*, Decimal};
-use serde::{Deserialize, Serialize};
-#[cfg(feature = "fusotao")]
-use sp_core::ByteArray;
-
 #[cfg(feature = "fusotao")]
 use crate::fusotao::GlobalStates;
 use crate::{assets::Balance, orderbook::OrderBook};
@@ -32,6 +26,13 @@ pub use crate::{
     matcher::{Role, State as OrderState},
     orderbook::AskOrBid,
 };
+use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
+#[cfg(feature = "fusotao")]
+use rust_decimal::prelude::Zero;
+use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
+#[cfg(feature = "fusotao")]
+use sp_core::ByteArray;
 
 pub type Base = u32;
 pub type Quote = u32;

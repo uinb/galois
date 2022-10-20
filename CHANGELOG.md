@@ -1,3 +1,6 @@
+# v0.3.1-rc.13
+- reduce logs in loop
+
 # v0.3.1-rc.12
 - update submit proof
 - disable to update fee when ppi is too high
