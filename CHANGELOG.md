@@ -1,3 +1,7 @@
+# v0.3.1
+
+- release 0.3.1
+
 # v0.3.1-rc.13
 - reduce logs in loop
 
