@@ -12,19 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fs::OpenOptions;
-use std::panic::catch_unwind;
-use std::path::PathBuf;
-use std::{
-    collections::HashMap,
-    convert::TryInto,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        mpsc::{Receiver, Sender},
-        Arc,
-    },
-};
-
 use crate::{
     assets, clearing,
     config::C,
@@ -39,6 +26,18 @@ use anyhow::anyhow;
 use cfg_if::cfg_if;
 use rust_decimal::{prelude::*, Decimal};
 use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashMap,
+    convert::TryInto,
+    fs::OpenOptions,
+    panic::catch_unwind,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{Receiver, Sender},
+        Arc,
+    },
+};
 use thiserror::Error;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

@@ -85,10 +85,15 @@ impl FusoConnector {
             let start_from = proved_event_id.load(Ordering::Relaxed);
             let mut new_max_submitted = std::panic::catch_unwind(|| -> u64 {
                 let (end_to, truncated) = Self::fetch_proofs(start_from);
+                log::info!("found proofs to submit {}-{}", start_from, end_to);
                 let submit_result = Self::submit_batch(&api, truncated);
                 Self::handle_submit_result(submit_result, (start_from, end_to))
             })
             .unwrap_or(start_from);
+            if start_from == new_max_submitted {
+                std::thread::sleep(Duration::from_millis(1000));
+                continue;
+            }
             let now = Local::now().timestamp();
             if now - last_proved_check_time > 60 {
                 new_max_submitted = std::panic::catch_unwind(|| -> u64 {
@@ -252,21 +257,14 @@ impl FusoConnector {
         let mut total_size = 0usize;
         let mut last_submit = start_from;
         let mut truncated = vec![];
-        if !proofs.is_empty() {
-            for (event_id, proof) in proofs.into_iter() {
-                if total_size + proof.0.len() >= super::MAX_EXTRINSIC_SIZE {
-                    break;
-                }
-                total_size += proof.0.len();
-                last_submit = event_id;
-                truncated.push(proof);
+        for (event_id, proof) in proofs.into_iter() {
+            if total_size + proof.0.len() >= super::MAX_EXTRINSIC_SIZE {
+                break;
             }
+            total_size += proof.0.len();
+            last_submit = event_id;
+            truncated.push(proof);
         }
-        log::info!(
-            "found proofs for submitting: from {} to {}",
-            start_from,
-            last_submit
-        );
         (last_submit, truncated)
     }
 
