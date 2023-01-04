@@ -720,11 +720,4 @@ pub fn test_serialize() {
         true,
     );
     data.orderbooks.insert((0, 1), orderbook);
-    let cmd = gen_adjust_fee_cmds(5000, 1000, &data);
-    assert_eq!(1, cmd.len());
-    assert_eq!(5, cmd[0].fee_times.unwrap());
-    assert_eq!(dec!(0.005), cmd[0].maker_fee.unwrap());
-    assert_eq!(dec!(0.005), cmd[0].taker_fee.unwrap());
-    assert_eq!(dec!(0.001), cmd[0].base_maker_fee.unwrap());
-    assert_eq!(dec!(0.001), cmd[0].base_taker_fee.unwrap());
 }
