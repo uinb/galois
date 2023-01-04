@@ -1277,7 +1277,7 @@ dependencies = [
 
 [[package]]
 name = "galois"
-version = "0.2.6-dev"
+version = "0.3.1"
 dependencies = [
  "ac-node-api",
  "anyhow",

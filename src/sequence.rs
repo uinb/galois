@@ -153,7 +153,7 @@ impl TryInto<Event> for Sequence {
                         .ok_or(anyhow!(""))?,
                     taker_fee: self
                         .cmd
-                        .maker_fee
+                        .taker_fee
                         .filter(|f| f.is_sign_positive())
                         .ok_or(anyhow!(""))?,
                     maker_fee: self
