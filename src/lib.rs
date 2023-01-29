@@ -18,7 +18,6 @@
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::wrong_self_convention)]
 #![allow(clippy::map_entry)]
-#![feature(map_first_last)]
 
 pub mod assets;
 pub mod clearing;
