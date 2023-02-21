@@ -14,6 +14,7 @@
 
 use crate::{config::C, fusotao::*, sequence};
 use anyhow::anyhow;
+use cfg_if::cfg_if;
 use chrono::Local;
 use memmap::MmapMut;
 use node_api::events::{EventsDecoder, Raw};
@@ -30,7 +31,6 @@ use std::{
     },
     time::Duration,
 };
-use cfg_if::cfg_if;
 
 pub struct FusoConnector {
     pub api: FusoApi,
@@ -358,7 +358,6 @@ impl FusoConnector {
             );
             Ok(())
         }
-
     }
 
     fn submit_batch(api: &FusoApi, batch: Vec<RawParameter>) -> anyhow::Result<()> {
