@@ -21,6 +21,7 @@ required-features = ["enc-conf"]
 default = []
 fusotao = ["sub-api", "parity-scale-codec", "smt", "memmap", "sp-core", "sp-runtime"]
 enc-conf = ["magic-crypt"]
+verify_compress = ["lz4_flex"]
 
 [dependencies.rust_decimal]
 version = "1.22"
@@ -83,6 +84,10 @@ version = "2.2"
 
 [dependencies.syn]
 version = "1.0.107"
+
+[dependencies.lz4_flex]
+version = "0.10.0"
+optional = true
 
 [dependencies.log]
 version = "0.4"

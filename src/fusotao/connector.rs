@@ -30,6 +30,7 @@ use std::{
     },
     time::Duration,
 };
+use cfg_if::cfg_if;
 
 pub struct FusoConnector {
     pub api: FusoApi,
@@ -86,7 +87,14 @@ impl FusoConnector {
             let mut new_max_submitted = std::panic::catch_unwind(|| -> u64 {
                 let (end_to, truncated) = Self::fetch_proofs(start_from);
                 log::info!("found proofs to submit {}-{}", start_from, end_to);
-                let submit_result = Self::submit_batch(&api, truncated);
+                cfg_if! {
+                    if #[cfg(feature = "verify_compress")] {
+                        let submit_result = Self::submit_batch_compressed(&api, truncated);
+                    } else {
+                        let submit_result = Self::submit_batch(&api, truncated);
+                    }
+                }
+
                 Self::handle_submit_result(submit_result, (start_from, end_to))
             })
             .unwrap_or(start_from);
@@ -313,6 +321,44 @@ impl FusoConnector {
             .flatten()
             .collect();
         Ok((r, from_block_included + i))
+    }
+
+    #[cfg(feature = "verify_compress")]
+    fn verify_compress(raws: Vec<RawParameter>) -> Vec<u8> {
+        let r = raws.encode();
+        let compressed_proofs = lz4_flex::compress_prepend_size(r.as_ref());
+        compressed_proofs
+    }
+
+    #[cfg(feature = "verify_compress")]
+    fn submit_batch_compressed(api: &FusoApi, proofs: Vec<RawParameter>) -> anyhow::Result<()> {
+        if proofs.is_empty() {
+            return Ok(());
+        }
+        log::info!(
+            "start submit_proofs, time is {} now",
+            Local::now().timestamp_millis()
+        );
+        let compress_proofs = Self::verify_compress(proofs);
+        let xt: sub_api::UncheckedExtrinsicV4<_> =
+            sub_api::compose_extrinsic!(api, "Verifier", "verify_compress", compress_proofs);
+        let hash = api
+            .send_extrinsic(xt.hex_encode(), sub_api::XtStatus::InBlock)
+            .map_err(|e| anyhow::anyhow!("submit proofs failed, {:?}", e))?;
+        log::info!(
+            "end submit_proofs time is {} now",
+            Local::now().timestamp_millis()
+        );
+        if hash.is_none() {
+            Err(anyhow::anyhow!("extrinsic executed failed"))
+        } else {
+            log::info!(
+                "submitting proofs ok, extrinsic hash: {:?}",
+                hex::encode(hash.unwrap())
+            );
+            Ok(())
+        }
+
     }
 
     fn submit_batch(api: &FusoApi, batch: Vec<RawParameter>) -> anyhow::Result<()> {
