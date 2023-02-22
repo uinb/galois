@@ -1,3 +1,8 @@
+# v0.3.4-test
+
+- release 0.3.4-test
+- add verify compress
+
 # v0.3.3
 
 - release 0.3.3
