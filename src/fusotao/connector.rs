@@ -31,6 +31,7 @@ use std::{
     },
     time::Duration,
 };
+use log::{info, log};
 
 pub struct FusoConnector {
     pub api: FusoApi,
@@ -326,7 +327,10 @@ impl FusoConnector {
     #[cfg(feature = "verify_compress")]
     fn verify_compress(raws: Vec<RawParameter>) -> Vec<u8> {
         let r = raws.encode();
+        let uncompress_size = r.len();
         let compressed_proofs = lz4_flex::compress_prepend_size(r.as_ref());
+        let compressed_size = compressed_proofs.len();
+        info!("proof compress: uncompress size = {}, compressed size = {}", uncompress_size, compressed_size);
         compressed_proofs
     }
 
