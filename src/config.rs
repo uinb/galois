@@ -166,6 +166,7 @@ pub fn print_enc_config_file() -> anyhow::Result<()> {
     }
     let mut cfg: Config = toml::from_str(&std::fs::read_to_string(file)?)?;
     cfg.mysql.encrypt(&key)?;
+    cfg.redis.encrypt(&key)?;
     if let Some(ref mut fuso) = cfg.fusotao {
         fuso.encrypt(&key)?;
     }

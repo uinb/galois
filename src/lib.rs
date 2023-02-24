@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(map_first_last)]
 #![feature(type_ascription)]
 #![feature(drain_filter)]
 #![allow(clippy::from_over_into)]
