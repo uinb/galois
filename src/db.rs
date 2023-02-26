@@ -1,4 +1,4 @@
-// Copyright 2021 UINB Technologies Pte. Ltd.
+// Copyright 2021-2023 UINB Technologies Pte. Ltd.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ use lazy_static::lazy_static;
 use crate::config::C;
 
 lazy_static! {
-    pub static ref DB: mysql::Pool = mysql::Pool::new(&C.mysql.url).unwrap();
+    pub static ref DB: mysql::Pool =
+        mysql::Pool::new(mysql::Opts::from_url(&C.mysql.url).unwrap()).unwrap();
     pub static ref REDIS: redis::Client = redis::Client::open((&C.redis.url).to_string()).unwrap();
 }

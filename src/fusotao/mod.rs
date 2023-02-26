@@ -1,4 +1,4 @@
-// Copyright 2021 UINB Technologies Pte. Ltd.
+// Copyright 2021-2023 UINB Technologies Pte. Ltd.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,10 +25,9 @@ use std::{
     },
 };
 
-pub use prover::Prover;
-
 use crate::fusotao::connector::FusoConnector;
 use crate::{config::C, core::*, event::*};
+pub use prover::Prover;
 use sp_core::Pair;
 use std::sync::atomic::Ordering;
 
@@ -246,7 +245,7 @@ pub fn to_decimal_represent(v: u128) -> Option<Decimal> {
     let n: Amount = n.try_into().ok()?;
     let mut f: Amount = f.try_into().ok()?;
     f.set_scale(18).ok()?;
-    let mut r = n + f;
+    let r = n + f;
     if r.validate() {
         Some(r)
     } else {

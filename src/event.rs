@@ -1,4 +1,4 @@
-// Copyright 2021 UINB Technologies Pte. Ltd.
+// Copyright 2021-2023 UINB Technologies Pte. Ltd.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,26 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{
-    assets, clearing,
-    config::C,
-    core::*,
-    matcher,
-    orderbook::*,
-    output, sequence,
-    sequence::{Command, UPDATE_SYMBOL},
-    server, snapshot,
-};
+use crate::{assets, clearing, core::*, matcher, orderbook::*, output, sequence, server, snapshot};
 use anyhow::anyhow;
 use cfg_if::cfg_if;
-use rust_decimal::{prelude::*, Decimal};
+#[cfg(feature = "fusotao")]
+use rust_decimal::prelude::*;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     convert::TryInto,
-    fs::OpenOptions,
-    panic::catch_unwind,
-    path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc::{Receiver, Sender},
@@ -498,56 +488,6 @@ fn handle_event(
     }
 }
 
-#[cfg(feature = "fusotao")]
-fn gen_adjust_fee_cmds(delta: u64, fee_adjust_threshold: u64, data: &Data) -> Vec<Command> {
-    let mut times: u32 = (delta / fee_adjust_threshold) as u32;
-    times = if times > 0 { times } else { 1 };
-    data.orderbooks
-        .iter()
-        .filter(|(_, v)| times != v.fee_times)
-        .map(|(k, v)| {
-            let mut cmd = Command::default();
-            cmd.cmd = UPDATE_SYMBOL;
-            cmd.base = Some(k.0);
-            cmd.quote = Some(k.1);
-            cmd.open = Some(v.open);
-            cmd.enable_market_order = Some(v.enable_market_order);
-            cmd.fee_times = Some(times);
-            cmd.base_taker_fee = Some(v.base_taker_fee);
-            cmd.base_maker_fee = Some(v.base_maker_fee);
-            let fee_rate_limit = Decimal::from_str("0.01").unwrap();
-            let maker_fee = v.base_maker_fee * Decimal::from(times);
-            let maker_fee = if maker_fee > fee_rate_limit {
-                fee_rate_limit
-            } else {
-                maker_fee
-            };
-            let taker_fee = v.base_taker_fee * Decimal::from(times);
-            let taker_fee = if taker_fee > fee_rate_limit {
-                fee_rate_limit
-            } else {
-                taker_fee
-            };
-            cmd.maker_fee = Some(maker_fee);
-            cmd.taker_fee = Some(taker_fee);
-            cmd.min_amount = Some(v.min_amount);
-            cmd.min_vol = Some(v.min_vol);
-            cmd.quote_scale = Some(v.quote_scale);
-            cmd.base_scale = Some(v.base_scale);
-            cmd
-        })
-        .collect::<Vec<_>>()
-}
-
-#[cfg(feature = "fusotao")]
-fn update_exchange_fee(delta: u64, data: &Data) {
-    let cmds = gen_adjust_fee_cmds(
-        delta,
-        C.fusotao.as_ref().unwrap().fee_adjust_threshold,
-        data,
-    );
-}
-
 fn do_inspect(
     inspection: Inspection,
     data: &Data,
@@ -627,33 +567,24 @@ fn do_inspect(
             snapshot::dump(id, time, data);
         }
         #[cfg(feature = "fusotao")]
-        Inspection::ProvingPerfIndexCheck(id) => {
-            let current_proved_event = prover.proved_event_id.load(Ordering::Relaxed);
-            if current_proved_event != 0 {
-                let delta = if id > current_proved_event {
-                    id - current_proved_event
-                } else {
-                    current_proved_event - id
-                };
-                update_exchange_fee(delta, data);
-            }
-        }
+        Inspection::ProvingPerfIndexCheck(_id) => {}
     }
     Ok(())
 }
 
 #[cfg(feature = "fusotao")]
 fn scaned_height() -> u32 {
-    use memmap::Mmap;
     let mut scaned_height = 0u32;
-    let path: PathBuf = [&C.sequence.coredump_dir, "fusotao.blk"].iter().collect();
-    let finalized_file = OpenOptions::new()
+    let path: std::path::PathBuf = [&crate::config::C.sequence.coredump_dir, "fusotao.blk"]
+        .iter()
+        .collect();
+    let finalized_file = std::fs::OpenOptions::new()
         .read(true)
         .write(false)
         .create(false)
         .open(&path);
     if let Ok(f) = finalized_file {
-        let blk = unsafe { Mmap::map(&f) };
+        let blk = unsafe { memmap::Mmap::map(&f) };
         scaned_height = match blk {
             Ok(b) => u32::from_le_bytes(b.as_ref().try_into().unwrap_or_default()),
             Err(_) => 0u32,
@@ -665,8 +596,9 @@ fn scaned_height() -> u32 {
 #[cfg(feature = "fusotao")]
 fn chain_height() -> u32 {
     use crate::fusotao::{FusoApi, FusoBlock};
-    catch_unwind(|| {
-        let client = sub_api::rpc::WsRpcClient::new(&C.fusotao.as_ref().unwrap().node_url);
+    std::panic::catch_unwind(|| {
+        let client =
+            sub_api::rpc::WsRpcClient::new(&crate::config::C.fusotao.as_ref().unwrap().node_url);
         let api = FusoApi::new(client)
             .map_err(|e| {
                 log::error!("{:?}", e);
