@@ -41,8 +41,8 @@ impl Prover {
     pub fn prove_trade_cmd(
         &self,
         data: &mut Data,
-        nonce: u32,
-        signature: Vec<u8>,
+        _nonce: u32,
+        _signature: Vec<u8>,
         encoded_cmd: FusoCommand,
         ask_size_before: Amount,
         bid_size_before: Amount,
@@ -326,7 +326,7 @@ impl Prover {
                 leaves: vec![],
                 maker_page_delta: 0,
                 maker_account_delta: 0,
-                merkle_proof: vec![],
+                merkle_proof,
                 root: merkle_tree.root().clone().into(),
             })
             .unwrap();
