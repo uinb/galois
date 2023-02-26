@@ -17,6 +17,7 @@ use lazy_static::lazy_static;
 use crate::config::C;
 
 lazy_static! {
-    pub static ref DB: mysql::Pool = mysql::Pool::new(&C.mysql.url).unwrap();
+    pub static ref DB: mysql::Pool =
+        mysql::Pool::new(mysql::Opts::from_url(&C.mysql.url).unwrap()).unwrap();
     pub static ref REDIS: redis::Client = redis::Client::open((&C.redis.url).to_string()).unwrap();
 }
