@@ -1,3 +1,8 @@
+# v0.3.8
+
+- upgrade substrate version to 0.9.30
+- compress proofs
+
 # v0.3.4-test.1
 
 - release v0.3.4-test.1
