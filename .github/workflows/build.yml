@@ -20,7 +20,7 @@ jobs:
         with:
           command: test
           args: --all-features
-  build:
+  build-on-default:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
