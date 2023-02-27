@@ -40,8 +40,8 @@ impl std::convert::TryFrom<u32> for AskOrBid {
 
     fn try_from(x: u32) -> anyhow::Result<Self> {
         match x {
-            crate::sequence::ASK_LIMIT => Ok(AskOrBid::Ask),
-            crate::sequence::BID_LIMIT => Ok(AskOrBid::Bid),
+            crate::cmd::ASK_LIMIT => Ok(AskOrBid::Ask),
+            crate::cmd::BID_LIMIT => Ok(AskOrBid::Bid),
             _ => Err(anyhow::anyhow!("")),
         }
     }

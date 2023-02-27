@@ -22,9 +22,9 @@ use std::{
 use crate::fusotao::GlobalStates;
 use crate::{assets::Balance, orderbook::OrderBook};
 pub use crate::{
-    event::InOrOut,
     matcher::{Role, State as OrderState},
     orderbook::AskOrBid,
+    sequence::InOrOut,
 };
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 #[cfg(feature = "fusotao")]

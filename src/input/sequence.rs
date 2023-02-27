@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{config::C, core::*, db::DB, event::*, orderbook::AskOrBid};
+use crate::{cmd::*, config::C, core::*, db::DB, input::*, orderbook::AskOrBid};
 use anyhow::{anyhow, ensure};
 use mysql::{prelude::*, *};
-use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::{
     convert::{TryFrom, TryInto},
@@ -27,25 +26,7 @@ use std::{
     },
     time::{Duration, SystemTime},
 };
-
-pub const ASK_LIMIT: u32 = 0;
-pub const BID_LIMIT: u32 = 1;
-pub const CANCEL: u32 = 4;
-pub const CANCEL_ALL: u32 = 5;
-pub const TRANSFER_OUT: u32 = 10;
-pub const TRANSFER_IN: u32 = 11;
-pub const UPDATE_SYMBOL: u32 = 13;
-
-pub const QUERY_ORDER: u32 = 14;
-pub const QUERY_BALANCE: u32 = 15;
-pub const QUERY_ACCOUNTS: u32 = 16;
-pub const DUMP: u32 = 17;
-pub const UPDATE_DEPTH: u32 = 18;
-pub const CONFIRM_ALL: u32 = 19;
-pub const PROVING_PERF_INDEX_CHECK: u32 = 20;
-pub const QUERY_EXCHANGE_FEE: u32 = 21;
-pub const QUERY_PROVING_PERF_INDEX: u32 = 22;
-pub const QUERY_SCAN_HEIGHT: u32 = 23;
+use thiserror::Error;
 
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
 pub struct Sequence {
@@ -208,204 +189,9 @@ impl Sequence {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
-pub struct Watch {
-    pub session: u64,
-    pub req_id: u64,
-    pub cmd: Command,
-}
-
-impl TryInto<Inspection> for Watch {
-    type Error = anyhow::Error;
-
-    fn try_into(self) -> anyhow::Result<Inspection> {
-        match self.cmd.cmd {
-            QUERY_ORDER => Ok(Inspection::QueryOrder(
-                self.cmd.symbol().ok_or(anyhow!(""))?,
-                self.cmd.order_id.ok_or(anyhow!(""))?,
-                self.session,
-                self.req_id,
-            )),
-            QUERY_BALANCE => Ok(Inspection::QueryBalance(
-                UserId::from_str(self.cmd.user_id.as_ref().ok_or(anyhow!(""))?)?,
-                self.cmd.currency.ok_or(anyhow!(""))?,
-                self.session,
-                self.req_id,
-            )),
-            QUERY_ACCOUNTS => Ok(Inspection::QueryAccounts(
-                UserId::from_str(self.cmd.user_id.as_ref().ok_or(anyhow!(""))?)?,
-                self.session,
-                self.req_id,
-            )),
-            UPDATE_DEPTH => Ok(Inspection::UpdateDepth),
-            CONFIRM_ALL => Ok(Inspection::ConfirmAll(
-                self.cmd.from.ok_or(anyhow!(""))?,
-                self.cmd.exclude.ok_or(anyhow!(""))?,
-            )),
-            QUERY_EXCHANGE_FEE => Ok(Inspection::QueryExchangeFee(
-                self.cmd.symbol().ok_or(anyhow!(""))?,
-                self.session,
-                self.req_id,
-            )),
-            #[cfg(feature = "fusotao")]
-            QUERY_PROVING_PERF_INDEX => {
-                Ok(Inspection::QueryProvingPerfIndex(self.session, self.req_id))
-            }
-            #[cfg(feature = "fusotao")]
-            QUERY_SCAN_HEIGHT => Ok(Inspection::QueryScanHeight(self.session, self.req_id)),
-            DUMP => Ok(Inspection::Dump(
-                self.cmd.event_id.ok_or(anyhow!(""))?,
-                self.cmd.timestamp.ok_or(anyhow!(""))?,
-            )),
-            #[cfg(feature = "fusotao")]
-            PROVING_PERF_INDEX_CHECK => Ok(Inspection::ProvingPerfIndexCheck(
-                self.cmd.event_id.ok_or(anyhow!(""))?,
-            )),
-            _ => Err(anyhow!("Invalid Inspection")),
-        }
-    }
-}
-
-impl Watch {
-    pub fn new_update_depth_watch() -> Self {
-        let mut cmd = Command::default();
-        cmd.cmd = UPDATE_DEPTH;
-        Self {
-            session: 0,
-            req_id: 0,
-            cmd,
-        }
-    }
-
-    pub fn new_dump_watch(at: u64, time: u64) -> Self {
-        let mut cmd = Command::default();
-        cmd.cmd = DUMP;
-        cmd.event_id = Some(at);
-        cmd.timestamp = Some(time);
-        Self {
-            session: 0,
-            req_id: 0,
-            cmd,
-        }
-    }
-
-    pub fn new_proving_perf_check_watch(at: u64) -> Self {
-        let mut cmd = Command::default();
-        cmd.cmd = PROVING_PERF_INDEX_CHECK;
-        cmd.event_id = Some(at);
-        Self {
-            session: 0,
-            req_id: 0,
-            cmd,
-        }
-    }
-
-    pub fn new_confirm_watch(from: u64, exclude: u64) -> Self {
-        let mut cmd = Command::default();
-        cmd.cmd = CONFIRM_ALL;
-        cmd.from.replace(from);
-        cmd.exclude.replace(exclude);
-        Self {
-            session: 0,
-            req_id: 0,
-            cmd,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone, Default)]
-pub struct Command {
-    pub cmd: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub order_id: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub user_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub base: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub quote: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub currency: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub vol: Option<Decimal>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub amount: Option<Amount>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub price: Option<Price>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub signature: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub nonce: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub extrinsic_hash: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub block_number: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub base_scale: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub quote_scale: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub taker_fee: Option<Fee>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub maker_fee: Option<Fee>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub base_taker_fee: Option<Fee>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub base_maker_fee: Option<Fee>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub fee_times: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub min_amount: Option<Amount>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub min_vol: Option<Amount>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub open: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub enable_market_order: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub from: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub exclude: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub event_id: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub timestamp: Option<u64>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
-pub enum Fusion {
-    W(Sequence),
-    R(Watch),
-}
-
 unsafe impl Send for Sequence {}
 
-unsafe impl Send for Command {}
-
-unsafe impl Send for Fusion {}
-
-impl Command {
-    pub fn symbol(&self) -> Option<Symbol> {
-        Some((self.base?, self.quote?))
-    }
-
-    #[must_use]
-    pub const fn is_read(&self) -> bool {
-        matches!(
-            self.cmd,
-            QUERY_ACCOUNTS
-                | QUERY_BALANCE
-                | QUERY_ORDER
-                | DUMP
-                | QUERY_EXCHANGE_FEE
-                | QUERY_PROVING_PERF_INDEX
-                | PROVING_PERF_INDEX_CHECK
-                | QUERY_SCAN_HEIGHT
-        )
-    }
-}
-
-pub fn init(sender: Sender<Fusion>, id: u64, startup: Arc<AtomicBool>) {
+pub fn init(sender: Sender<Input>, id: u64, startup: Arc<AtomicBool>) {
     let mut id = id;
     let mut counter = 0_usize;
     let event_sender = sender.clone();
@@ -438,7 +224,7 @@ pub fn init(sender: Sender<Fusion>, id: u64, startup: Arc<AtomicBool>) {
                     id += 1;
                     continue;
                 }
-                event_sender.send(Fusion::W(s)).unwrap();
+                event_sender.send(Input::Modifier(s)).unwrap();
                 counter += 1;
                 if counter >= C.sequence.checkpoint {
                     counter = 0;
@@ -447,26 +233,28 @@ pub fn init(sender: Sender<Fusion>, id: u64, startup: Arc<AtomicBool>) {
                         .unwrap()
                         .as_secs();
                     event_sender
-                        .send(Fusion::R(Watch::new_dump_watch(id, t)))
+                        .send(Input::NonModifier(Whistle::new_dump_whistle(id, t)))
                         .unwrap();
                 }
                 //check system busy
                 if counter != 0 && counter % 200 == 0 {
                     event_sender
-                        .send(Fusion::R(Watch::new_proving_perf_check_watch(id)))
+                        .send(Input::NonModifier(Whistle::new_proving_perf_check_whistle(
+                            id,
+                        )))
                         .unwrap();
                 }
                 id += 1;
             }
             event_sender
-                .send(Fusion::R(Watch::new_confirm_watch(from, id)))
+                .send(Input::NonModifier(Whistle::new_confirm_whistle(from, id)))
                 .unwrap();
         }
     });
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_millis(500));
-        let watch = Watch::new_update_depth_watch();
-        sender.send(Fusion::R(watch)).unwrap();
+        let whistle = Whistle::new_update_depth_whistle();
+        sender.send(Input::NonModifier(whistle)).unwrap();
     });
 }
 
@@ -550,27 +338,186 @@ pub const PENDING: u32 = 0;
 pub const ACCEPTED: u32 = 1;
 pub const ERROR: u32 = 2;
 
-#[test]
-#[cfg(not(feature = "fusotao"))]
-pub fn test_deserialize_cmd() {
-    let transfer_in = r#"{"currency":100, "amount":"100.0", "user_id":"0x0000000000000000000000000000000000000000000000000000000000000001", "cmd":11}"#;
-    let e = serde_json::from_str::<Command>(transfer_in).unwrap();
-    let s: anyhow::Result<Event> = Sequence {
-        id: 1,
-        cmd: e,
-        status: 0,
-        timestamp: 0,
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub enum Event {
+    Limit(EventId, LimitCmd, Timestamp),
+    Cancel(EventId, CancelCmd, Timestamp),
+    TransferOut(EventId, AssetsCmd, Timestamp),
+    TransferIn(EventId, AssetsCmd, Timestamp),
+    UpdateSymbol(EventId, SymbolCmd, Timestamp),
+    #[cfg(not(feature = "fusotao"))]
+    CancelAll(EventId, Symbol, Timestamp),
+}
+
+impl Event {
+    pub fn is_trading_cmd(&self) -> bool {
+        matches!(self, Event::Limit(_, _, _)) || matches!(self, Event::Cancel(_, _, _))
     }
-    .try_into();
-    assert!(s.is_ok());
-    let bid_limit = r#"{"quote":100, "base":101, "cmd":1, "price":"10.0", "amount":"0.5", "order_id":1, "user_id":"0x0000000000000000000000000000000000000000000000000000000000000001"}"#;
-    let e = serde_json::from_str::<Command>(bid_limit).unwrap();
-    let s: anyhow::Result<Event> = Sequence {
-        id: 2,
-        cmd: e,
-        status: 0,
-        timestamp: 0,
+
+    pub fn is_assets_cmd(&self) -> bool {
+        matches!(self, Event::TransferIn(_, _, _)) || matches!(self, Event::TransferOut(_, _, _))
     }
-    .try_into();
-    assert!(s.is_ok());
+
+    pub fn get_id(&self) -> u64 {
+        match self {
+            Event::Limit(id, _, _) => *id,
+            Event::Cancel(id, _, _) => *id,
+            Event::TransferOut(id, _, _) => *id,
+            Event::TransferIn(id, _, _) => *id,
+            Event::UpdateSymbol(id, _, _) => *id,
+            #[cfg(not(feature = "fusotao"))]
+            Event::CancelAll(id, _, _) => *id,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LimitCmd {
+    pub symbol: Symbol,
+    pub user_id: UserId,
+    pub order_id: OrderId,
+    pub price: Price,
+    pub amount: Amount,
+    pub ask_or_bid: AskOrBid,
+    #[cfg(feature = "fusotao")]
+    pub nonce: u32,
+    #[cfg(feature = "fusotao")]
+    pub signature: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CancelCmd {
+    pub symbol: Symbol,
+    pub user_id: UserId,
+    pub order_id: OrderId,
+    #[cfg(feature = "fusotao")]
+    pub nonce: u32,
+    #[cfg(feature = "fusotao")]
+    pub signature: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum InOrOut {
+    In,
+    Out,
+}
+
+impl std::convert::TryFrom<u32> for InOrOut {
+    type Error = anyhow::Error;
+
+    fn try_from(x: u32) -> anyhow::Result<Self> {
+        match x {
+            crate::cmd::TRANSFER_IN => Ok(InOrOut::In),
+            crate::cmd::TRANSFER_OUT => Ok(InOrOut::Out),
+            _ => Err(anyhow::anyhow!("")),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AssetsCmd {
+    pub user_id: UserId,
+    pub in_or_out: InOrOut,
+    pub currency: Currency,
+    pub amount: Amount,
+    #[cfg(feature = "fusotao")]
+    pub block_number: u32,
+    #[cfg(feature = "fusotao")]
+    pub extrinsic_hash: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SymbolCmd {
+    pub symbol: Symbol,
+    pub open: bool,
+    pub base_scale: Scale,
+    pub quote_scale: Scale,
+    pub taker_fee: Fee,
+    pub maker_fee: Fee,
+    pub base_maker_fee: Fee,
+    pub base_taker_fee: Fee,
+    pub fee_times: u32,
+    pub min_amount: Amount,
+    pub min_vol: Vol,
+    pub enable_market_order: bool,
+}
+
+#[derive(Debug, Error)]
+pub enum EventsError {
+    #[error("Events execution thread interrupted")]
+    Interrupted,
+    #[error("Error occurs in sequence {0}: {1}")]
+    EventRejected(u64, anyhow::Error),
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use rust_decimal_macros::dec;
+
+    #[test]
+    pub fn test_serialize() {
+        assert_eq!("{}", serde_json::to_string(&Accounts::new()).unwrap());
+        let mut account = Account::default();
+        account.insert(
+            100,
+            crate::assets::Balance {
+                available: Amount::new(200, 1),
+                frozen: Amount::new(0, 0),
+            },
+        );
+        assert_eq!(
+            r#"{"100":{"available":"20.0","frozen":"0"}}"#,
+            serde_json::to_string(&account).unwrap()
+        );
+        assert_eq!(
+            r#"{"available":"0","frozen":"0"}"#,
+            serde_json::to_string(&crate::assets::Balance {
+                available: Amount::new(0, 0),
+                frozen: Amount::new(0, 0),
+            })
+            .unwrap()
+        );
+
+        let mut data = Data::new();
+        let orderbook = crate::orderbook::OrderBook::new(
+            8,
+            8,
+            dec!(0.001),
+            dec!(0.001),
+            dec!(0.001),
+            dec!(0.001),
+            1,
+            dec!(0.1),
+            dec!(0.1),
+            true,
+            true,
+        );
+        data.orderbooks.insert((0, 1), orderbook);
+    }
+
+    #[test]
+    #[cfg(not(feature = "fusotao"))]
+    pub fn test_deserialize_cmd() {
+        let transfer_in = r#"{"currency":100, "amount":"100.0", "user_id":"0x0000000000000000000000000000000000000000000000000000000000000001", "cmd":11}"#;
+        let e = serde_json::from_str::<Command>(transfer_in).unwrap();
+        let s: anyhow::Result<Event> = Sequence {
+            id: 1,
+            cmd: e,
+            status: 0,
+            timestamp: 0,
+        }
+        .try_into();
+        assert!(s.is_ok());
+        let bid_limit = r#"{"quote":100, "base":101, "cmd":1, "price":"10.0", "amount":"0.5", "order_id":1, "user_id":"0x0000000000000000000000000000000000000000000000000000000000000001"}"#;
+        let e = serde_json::from_str::<Command>(bid_limit).unwrap();
+        let s: anyhow::Result<Event> = Sequence {
+            id: 2,
+            cmd: e,
+            status: 0,
+            timestamp: 0,
+        }
+        .try_into();
+        assert!(s.is_ok());
+    }
 }

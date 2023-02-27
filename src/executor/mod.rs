@@ -12,13 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{assets, clearing, core::*, matcher, orderbook::*, output, sequence, server, snapshot};
+pub mod assets;
+pub mod clearing;
+pub mod matcher;
+pub mod orderbook;
+
+use crate::{
+    core::*,
+    input::{Event, EventsError, Input, Inspection},
+    orderbook::*,
+    output::{self, Output},
+    sequence, server, snapshot,
+};
 use anyhow::anyhow;
-use cfg_if::cfg_if;
 #[cfg(feature = "fusotao")]
 use rust_decimal::prelude::*;
 use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     convert::TryInto,
@@ -28,151 +37,14 @@ use std::{
         Arc,
     },
 };
-use thiserror::Error;
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub enum Event {
-    Limit(EventId, LimitCmd, Timestamp),
-    Cancel(EventId, CancelCmd, Timestamp),
-    TransferOut(EventId, AssetsCmd, Timestamp),
-    TransferIn(EventId, AssetsCmd, Timestamp),
-    UpdateSymbol(EventId, SymbolCmd, Timestamp),
-    #[cfg(not(feature = "fusotao"))]
-    CancelAll(EventId, Symbol, Timestamp),
-}
-
-impl Event {
-    pub fn is_trading_cmd(&self) -> bool {
-        matches!(self, Event::Limit(_, _, _)) || matches!(self, Event::Cancel(_, _, _))
-    }
-
-    pub fn is_assets_cmd(&self) -> bool {
-        matches!(self, Event::TransferIn(_, _, _)) || matches!(self, Event::TransferOut(_, _, _))
-    }
-
-    pub fn get_id(&self) -> u64 {
-        match self {
-            Event::Limit(id, _, _) => *id,
-            Event::Cancel(id, _, _) => *id,
-            Event::TransferOut(id, _, _) => *id,
-            Event::TransferIn(id, _, _) => *id,
-            Event::UpdateSymbol(id, _, _) => *id,
-            #[cfg(not(feature = "fusotao"))]
-            Event::CancelAll(id, _, _) => *id,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct LimitCmd {
-    pub symbol: Symbol,
-    pub user_id: UserId,
-    pub order_id: OrderId,
-    pub price: Price,
-    pub amount: Amount,
-    pub ask_or_bid: AskOrBid,
-    #[cfg(feature = "fusotao")]
-    pub nonce: u32,
-    #[cfg(feature = "fusotao")]
-    pub signature: Vec<u8>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CancelCmd {
-    pub symbol: Symbol,
-    pub user_id: UserId,
-    pub order_id: OrderId,
-    #[cfg(feature = "fusotao")]
-    pub nonce: u32,
-    #[cfg(feature = "fusotao")]
-    pub signature: Vec<u8>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum InOrOut {
-    In,
-    Out,
-}
-
-impl std::convert::TryFrom<u32> for InOrOut {
-    type Error = anyhow::Error;
-
-    fn try_from(x: u32) -> anyhow::Result<Self> {
-        match x {
-            crate::sequence::TRANSFER_IN => Ok(InOrOut::In),
-            crate::sequence::TRANSFER_OUT => Ok(InOrOut::Out),
-            _ => Err(anyhow::anyhow!("")),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct AssetsCmd {
-    pub user_id: UserId,
-    pub in_or_out: InOrOut,
-    pub currency: Currency,
-    pub amount: Amount,
-    #[cfg(feature = "fusotao")]
-    pub block_number: u32,
-    #[cfg(feature = "fusotao")]
-    pub extrinsic_hash: Vec<u8>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SymbolCmd {
-    pub symbol: Symbol,
-    pub open: bool,
-    pub base_scale: Scale,
-    pub quote_scale: Scale,
-    pub taker_fee: Fee,
-    pub maker_fee: Fee,
-    pub base_maker_fee: Fee,
-    pub base_taker_fee: Fee,
-    pub fee_times: u32,
-    pub min_amount: Amount,
-    pub min_vol: Vol,
-    pub enable_market_order: bool,
-}
-
-#[derive(Debug, Eq, PartialEq, Clone, Deserialize, Serialize, Copy)]
-pub enum Inspection {
-    ConfirmAll(u64, u64),
-    UpdateDepth,
-    QueryOrder(Symbol, OrderId, u64, u64),
-    QueryBalance(UserId, Currency, u64, u64),
-    QueryAccounts(UserId, u64, u64),
-    #[cfg(feature = "fusotao")]
-    QueryProvingPerfIndex(u64, u64),
-    QueryExchangeFee(Symbol, u64, u64),
-    #[cfg(feature = "fusotao")]
-    QueryScanHeight(u64, u64),
-    // special: `EventId` means dump at `EventId`
-    Dump(EventId, Timestamp),
-    #[cfg(feature = "fusotao")]
-    ProvingPerfIndexCheck(EventId),
-}
-
-impl Default for Inspection {
-    fn default() -> Self {
-        Self::UpdateDepth
-    }
-}
-
-#[derive(Debug, Error)]
-pub enum EventsError {
-    #[error("Events execution thread interrupted")]
-    Interrupted,
-    #[error("Error occurs in sequence {0}: {1}")]
-    EventRejected(u64, anyhow::Error),
-}
 
 type EventExecutionResult = Result<(), EventsError>;
-type OutputChannel = Sender<Vec<output::Output>>;
-type DriverChannel = Receiver<sequence::Fusion>;
+type OutputChannel = Sender<Vec<Output>>;
+type DriverChannel = Receiver<Input>;
 
 pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data, ready: Arc<AtomicBool>) {
     std::thread::spawn(move || {
-        cfg_if! {
+        cfg_if::cfg_if! {
             if #[cfg(feature = "fusotao")] {
                 use crate::fusotao;
                 let (tx, rx) = std::sync::mpsc::channel();
@@ -185,13 +57,13 @@ pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data, ready: A
         loop {
             let fusion = recv.recv().unwrap();
             match fusion {
-                sequence::Fusion::R(watch) => {
-                    let (s, r) = (watch.session, watch.req_id);
-                    if let Ok(inspection) = watch.try_into() {
-                        cfg_if! {
+                Input::NonModifier(whistle) => {
+                    let (s, r) = (whistle.session, whistle.req_id);
+                    if let Ok(inspection) = whistle.try_into() {
+                        cfg_if::cfg_if! {
                             if #[cfg(feature = "fusotao")] {
                                 do_inspect(inspection, &data, &prover).unwrap();
-                            }else {
+                            } else {
                                 do_inspect(inspection, &data).unwrap();
                             }
                         }
@@ -199,11 +71,11 @@ pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data, ready: A
                         server::publish(server::Message::with_payload(s, r, vec![]));
                     }
                 }
-                sequence::Fusion::W(seq) => {
+                Input::Modifier(seq) => {
                     let id = seq.id;
                     match seq.try_into() {
                         Ok(event) => {
-                            cfg_if! {
+                            cfg_if::cfg_if! {
                                 if #[cfg(feature = "fusotao")] {
                                     let result = handle_event(event, &mut data, &sender, &prover);
                                 } else {
@@ -250,7 +122,7 @@ fn handle_event(
                     id,
                     anyhow!("order can't be accepted"),
                 ))?;
-            cfg_if! {
+            cfg_if::cfg_if! {
                 if #[cfg(feature = "fusotao")] {
                     log::info!("predicate root=0x{} before applying {}", hex::encode(data.merkle_tree.root()), id);
                     let (ask_size, bid_size) = orderbook.size();
@@ -279,7 +151,7 @@ fn handle_event(
                 &mr,
                 time,
             );
-            cfg_if! {
+            cfg_if::cfg_if! {
                 if #[cfg(feature = "fusotao")] {
                     let (maker_fee, taker_fee) = (orderbook.maker_fee, orderbook.taker_fee);
                     prover.prove_trade_cmd(
@@ -315,7 +187,7 @@ fn handle_event(
                 .find_order(cmd.order_id)
                 .filter(|o| o.user == cmd.user_id)
                 .ok_or(EventsError::EventRejected(id, anyhow!("order not exists")))?;
-            cfg_if! {
+            cfg_if::cfg_if! {
                 if #[cfg(feature = "fusotao")] {
                     log::debug!("predicate root=0x{} before applying {}", hex::encode(data.merkle_tree.root()), id);
                     let size = orderbook.size();
@@ -335,7 +207,7 @@ fn handle_event(
                 &mr,
                 time,
             );
-            cfg_if! {
+            cfg_if::cfg_if! {
                 if #[cfg(feature = "fusotao")] {
                     prover.prove_trade_cmd(
                         data,
@@ -386,7 +258,7 @@ fn handle_event(
             Ok(())
         }
         Event::TransferOut(id, cmd, _) => {
-            cfg_if! {
+            cfg_if::cfg_if! {
                 if #[cfg(feature = "fusotao")] {
                     log::info!("predicate root=0x{} before applying {}", hex::encode(data.merkle_tree.root()), id);
                     let before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.currency);
@@ -423,7 +295,7 @@ fn handle_event(
             }
         }
         Event::TransferIn(id, cmd, _) => {
-            cfg_if! {
+            cfg_if::cfg_if! {
                 if #[cfg(feature = "fusotao")] {
                     if data.tvl + cmd.amount >= crate::core::max_number() {
                         let before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.currency);
@@ -609,47 +481,4 @@ fn chain_height() -> u32 {
         r.map_or(0u32, |b| b.header.number)
     })
     .unwrap_or(0u32)
-}
-
-#[test]
-pub fn test_serialize() {
-    use rust_decimal_macros::dec;
-
-    assert_eq!("{}", serde_json::to_string(&Accounts::new()).unwrap());
-    let mut account = Account::default();
-    account.insert(
-        100,
-        assets::Balance {
-            available: Amount::new(200, 1),
-            frozen: Amount::new(0, 0),
-        },
-    );
-    assert_eq!(
-        r#"{"100":{"available":"20.0","frozen":"0"}}"#,
-        serde_json::to_string(&account).unwrap()
-    );
-    assert_eq!(
-        r#"{"available":"0","frozen":"0"}"#,
-        serde_json::to_string(&assets::Balance {
-            available: Amount::new(0, 0),
-            frozen: Amount::new(0, 0),
-        })
-        .unwrap()
-    );
-
-    let mut data = Data::new();
-    let orderbook = OrderBook::new(
-        8,
-        8,
-        dec!(0.001),
-        dec!(0.001),
-        dec!(0.001),
-        dec!(0.001),
-        1,
-        dec!(0.1),
-        dec!(0.1),
-        true,
-        true,
-    );
-    data.orderbooks.insert((0, 1), orderbook);
 }

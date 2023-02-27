@@ -1676,7 +1676,7 @@ mod test {
             )
             .unwrap()),
         };
-        let (b, q, p) = ml.try_get_orderpage().unwrap();
+        let _ = ml.try_get_orderpage().unwrap();
         assert_eq!(
             super::to_decimal_represent(ml.split_old_to_sum()).unwrap(),
             dec!(1476.5)
@@ -1728,7 +1728,7 @@ mod test {
             )
             .unwrap()),
         };
-        let best_price = MerkleLeaf {
+        let _best_price = MerkleLeaf {
             key: hex::decode("020000000001000000").unwrap(),
             old_v: cv(hex::decode(
                 "0000470ea1b0f800000000000000000000009108c73695000000000000000000",
@@ -1994,7 +1994,7 @@ mod test {
             } else {
                 // filled or conditional_canceled
                 let vanity_maker = leaves.last().unwrap();
-                let (b, q, p) = vanity_maker.try_get_orderpage().unwrap();
+                let (b, q, _p) = vanity_maker.try_get_orderpage().unwrap();
                 assert!(b == base && q == quote,);
                 assert!(best_bid1 == best_bid0,);
                 let prv_is_maker = vanity_maker.split_old_to_sum();
@@ -2057,13 +2057,13 @@ mod test {
         assert!(ask_delta + bid_delta != 0,);
         assert!(ask_delta & bid_delta == 0,);
 
-        let (b, id) = leaves[1].try_get_account().unwrap();
+        let (b, _id) = leaves[1].try_get_account().unwrap();
         assert!(b == base,);
         let (ba0, bf0) = leaves[1].split_old_to_u128();
         let (ba1, bf1) = leaves[1].split_new_to_u128();
         assert!(ba0 + bf0 == ba1 + bf1,);
 
-        let (q, id) = leaves[2].try_get_account().unwrap();
+        let (q, _id) = leaves[2].try_get_account().unwrap();
         assert!(q == quote,);
         let (qa0, qf0) = leaves[2].split_old_to_u128();
         let (qa1, qf1) = leaves[2].split_new_to_u128();

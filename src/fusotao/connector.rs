@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{config::C, fusotao::*, sequence};
+use crate::{config::C, fusotao::*, input::Command, sequence};
 use anyhow::anyhow;
 use cfg_if::cfg_if;
 use chrono::Local;
@@ -205,7 +205,7 @@ impl FusoConnector {
         signer: &FusoAccountId,
         at: Option<u32>,
         decoder: &EventsDecoder,
-    ) -> anyhow::Result<Vec<sequence::Command>> {
+    ) -> anyhow::Result<Vec<Command>> {
         use hex::ToHex;
         let hash = api.get_block_hash(at).map_err(|_| anyhow!(""))?;
         let key = api
@@ -223,28 +223,28 @@ impl FusoConnector {
                     "TokenHosted" => {
                         let decoded = TokenHostedEvent::decode(&mut &raw.data[..]).unwrap();
                         if &decoded.dominator == signer {
-                            let mut cmd = sequence::Command::default();
-                            cmd.cmd = sequence::TRANSFER_IN;
+                            let mut cmd = Command::default();
+                            cmd.cmd = crate::cmd::TRANSFER_IN;
                             cmd.currency = Some(decoded.token_id);
                             cmd.amount = to_decimal_represent(decoded.amount);
                             cmd.user_id = Some(format!("{}", decoded.fund_owner));
                             cmd.block_number = at.or(Some(0));
                             cmd.extrinsic_hash =
-                                hash.map(|h| h.encode_hex()).or(Some("abcdef".to_string()));
+                                hash.map(|h| h.encode_hex()).or(Some("".to_string()));
                             cmds.push(cmd);
                         }
                     }
                     "TokenRevoked" => {
                         let decoded = TokenRevokedEvent::decode(&mut &raw.data[..]).unwrap();
                         if &decoded.dominator == signer {
-                            let mut cmd = sequence::Command::default();
-                            cmd.cmd = sequence::TRANSFER_OUT;
+                            let mut cmd = Command::default();
+                            cmd.cmd = crate::cmd::TRANSFER_OUT;
                             cmd.currency = Some(decoded.token_id);
                             cmd.amount = to_decimal_represent(decoded.amount);
                             cmd.user_id = Some(format!("{}", decoded.fund_owner));
                             cmd.block_number = at.or(Some(0));
                             cmd.extrinsic_hash =
-                                hash.map(|h| h.encode_hex()).or(Some("abcdef".to_string()));
+                                hash.map(|h| h.encode_hex()).or(Some("".to_string()));
                             cmds.push(cmd);
                         }
                     }
@@ -278,10 +278,10 @@ impl FusoConnector {
         api: &FusoApi,
         who: &FusoAccountId,
         decoder: &EventsDecoder,
-    ) -> anyhow::Result<(Vec<sequence::Command>, u32)> {
+    ) -> anyhow::Result<(Vec<Command>, u32)> {
         let finalized_block_hash = api
             .get_finalized_head()?
-            .ok_or(anyhow!("finalized heads couldn't be found"))?;
+            .ok_or(anyhow!("finalized headers couldn't be found"))?;
         let finalized_block: sub_api::SignedBlock<FusoBlock> = api
             .get_signed_block(Some(finalized_block_hash))?
             .ok_or(anyhow!(
@@ -339,7 +339,7 @@ impl FusoConnector {
             return Ok(());
         }
         log::info!(
-            "start submit_proofs, time is {} now",
+            "start to submit_proofs at {}",
             Local::now().timestamp_millis()
         );
         cfg_if! {
@@ -351,7 +351,7 @@ impl FusoConnector {
             sub_api::compose_extrinsic!(api, "Verifier", "verify", batch);
         let hash = api
             .send_extrinsic(xt.hex_encode(), sub_api::XtStatus::InBlock)
-            .map_err(|e| anyhow::anyhow!("submit proofs failed, {:?}", e))?;
+            .map_err(|e| anyhow::anyhow!("submitting proofs failed, {:?}", e))?;
         log::info!(
             "end submit_proofs time is {} now",
             Local::now().timestamp_millis()

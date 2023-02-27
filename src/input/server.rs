@@ -14,7 +14,8 @@
 
 use crate::{
     config::C,
-    sequence::{Command, Fusion, Watch},
+    input::{Command, Input},
+    whistle::Whistle,
 };
 use async_std::{
     net::{TcpListener, TcpStream, ToSocketAddrs},
@@ -107,14 +108,14 @@ const fn has_next_frame(header: u64) -> bool {
     (header & _NXT_FRM_MASK) == _NXT_FRM_MASK
 }
 
-pub fn init(sender: Sender<Fusion>, ready: Arc<AtomicBool>) {
+pub fn init(sender: Sender<Input>, ready: Arc<AtomicBool>) {
     let future = accept(&C.server.bind_addr, sender, ready);
     task::block_on(future).unwrap();
 }
 
 async fn accept(
     addr: impl ToSocketAddrs,
-    cmd_acc: Sender<Fusion>,
+    cmd_acc: Sender<Input>,
     ready: Arc<AtomicBool>,
 ) -> Result<()> {
     let listener = TcpListener::bind(addr).await?;
@@ -130,7 +131,7 @@ async fn accept(
     Ok(())
 }
 
-fn register(session: u64, stream: TcpStream, cmd_acc: Sender<Fusion>) {
+fn register(session: u64, stream: TcpStream, cmd_acc: Sender<Input>) {
     let (tx, rx) = mpsc::unbounded();
     match stream.set_nodelay(true) {
         Ok(_) => {}
@@ -155,7 +156,7 @@ async fn write_loop(
 }
 
 /// if r: (query order/assets) validate to sequence push to cmd_acc
-async fn handle_req(upstream: &mut Sender<Fusion>, session: u64, req_id: u64, json: String) {
+async fn handle_req(upstream: &mut Sender<Input>, session: u64, req_id: u64, json: String) {
     let cmd: Command = match serde_json::from_str(&json) {
         Ok(cmd) => cmd,
         Err(_) => {
@@ -165,11 +166,12 @@ async fn handle_req(upstream: &mut Sender<Fusion>, session: u64, req_id: u64, js
             return;
         }
     };
+    // TODO
     if !cmd.is_read() {
         return;
     }
     upstream
-        .send(Fusion::R(Watch {
+        .send(Input::NonModifier(Whistle {
             session,
             req_id,
             cmd,
@@ -177,7 +179,7 @@ async fn handle_req(upstream: &mut Sender<Fusion>, session: u64, req_id: u64, js
         .unwrap();
 }
 
-async fn read_loop(cmd_acc: Sender<Fusion>, session: u64, stream: Arc<TcpStream>) -> Result<()> {
+async fn read_loop(cmd_acc: Sender<Input>, session: u64, stream: Arc<TcpStream>) -> Result<()> {
     let mut cmd_acc = cmd_acc;
     let mut stream = &*stream;
     let mut buf = Vec::<u8>::with_capacity(4096);
