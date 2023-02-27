@@ -27,7 +27,7 @@ pub use whistle::*;
 
 /// Input
 ///     sequence = command + database_header -> event
-///     watch = command + network_header -> inspection
+///     whistle = command + network_header -> inspection
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
 pub enum Input {
     Modifier(Sequence),
