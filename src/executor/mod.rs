@@ -19,8 +19,7 @@ pub mod orderbook;
 
 use crate::{
     core::*,
-    event::*,
-    input::Input,
+    input::{Event, EventsError, Input, Inspection},
     orderbook::*,
     output::{self, Output},
     sequence, server, snapshot,

@@ -26,7 +26,7 @@ use std::{
 };
 
 use crate::fusotao::connector::FusoConnector;
-use crate::{config::C, core::*, event::*};
+use crate::{config::C, core::*, sequence::*};
 pub use prover::Prover;
 use sp_core::Pair;
 use std::sync::atomic::Ordering;

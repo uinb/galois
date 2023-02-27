@@ -26,6 +26,7 @@ use std::{
     },
     time::{Duration, SystemTime},
 };
+use thiserror::Error;
 
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
 pub struct Sequence {
@@ -337,27 +338,186 @@ pub const PENDING: u32 = 0;
 pub const ACCEPTED: u32 = 1;
 pub const ERROR: u32 = 2;
 
-#[test]
-#[cfg(not(feature = "fusotao"))]
-pub fn test_deserialize_cmd() {
-    let transfer_in = r#"{"currency":100, "amount":"100.0", "user_id":"0x0000000000000000000000000000000000000000000000000000000000000001", "cmd":11}"#;
-    let e = serde_json::from_str::<Command>(transfer_in).unwrap();
-    let s: anyhow::Result<Event> = Sequence {
-        id: 1,
-        cmd: e,
-        status: 0,
-        timestamp: 0,
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub enum Event {
+    Limit(EventId, LimitCmd, Timestamp),
+    Cancel(EventId, CancelCmd, Timestamp),
+    TransferOut(EventId, AssetsCmd, Timestamp),
+    TransferIn(EventId, AssetsCmd, Timestamp),
+    UpdateSymbol(EventId, SymbolCmd, Timestamp),
+    #[cfg(not(feature = "fusotao"))]
+    CancelAll(EventId, Symbol, Timestamp),
+}
+
+impl Event {
+    pub fn is_trading_cmd(&self) -> bool {
+        matches!(self, Event::Limit(_, _, _)) || matches!(self, Event::Cancel(_, _, _))
     }
-    .try_into();
-    assert!(s.is_ok());
-    let bid_limit = r#"{"quote":100, "base":101, "cmd":1, "price":"10.0", "amount":"0.5", "order_id":1, "user_id":"0x0000000000000000000000000000000000000000000000000000000000000001"}"#;
-    let e = serde_json::from_str::<Command>(bid_limit).unwrap();
-    let s: anyhow::Result<Event> = Sequence {
-        id: 2,
-        cmd: e,
-        status: 0,
-        timestamp: 0,
+
+    pub fn is_assets_cmd(&self) -> bool {
+        matches!(self, Event::TransferIn(_, _, _)) || matches!(self, Event::TransferOut(_, _, _))
     }
-    .try_into();
-    assert!(s.is_ok());
+
+    pub fn get_id(&self) -> u64 {
+        match self {
+            Event::Limit(id, _, _) => *id,
+            Event::Cancel(id, _, _) => *id,
+            Event::TransferOut(id, _, _) => *id,
+            Event::TransferIn(id, _, _) => *id,
+            Event::UpdateSymbol(id, _, _) => *id,
+            #[cfg(not(feature = "fusotao"))]
+            Event::CancelAll(id, _, _) => *id,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LimitCmd {
+    pub symbol: Symbol,
+    pub user_id: UserId,
+    pub order_id: OrderId,
+    pub price: Price,
+    pub amount: Amount,
+    pub ask_or_bid: AskOrBid,
+    #[cfg(feature = "fusotao")]
+    pub nonce: u32,
+    #[cfg(feature = "fusotao")]
+    pub signature: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CancelCmd {
+    pub symbol: Symbol,
+    pub user_id: UserId,
+    pub order_id: OrderId,
+    #[cfg(feature = "fusotao")]
+    pub nonce: u32,
+    #[cfg(feature = "fusotao")]
+    pub signature: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum InOrOut {
+    In,
+    Out,
+}
+
+impl std::convert::TryFrom<u32> for InOrOut {
+    type Error = anyhow::Error;
+
+    fn try_from(x: u32) -> anyhow::Result<Self> {
+        match x {
+            crate::cmd::TRANSFER_IN => Ok(InOrOut::In),
+            crate::cmd::TRANSFER_OUT => Ok(InOrOut::Out),
+            _ => Err(anyhow::anyhow!("")),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AssetsCmd {
+    pub user_id: UserId,
+    pub in_or_out: InOrOut,
+    pub currency: Currency,
+    pub amount: Amount,
+    #[cfg(feature = "fusotao")]
+    pub block_number: u32,
+    #[cfg(feature = "fusotao")]
+    pub extrinsic_hash: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SymbolCmd {
+    pub symbol: Symbol,
+    pub open: bool,
+    pub base_scale: Scale,
+    pub quote_scale: Scale,
+    pub taker_fee: Fee,
+    pub maker_fee: Fee,
+    pub base_maker_fee: Fee,
+    pub base_taker_fee: Fee,
+    pub fee_times: u32,
+    pub min_amount: Amount,
+    pub min_vol: Vol,
+    pub enable_market_order: bool,
+}
+
+#[derive(Debug, Error)]
+pub enum EventsError {
+    #[error("Events execution thread interrupted")]
+    Interrupted,
+    #[error("Error occurs in sequence {0}: {1}")]
+    EventRejected(u64, anyhow::Error),
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use rust_decimal_macros::dec;
+
+    #[test]
+    pub fn test_serialize() {
+        assert_eq!("{}", serde_json::to_string(&Accounts::new()).unwrap());
+        let mut account = Account::default();
+        account.insert(
+            100,
+            crate::assets::Balance {
+                available: Amount::new(200, 1),
+                frozen: Amount::new(0, 0),
+            },
+        );
+        assert_eq!(
+            r#"{"100":{"available":"20.0","frozen":"0"}}"#,
+            serde_json::to_string(&account).unwrap()
+        );
+        assert_eq!(
+            r#"{"available":"0","frozen":"0"}"#,
+            serde_json::to_string(&crate::assets::Balance {
+                available: Amount::new(0, 0),
+                frozen: Amount::new(0, 0),
+            })
+            .unwrap()
+        );
+
+        let mut data = Data::new();
+        let orderbook = crate::orderbook::OrderBook::new(
+            8,
+            8,
+            dec!(0.001),
+            dec!(0.001),
+            dec!(0.001),
+            dec!(0.001),
+            1,
+            dec!(0.1),
+            dec!(0.1),
+            true,
+            true,
+        );
+        data.orderbooks.insert((0, 1), orderbook);
+    }
+
+    #[test]
+    #[cfg(not(feature = "fusotao"))]
+    pub fn test_deserialize_cmd() {
+        let transfer_in = r#"{"currency":100, "amount":"100.0", "user_id":"0x0000000000000000000000000000000000000000000000000000000000000001", "cmd":11}"#;
+        let e = serde_json::from_str::<Command>(transfer_in).unwrap();
+        let s: anyhow::Result<Event> = Sequence {
+            id: 1,
+            cmd: e,
+            status: 0,
+            timestamp: 0,
+        }
+        .try_into();
+        assert!(s.is_ok());
+        let bid_limit = r#"{"quote":100, "base":101, "cmd":1, "price":"10.0", "amount":"0.5", "order_id":1, "user_id":"0x0000000000000000000000000000000000000000000000000000000000000001"}"#;
+        let e = serde_json::from_str::<Command>(bid_limit).unwrap();
+        let s: anyhow::Result<Event> = Sequence {
+            id: 2,
+            cmd: e,
+            status: 0,
+            timestamp: 0,
+        }
+        .try_into();
+        assert!(s.is_ok());
+    }
 }

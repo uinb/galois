@@ -16,12 +16,10 @@ use crate::core::*;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-pub mod event;
 pub mod sequence;
 pub mod server;
 pub mod whistle;
 
-pub use event::*;
 pub use sequence::*;
 pub use whistle::*;
 

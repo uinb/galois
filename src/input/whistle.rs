@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{cmd::*, core::*, Command, Inspection};
+use crate::{cmd::*, core::*, Command};
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -119,5 +119,29 @@ impl Whistle {
             req_id: 0,
             cmd,
         }
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Clone, Deserialize, Serialize, Copy)]
+pub enum Inspection {
+    ConfirmAll(u64, u64),
+    UpdateDepth,
+    QueryOrder(Symbol, OrderId, u64, u64),
+    QueryBalance(UserId, Currency, u64, u64),
+    QueryAccounts(UserId, u64, u64),
+    #[cfg(feature = "fusotao")]
+    QueryProvingPerfIndex(u64, u64),
+    QueryExchangeFee(Symbol, u64, u64),
+    #[cfg(feature = "fusotao")]
+    QueryScanHeight(u64, u64),
+    // special: `EventId` means dump at `EventId`
+    Dump(EventId, Timestamp),
+    #[cfg(feature = "fusotao")]
+    ProvingPerfIndexCheck(EventId),
+}
+
+impl Default for Inspection {
+    fn default() -> Self {
+        Self::UpdateDepth
     }
 }
