@@ -3,7 +3,7 @@
 <p align="center">Granted by<br><img src="https://cryptologos.cc/logos/near-protocol-near-logo.png?v=014" alt="NEAR Grants Program" width="80" height="80"></p>
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg)](#LICENSE)
-[![GitHub Workflow Status (branch)](https://img.shields.io/github/workflow/status/uinb/galois/Rust%20CI/master)](https://github.com/uinb/galois/actions?query=branch%3Amaster)
+[![GitHub Workflow Status (branch)](https://github.com/uinb/galois/actions/workflows/build.yml/badge.svg)](https://github.com/uinb/galois/actions?query=branch%3Amaster)
 
   
 ## Introduction
@@ -25,10 +25,12 @@ events(mysql)  >>  |  galois  |  >> match results(mysql)/best n price(redis)
                        
 ```
 
-Galois works as a component of [Fusotao](https://github.com/uinb/fusotao) which is being WIP. The version without `fusotao` feature enabled can be used for building a high performance exchange with broker(refer to [Guide to implement a broker](#)). Buttttt, we *strongly* recommend you shall hire an expert before you do the business, seriously.
+Galois works as the prover(a.k.a Proof of Matches) component of [Fusotao](https://github.com/uinb/fusotao). The version without `fusotao` feature enabled can be used for building a high performance exchange with broker(refer to [Guide to implement a broker](#)). Buttttt, we *strongly* recommend you shall hire an expert before you do the business, seriously.
 
 
 ## Getting Started
+
+[Fusotao Docs](https://docs.fusotao.org/)
 
 ### Dependencies
 

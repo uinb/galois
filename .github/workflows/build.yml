@@ -1,10 +1,10 @@
-name: Rust CI 
+name: Build
 
 on:
   push:
-    branches: [ master, offchain ]
+    branches: [ master ]
   pull_request:
-    branches: [ master, offchain ]
+    branches: [ master ]
 
 jobs:
   build:
@@ -20,3 +20,15 @@ jobs:
         with:
           command: test
           args: --all-features
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly-2023-01-29
+          override: true
+          components: rustfmt, clippy
+      - uses: actions-rs/cargo@v1
+        with:
+          command: test

@@ -19,8 +19,7 @@ use chrono::Local;
 use memmap::MmapMut;
 use node_api::events::{EventsDecoder, Raw};
 use parity_scale_codec::Decode;
-use sp_core::sr25519::Public;
-use sp_core::Pair;
+use sp_core::{sr25519::Public, Pair};
 use std::{
     convert::TryInto,
     fs::OpenOptions,
@@ -173,9 +172,11 @@ impl FusoConnector {
         );
         let key = api
             .metadata
-            .storage_map_key::<FusoAccountId>("Verifier", "Dominators", *who)?;
+            .storage_map_key::<FusoAccountId>("Verifier", "Dominators", *who)
+            .map_err(|_| anyhow!(""))?;
         let payload = api
-            .get_opaque_storage_by_key_hash(key, None)?
+            .get_opaque_storage_by_key_hash(key, None)
+            .map_err(|_| anyhow!(""))?
             .ok_or(anyhow!(""))?;
         let result = Dominator::decode(&mut payload.as_slice())?;
         log::info!(
@@ -206,8 +207,11 @@ impl FusoConnector {
         decoder: &EventsDecoder,
     ) -> anyhow::Result<Vec<sequence::Command>> {
         use hex::ToHex;
-        let hash = api.get_block_hash(at)?;
-        let key = api.metadata.storage_value_key("System", "Events")?;
+        let hash = api.get_block_hash(at).map_err(|_| anyhow!(""))?;
+        let key = api
+            .metadata
+            .storage_value_key("System", "Events")
+            .map_err(|_| anyhow!(""))?;
         let payload = api.get_opaque_storage_by_key_hash(key, hash)?;
         let events = decoder
             .decode_events(&mut payload.unwrap_or(vec![]).as_slice())
@@ -343,7 +347,7 @@ impl FusoConnector {
                 let batch = Self::compress_proofs(batch);
             }
         }
-        let xt: sub_api::UncheckedExtrinsicV4<_> =
+        let xt: sub_api::UncheckedExtrinsicV4<_, _> =
             sub_api::compose_extrinsic!(api, "Verifier", "verify", batch);
         let hash = api
             .send_extrinsic(xt.hex_encode(), sub_api::XtStatus::InBlock)
