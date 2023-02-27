@@ -12,22 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::{
+    core::*,
+    db::{DB, REDIS},
+    matcher::*,
+    orderbook::{AskOrBid, Depth},
+};
+use mysql::{prelude::*, *};
+use redis::Commands;
 use std::{
     collections::HashMap,
     convert::Into,
     sync::mpsc::{Receiver, Sender},
     thread,
     time::Duration,
-};
-
-use mysql::{prelude::*, *};
-use redis::Commands;
-
-use crate::{
-    core::*,
-    db::{DB, REDIS},
-    matcher::*,
-    orderbook::{AskOrBid, Depth},
 };
 
 #[derive(Debug, Clone)]

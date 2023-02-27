@@ -188,16 +188,17 @@ mod test {
         assert_eq!(a.frozen, dec!(0.00011));
     }
 
+    use crate::input::Command;
     fn help(all: &mut Accounts, json: &str) {
-        let cmd: crate::sequence::Command = serde_json::from_str(json).unwrap();
-        if cmd.cmd == crate::sequence::TRANSFER_IN {
+        let cmd: Command = serde_json::from_str(json).unwrap();
+        if cmd.cmd == crate::cmd::TRANSFER_IN {
             add_to_available(
                 all,
                 &UserId::from_str(&cmd.user_id.unwrap()).unwrap(),
                 cmd.currency.unwrap(),
                 cmd.amount.unwrap(),
             );
-        } else if cmd.cmd == crate::sequence::TRANSFER_OUT {
+        } else if cmd.cmd == crate::cmd::TRANSFER_OUT {
             deduct_available(
                 all,
                 &UserId::from_str(&cmd.user_id.unwrap()).unwrap(),

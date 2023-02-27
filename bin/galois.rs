@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use galois::{config, event, output, sequence, server, snapshot};
+use galois::{config, executor, output, sequence, server, snapshot};
 use std::sync::{atomic, mpsc, Arc};
 
 fn main() {
@@ -23,7 +23,7 @@ fn main() {
     let (event_tx, event_rx) = mpsc::channel();
     output::init(output_tx.clone(), output_rx);
     let handler_ready = Arc::new(atomic::AtomicBool::new(false));
-    event::init(event_rx, output_tx, coredump, handler_ready.clone());
+    executor::init(event_rx, output_tx, coredump, handler_ready.clone());
     while !handler_ready.load(atomic::Ordering::Relaxed) {
         std::thread::sleep(std::time::Duration::from_millis(500));
     }

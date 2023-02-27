@@ -2,3 +2,4 @@
 galois.toml
 !Cargo.toml
 .idea
+.DS_Store
