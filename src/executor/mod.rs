@@ -63,7 +63,7 @@ pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data, ready: A
                         cfg_if::cfg_if! {
                             if #[cfg(feature = "fusotao")] {
                                 do_inspect(inspection, &data, &prover).unwrap();
-                            }else {
+                            } else {
                                 do_inspect(inspection, &data).unwrap();
                             }
                         }
