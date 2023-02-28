@@ -119,13 +119,12 @@ impl WrapperTypeEncode for UserId {}
 /// 2. new or from public
 pub fn init(rx: Receiver<Proof>) -> anyhow::Result<()> {
     persistence::init(rx);
-    if C.dry_run.is_some() {
-        return Ok(Default::default());
+    if C.dry_run.is_none() {
+        let connector = FusoConnector::new()?;
+        connector.start_submitting()?;
+        connector.start_scanning()?;
     }
-    let connector = FusoConnector::new()?;
-    connector.start_submitting()?;
-    connector.start_scanning()?;
-    log::info!("fusotao prover initialized");
+    log::info!("prover initialized");
     Ok(())
 }
 

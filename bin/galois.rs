@@ -20,7 +20,7 @@ fn start() {
     let (id, coredump) = snapshot::load().unwrap();
     let (output_tx, output_rx) = mpsc::channel();
     let (event_tx, event_rx) = mpsc::channel();
-    output::init(output_tx.clone(), output_rx);
+    output::init(output_rx);
     let handler_ready = Arc::new(atomic::AtomicBool::new(false));
     executor::init(event_rx, output_tx, coredump, handler_ready.clone());
     while !handler_ready.load(atomic::Ordering::Relaxed) {

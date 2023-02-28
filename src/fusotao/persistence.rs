@@ -29,7 +29,7 @@ pub fn init(rx: Receiver<Proof>) {
         };
         if C.dry_run.is_some() {
             if let Some(p) = proof {
-                println!("0x{}", &hex::encode(p.root));
+                log::info!("{}(dry-run) => 0x{}", p.event_id, &hex::encode(p.root));
             }
             continue;
         } else {

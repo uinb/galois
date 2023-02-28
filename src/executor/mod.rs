@@ -47,7 +47,7 @@ pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data, ready: A
         fusotao::init(rx).unwrap();
         let prover = Prover::new(tx);
         ready.store(true, Ordering::Relaxed);
-        log::info!("event handler initialized");
+        log::info!("executor initialized");
         loop {
             let fusion = recv.recv().unwrap();
             match fusion {

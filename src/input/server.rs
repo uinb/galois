@@ -109,9 +109,6 @@ const fn has_next_frame(header: u64) -> bool {
 }
 
 pub fn init(sender: Sender<Input>, ready: Arc<AtomicBool>) {
-    if C.dry_run.is_some() {
-        return;
-    }
     let future = accept(&C.server.bind_addr, sender, ready);
     task::block_on(future).unwrap();
 }
@@ -122,6 +119,7 @@ async fn accept(
     ready: Arc<AtomicBool>,
 ) -> Result<()> {
     let listener = TcpListener::bind(addr).await?;
+    log::info!("server initialized");
     let mut incoming = listener.incoming();
     let mut session = 0_u64;
     while let Some(stream) = incoming.next().await {
