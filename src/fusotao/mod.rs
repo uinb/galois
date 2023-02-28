@@ -118,10 +118,10 @@ impl WrapperTypeEncode for UserId {}
 /// 1. from_ss58check() or from_ss58check_with_version()
 /// 2. new or from public
 pub fn init(rx: Receiver<Proof>) -> anyhow::Result<()> {
+    persistence::init(rx);
     if C.dry_run.is_some() {
         return Ok(Default::default());
     }
-    persistence::init(rx);
     let connector = FusoConnector::new()?;
     connector.start_submitting()?;
     connector.start_scanning()?;
