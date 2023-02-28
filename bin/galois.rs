@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use clap::Parser;
 use galois::{config, executor, output, sequence, server, snapshot};
 use std::sync::{atomic, mpsc, Arc};
 
-fn main() {
-    print_banner();
-    lazy_static::initialize(&config::C);
+fn start() {
     let (id, coredump) = snapshot::load().unwrap();
     let (output_tx, output_rx) = mpsc::channel();
     let (event_tx, event_rx) = mpsc::channel();
@@ -32,18 +31,16 @@ fn main() {
     server::init(event_tx, source_ready);
 }
 
-fn print_banner() {
-    const BANNER: &str = r#"
-                 **       **
-   *******     ******     **               **
-  ***               **    **     *****     **    ******
- **              *****    **   ***   ***        **    *
- **            *******    **   **     **   **   **
- **    *****  **    **    **   *       *   **    **
-  **     ***  **    **    **   **     **   **     ****
-   *********   **  ****   **    *******    **        **
-      *    *    ****  *   **      ***      **    ** ***
-                                                  ****
-"#;
-    println!("{}", BANNER);
+fn main() {
+    lazy_static::initialize(&config::C);
+    let opts = config::GaloisCli::parse();
+    match opts.sub {
+        Some(config::SubCmd::EncryptConfig) => {
+            config::print_enc_config_file(config::C.clone()).unwrap();
+            return;
+        }
+        None => {
+            start();
+        }
+    }
 }
