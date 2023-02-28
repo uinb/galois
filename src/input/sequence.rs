@@ -216,7 +216,7 @@ pub fn init(sender: Sender<Input>, id: u64, startup: Arc<AtomicBool>) {
                     Some(0) => {}
                     Some(n) => {
                         if n > id {
-                            return;
+                            std::thread::park();
                         }
                     }
                     None => {}
