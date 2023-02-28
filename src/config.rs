@@ -256,27 +256,27 @@ fn init_config(toml: &str, key: Option<String>) -> anyhow::Result<Config> {
 #[cfg(not(feature = "fusotao"))]
 pub fn test_default() {
     let toml = r#"
-[server]
-bind_addr = "127.0.0.1:8097"
-[mysql]
-url = "mysql://username:password@localhost:3306/galois"
-[redis]
-url = "redis://localhost:6379/0"
-[sequence]
-checkpoint = 100000
-coredump_dir = "/tmp/snapshot"
-batch_size = 1000
-dump_mode = "disk"
-fetch_intervel_ms = 5
-enable_from_genesis = true
-[log]
-[log.appenders.console]
-kind = "console"
-[log.root]
-level = "info"
-appenders = ["console"]
-"#;
-    let config = init_config(&toml).unwrap();
+        [server]
+        bind_addr = "127.0.0.1:8097"
+        [mysql]
+        url = "mysql://username:password@localhost:3306/galois"
+        [redis]
+        url = "redis://localhost:6379/0"
+        [sequence]
+        checkpoint = 100000
+        coredump_dir = "/tmp/snapshot"
+        batch_size = 1000
+        dump_mode = "disk"
+        fetch_intervel_ms = 5
+        enable_from_genesis = true
+        [log]
+        [log.appenders.console]
+        kind = "console"
+        [log.root]
+        level = "info"
+        appenders = ["console"]
+    "#;
+    let config = init_config(&toml, None).unwrap();
     let mysql_opts = mysql::Opts::from_url(&config.mysql.url).unwrap();
     assert_eq!("password", mysql_opts.get_pass().unwrap());
 }
