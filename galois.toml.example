@@ -19,4 +19,5 @@ node_url = "ws://localhost:9944"
 key_seed = "//Alice"
 proof_batch_limit = 20
 claim_block = 1
+compress_proofs = true
 fee_adjust_threshold = 1000

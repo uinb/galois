@@ -171,7 +171,6 @@ impl Maker {
 pub struct Match {
     pub maker: Vec<Maker>,
     pub taker: Taker,
-    #[cfg(feature = "fusotao")]
     pub page_delta: std::collections::BTreeMap<Price, (Amount, Amount)>,
 }
 
@@ -184,13 +183,10 @@ pub fn execute_limit(
     ask_or_bid: AskOrBid,
 ) -> Match {
     book.update_executed_order_id(order_id);
-    cfg_if::cfg_if! {
-        if #[cfg(feature = "fusotao")] {
-            use rust_decimal::prelude::Zero;
-            let mut max_makers = 20u32;
-            let mut page_delta = std::collections::BTreeMap::<Price, (Amount, Amount)>::new();
-        }
-    }
+    use rust_decimal::prelude::Zero;
+    // TODO move to config
+    let mut max_makers = 20u32;
+    let mut page_delta = std::collections::BTreeMap::<Price, (Amount, Amount)>::new();
     let mut makers = Vec::<Maker>::new();
     let mut order = Order::new(order_id, user_id, price, amount);
     loop {
@@ -198,31 +194,15 @@ pub fn execute_limit(
             return Match {
                 maker: makers,
                 taker: Taker::taker(order, ask_or_bid, State::Filled),
-                #[cfg(feature = "fusotao")]
                 page_delta,
             };
         }
         if let Some(mut best) = book.get_best_if_match(ask_or_bid, &order.price) {
             let page = best.get_mut();
-            let (mut traded, interrupted) = take(
-                page,
-                &mut order,
-                #[cfg(feature = "fusotao")]
-                &mut max_makers,
-            );
-            cfg_if::cfg_if! {
-                if #[cfg(feature = "fusotao")] {
-                    let taking_at_page = traded.iter().map(|o| o.filled).sum::<Amount>();
-                    if !taking_at_page.is_zero() {
-                        page_delta.insert(
-                            page.price,
-                            (
-                                taking_at_page + page.amount,
-                                page.amount,
-                            ),
-                        );
-                    }
-                }
+            let (mut traded, interrupted) = take(page, &mut order, &mut max_makers);
+            let taking_at_page = traded.iter().map(|o| o.filled).sum::<Amount>();
+            if !taking_at_page.is_zero() {
+                page_delta.insert(page.price, (taking_at_page + page.amount, page.amount));
             }
             if page.is_empty() {
                 best.remove();
@@ -238,19 +218,15 @@ pub fn execute_limit(
                 return Match {
                     taker: Taker::taker(order, ask_or_bid, State::ConditionallyCanceled),
                     maker: makers,
-                    #[cfg(feature = "fusotao")]
                     page_delta,
                 };
             }
         } else {
-            cfg_if::cfg_if! {
-                if #[cfg(feature = "fusotao")] {
-                    let size_before = book.get_page_size(&order.price).unwrap_or(Amount::zero());
-                    page_delta.entry(order.price)
-                        .and_modify(|v| v.1 += order.unfilled)
-                        .or_insert((size_before, size_before + order.unfilled));
-                }
-            }
+            let size_before = book.get_page_size(&order.price).unwrap_or(Amount::zero());
+            page_delta
+                .entry(order.price)
+                .and_modify(|v| v.1 += order.unfilled)
+                .or_insert((size_before, size_before + order.unfilled));
             book.insert(order.clone(), ask_or_bid);
             return Match {
                 taker: match makers.is_empty() {
@@ -258,26 +234,17 @@ pub fn execute_limit(
                     false => Taker::taker(order, ask_or_bid, State::PartiallyFilled),
                 },
                 maker: makers,
-                #[cfg(feature = "fusotao")]
                 page_delta,
             };
         }
     }
 }
 
-fn take(
-    page: &mut OrderPage,
-    taker: &mut Order,
-    #[cfg(feature = "fusotao")] limit: &mut u32,
-) -> (Vec<Maker>, bool) {
+fn take(page: &mut OrderPage, taker: &mut Order, limit: &mut u32) -> (Vec<Maker>, bool) {
     let mut matches = Vec::<Maker>::new();
     while !taker.is_filled() && !page.is_empty() {
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "fusotao")] {
-                if *limit == 0u32 {
-                    return (matches, true);
-                }
-            }
+        if *limit == 0u32 {
+            return (matches, true);
         }
         let mut oldest = page.orders.entries().next().unwrap();
         if oldest.get().user == taker.user {
@@ -294,11 +261,7 @@ fn take(
         };
         taker.fill(m.filled);
         page.decr_size(&m.filled);
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "fusotao")] {
-                *limit -= 1;
-            }
-        }
+        *limit -= 1;
         matches.push(m);
     }
     (matches, false)
@@ -306,17 +269,17 @@ fn take(
 
 pub fn cancel(orderbook: &mut OrderBook, order_id: u64) -> Option<Match> {
     orderbook.remove(order_id).map(|(order, from)| {
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "fusotao")] {
-                use rust_decimal::prelude::Zero;
-                let after_removed = orderbook.get_page_size(&order.price).unwrap_or(Amount::zero());
-                let page_delta = std::collections::BTreeMap::from([(order.price, (after_removed + order.unfilled, after_removed))]);
-            }
-        }
+        use rust_decimal::prelude::Zero;
+        let after_removed = orderbook
+            .get_page_size(&order.price)
+            .unwrap_or(Amount::zero());
+        let page_delta = std::collections::BTreeMap::from([(
+            order.price,
+            (after_removed + order.unfilled, after_removed),
+        )]);
         Match {
             maker: vec![],
             taker: Taker::taker(order, from, State::Canceled),
-            #[cfg(feature = "fusotao")]
             page_delta,
         }
     })
@@ -647,7 +610,6 @@ mod test {
         assert!(book.find_order(1003).is_none());
     }
 
-    #[cfg(feature = "fusotao")]
     #[test]
     pub fn test_max_makers() {
         let base_scale = 5;

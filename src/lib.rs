@@ -23,7 +23,6 @@ pub mod config;
 pub mod core;
 pub mod db;
 pub mod executor;
-#[cfg(feature = "fusotao")]
 pub mod fusotao;
 pub mod input;
 pub mod output;

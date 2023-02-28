@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use cfg_if::cfg_if;
 use clap::Parser;
 use lazy_static::lazy_static;
 use log4rs::config::{Logger, RawConfig as LogConfig};
@@ -65,7 +64,6 @@ pub struct Config {
     pub sequence: SequenceConfig,
     pub mysql: MysqlConfig,
     pub redis: RedisConfig,
-    #[cfg(feature = "fusotao")]
     pub fusotao: FusotaoConfig,
     #[serde(skip_serializing)]
     pub log: LogConfig,
@@ -116,17 +114,17 @@ impl EncryptedConfig for MysqlConfig {
     }
 }
 
-#[cfg(feature = "fusotao")]
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct FusotaoConfig {
     pub node_url: String,
     pub key_seed: String,
     pub claim_block: u32,
     pub proof_batch_limit: usize,
+    pub compress_proofs: bool,
+    // deprecated
     pub fee_adjust_threshold: u64,
 }
 
-#[cfg(feature = "fusotao")]
 impl Default for FusotaoConfig {
     fn default() -> Self {
         Self {
@@ -134,12 +132,12 @@ impl Default for FusotaoConfig {
             key_seed: String::from(""),
             claim_block: 1,
             proof_batch_limit: 20,
+            compress_proofs: true,
             fee_adjust_threshold: 10,
         }
     }
 }
 
-#[cfg(feature = "fusotao")]
 impl EncryptedConfig for FusotaoConfig {
     fn decrypt(&mut self, key: &str) -> anyhow::Result<()> {
         use magic_crypt::MagicCryptTrait;
@@ -206,11 +204,7 @@ pub fn print_enc_config_file(mut cfg: Config) -> anyhow::Result<()> {
         .ok_or(anyhow::anyhow!("env MAGIC_KEY not set"))?;
     cfg.mysql.encrypt(&key)?;
     cfg.redis.encrypt(&key)?;
-    cfg_if! {
-        if #[cfg(feature = "fusotao")] {
-            cfg.fusotao.encrypt(&key)?;
-        }
-    }
+    cfg.fusotao.encrypt(&key)?;
     println!("{}", toml::to_string(&cfg)?);
     Ok(())
 }
@@ -220,11 +214,7 @@ fn init_config(toml: &str, key: Option<String>) -> anyhow::Result<Config> {
     if let Some(key) = key {
         cfg.mysql.decrypt(&key)?;
         cfg.redis.decrypt(&key)?;
-        cfg_if! {
-            if #[cfg(feature = "fusotao")] {
-                cfg.fusotao.decrypt(&key)?;
-            }
-        }
+        cfg.fusotao.decrypt(&key)?;
     }
     // TODO replace with env_log
     let mut loggers = cfg
@@ -253,7 +243,6 @@ fn init_config(toml: &str, key: Option<String>) -> anyhow::Result<Config> {
 }
 
 #[test]
-#[cfg(not(feature = "fusotao"))]
 pub fn test_default() {
     let toml = r#"
         [server]
@@ -275,6 +264,13 @@ pub fn test_default() {
         [log.root]
         level = "info"
         appenders = ["console"]
+        [fusotao]
+        node_url = "ws://localhost:9944"
+        key_seed = "//Alice"
+        proof_batch_limit = 20
+        claim_block = 1
+        compress_proofs = true
+        fee_adjust_threshold = 1000
     "#;
     let config = init_config(&toml, None).unwrap();
     let mysql_opts = mysql::Opts::from_url(&config.mysql.url).unwrap();

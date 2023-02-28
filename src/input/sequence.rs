@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::fusotao::ToBlockChainNumeric;
 use crate::{cmd::*, config::C, core::*, db::DB, input::*, orderbook::AskOrBid};
 use anyhow::{anyhow, ensure};
 use mysql::{prelude::*, *};
@@ -52,12 +53,8 @@ impl TryInto<Event> for Sequence {
                     amount.is_sign_positive() && amount.scale() <= 7,
                     "invalid amount numeric"
                 );
-                cfg_if::cfg_if! {
-                    if #[cfg(features = "fusotao")] {
-                        let mut vol = amount.checked_mul(price).ok_or(anyhow!(""))?;
-                        ensure!(vol.validate(), "overflow");
-                    }
-                }
+                let vol = amount.checked_mul(price).ok_or(anyhow!(""))?;
+                ensure!(vol.validate(), "overflow");
                 let cmd = LimitCmd {
                     symbol: self.cmd.symbol().ok_or(anyhow!(""))?,
                     user_id: UserId::from_str(self.cmd.user_id.as_ref().ok_or(anyhow!(""))?)?,
@@ -65,9 +62,7 @@ impl TryInto<Event> for Sequence {
                     price,
                     amount,
                     ask_or_bid: AskOrBid::try_from(self.cmd.cmd)?,
-                    #[cfg(feature = "fusotao")]
                     nonce: self.cmd.nonce.ok_or(anyhow!(""))?,
-                    #[cfg(feature = "fusotao")]
                     signature: hex::decode(self.cmd.signature.ok_or(anyhow!(""))?)?,
                 };
                 Ok(Event::Limit(self.id, cmd, self.timestamp))
@@ -78,9 +73,7 @@ impl TryInto<Event> for Sequence {
                     symbol: self.cmd.symbol().ok_or(anyhow!(""))?,
                     user_id: UserId::from_str(self.cmd.user_id.as_ref().ok_or(anyhow!(""))?)?,
                     order_id: self.cmd.order_id.ok_or(anyhow!(""))?,
-                    #[cfg(feature = "fusotao")]
                     nonce: self.cmd.nonce.ok_or(anyhow!(""))?,
-                    #[cfg(feature = "fusotao")]
                     signature: hex::decode(self.cmd.signature.ok_or(anyhow!(""))?)?,
                 },
                 self.timestamp,
@@ -96,9 +89,7 @@ impl TryInto<Event> for Sequence {
                         .amount
                         .filter(|a| a.is_sign_positive())
                         .ok_or(anyhow!(""))?,
-                    #[cfg(feature = "fusotao")]
                     block_number: self.cmd.block_number.ok_or(anyhow!(""))?,
-                    #[cfg(feature = "fusotao")]
                     extrinsic_hash: hex::decode(self.cmd.extrinsic_hash.ok_or(anyhow!(""))?)?,
                 },
                 self.timestamp,
@@ -114,9 +105,7 @@ impl TryInto<Event> for Sequence {
                         .amount
                         .filter(|a| a.is_sign_positive())
                         .ok_or(anyhow!(""))?,
-                    #[cfg(feature = "fusotao")]
                     block_number: self.cmd.block_number.ok_or(anyhow!(""))?,
-                    #[cfg(feature = "fusotao")]
                     extrinsic_hash: hex::decode(self.cmd.extrinsic_hash.ok_or(anyhow!(""))?)?,
                 },
                 self.timestamp,
@@ -171,12 +160,11 @@ impl TryInto<Event> for Sequence {
                 },
                 self.timestamp,
             )),
-            #[cfg(not(feature = "fusotao"))]
-            CANCEL_ALL => Ok(Event::CancelAll(
-                self.id,
-                self.cmd.symbol().ok_or(anyhow!(""))?,
-                self.timestamp,
-            )),
+            // CANCEL_ALL => Ok(Event::CancelAll(
+            //     self.id,
+            //     self.cmd.symbol().ok_or(anyhow!(""))?,
+            //     self.timestamp,
+            // )),
             _ => Err(anyhow!("Unsupported Command")),
         }
     }
@@ -309,7 +297,6 @@ pub fn update_sequence_status(id: u64, status: u32) -> anyhow::Result<()> {
         .map_err(|_| anyhow!("retrieve mysql connection failed while update_sequence_status"))
 }
 
-#[cfg(feature = "fusotao")]
 pub fn insert_sequences(seq: &Vec<Command>) -> anyhow::Result<()> {
     if seq.is_empty() {
         return Ok(());
@@ -345,7 +332,6 @@ pub enum Event {
     TransferOut(EventId, AssetsCmd, Timestamp),
     TransferIn(EventId, AssetsCmd, Timestamp),
     UpdateSymbol(EventId, SymbolCmd, Timestamp),
-    #[cfg(not(feature = "fusotao"))]
     CancelAll(EventId, Symbol, Timestamp),
 }
 
@@ -365,7 +351,6 @@ impl Event {
             Event::TransferOut(id, _, _) => *id,
             Event::TransferIn(id, _, _) => *id,
             Event::UpdateSymbol(id, _, _) => *id,
-            #[cfg(not(feature = "fusotao"))]
             Event::CancelAll(id, _, _) => *id,
         }
     }
@@ -379,9 +364,7 @@ pub struct LimitCmd {
     pub price: Price,
     pub amount: Amount,
     pub ask_or_bid: AskOrBid,
-    #[cfg(feature = "fusotao")]
     pub nonce: u32,
-    #[cfg(feature = "fusotao")]
     pub signature: Vec<u8>,
 }
 
@@ -390,9 +373,7 @@ pub struct CancelCmd {
     pub symbol: Symbol,
     pub user_id: UserId,
     pub order_id: OrderId,
-    #[cfg(feature = "fusotao")]
     pub nonce: u32,
-    #[cfg(feature = "fusotao")]
     pub signature: Vec<u8>,
 }
 
@@ -420,9 +401,7 @@ pub struct AssetsCmd {
     pub in_or_out: InOrOut,
     pub currency: Currency,
     pub amount: Amount,
-    #[cfg(feature = "fusotao")]
     pub block_number: u32,
-    #[cfg(feature = "fusotao")]
     pub extrinsic_hash: Vec<u8>,
 }
 
@@ -497,9 +476,8 @@ mod test {
     }
 
     #[test]
-    #[cfg(not(feature = "fusotao"))]
     pub fn test_deserialize_cmd() {
-        let transfer_in = r#"{"currency":100, "amount":"100.0", "user_id":"0x0000000000000000000000000000000000000000000000000000000000000001", "cmd":11}"#;
+        let transfer_in = r#"{"currency":100, "amount":"100.0", "user_id":"5Ccr8Qcp6NBMCvdUHSoqDaQMJHnA5PAC879NbWkzaiUwBdMm", "cmd":11, "block_number":1000, "extrinsic_hash":""}"#;
         let e = serde_json::from_str::<Command>(transfer_in).unwrap();
         let s: anyhow::Result<Event> = Sequence {
             id: 1,
@@ -509,7 +487,7 @@ mod test {
         }
         .try_into();
         assert!(s.is_ok());
-        let bid_limit = r#"{"quote":100, "base":101, "cmd":1, "price":"10.0", "amount":"0.5", "order_id":1, "user_id":"0x0000000000000000000000000000000000000000000000000000000000000001"}"#;
+        let bid_limit = r#"{"quote":100, "base":101, "cmd":1, "price":"10.0", "amount":"0.5", "order_id":1, "user_id":"5Ccr8Qcp6NBMCvdUHSoqDaQMJHnA5PAC879NbWkzaiUwBdMm","nonce":1,"signature":""}"#;
         let e = serde_json::from_str::<Command>(bid_limit).unwrap();
         let s: anyhow::Result<Event> = Sequence {
             id: 2,

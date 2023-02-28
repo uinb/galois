@@ -18,7 +18,6 @@ use std::{
     io::{BufReader, BufWriter},
 };
 
-#[cfg(feature = "fusotao")]
 use crate::fusotao::GlobalStates;
 use crate::{assets::Balance, orderbook::OrderBook};
 pub use crate::{
@@ -27,11 +26,8 @@ pub use crate::{
     sequence::InOrOut,
 };
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
-#[cfg(feature = "fusotao")]
-use rust_decimal::prelude::Zero;
-use rust_decimal::Decimal;
+use rust_decimal::{prelude::Zero, Decimal};
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "fusotao")]
 use sp_core::ByteArray;
 
 pub type Base = u32;
@@ -90,29 +86,17 @@ impl std::str::FromStr for B256 {
         if s.starts_with("0x") {
             Self::from_hex_str(s)
         } else {
-            cfg_if::cfg_if! {
-                if #[cfg(feature = "fusotao")] {
-                    use sp_core::crypto::Ss58Codec;
-                    Self::from_ss58check(s).map_err(|_| anyhow::anyhow!("invalid ss58 format"))
-                } else {
-                    Err(anyhow::anyhow!("invalid hex string"))
-                }
-            }
+            use sp_core::crypto::Ss58Codec;
+            Self::from_ss58check(s).map_err(|_| anyhow::anyhow!("invalid ss58 format"))
         }
     }
 }
 
 impl std::fmt::Debug for B256 {
-    #[cfg(feature = "fusotao")]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use sp_core::crypto::Ss58Codec;
         let s = self.to_ss58check();
         write!(f, "{}", &s)
-    }
-
-    #[cfg(not(feature = "fusotao"))]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "0x{}", &hex::encode(self.0))
     }
 }
 
@@ -146,12 +130,10 @@ impl From<[u8; 32]> for B256 {
     }
 }
 
-#[cfg(feature = "fusotao")]
 impl ByteArray for B256 {
     const LEN: usize = 32;
 }
 
-#[cfg(feature = "fusotao")]
 impl<'a> TryFrom<&'a [u8]> for B256 {
     type Error = ();
 
@@ -165,7 +147,6 @@ impl<'a> TryFrom<&'a [u8]> for B256 {
     }
 }
 
-#[cfg(feature = "fusotao")]
 impl sp_core::crypto::Ss58Codec for B256 {}
 
 pub const SYSTEM: UserId = UserId::zero();
@@ -179,10 +160,8 @@ pub fn max_number() -> Amount {
 pub struct Data {
     pub orderbooks: HashMap<Symbol, OrderBook>,
     pub accounts: Accounts,
-    #[cfg(feature = "fusotao")]
     pub merkle_tree: GlobalStates,
     pub current_event_id: u64,
-    #[cfg(feature = "fusotao")]
     pub tvl: Amount,
 }
 
@@ -193,10 +172,8 @@ impl Data {
         Self {
             orderbooks: HashMap::new(),
             accounts: HashMap::new(),
-            #[cfg(feature = "fusotao")]
             merkle_tree: GlobalStates::default(),
             current_event_id: 0,
-            #[cfg(feature = "fusotao")]
             tvl: Amount::zero(),
         }
     }
@@ -267,17 +244,6 @@ pub fn test_dump() {
 }
 
 #[test]
-#[cfg(not(feature = "fusotao"))]
-pub fn test_debug_b256() {
-    let u = B256::zero();
-    assert_eq!(
-        "0x0000000000000000000000000000000000000000000000000000000000000000",
-        format!("{:?}", u)
-    );
-}
-
-#[test]
-#[cfg(feature = "fusotao")]
 pub fn test_debug_b256_on_fusotao() {
     use std::str::FromStr;
     let u = B256::from_str("0x0ae466861e8397f1e3beadac1a49dc111beea3b62d34a6eb4b5be370f5aada30")

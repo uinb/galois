@@ -19,15 +19,14 @@ pub mod orderbook;
 
 use crate::{
     core::*,
+    fusotao::{self, Prover},
     input::{Event, EventsError, Input, Inspection},
     orderbook::*,
     output::{self, Output},
     sequence, server, snapshot,
 };
 use anyhow::anyhow;
-#[cfg(feature = "fusotao")]
-use rust_decimal::prelude::*;
-use rust_decimal::Decimal;
+use rust_decimal::{prelude::*, Decimal};
 use std::{
     collections::HashMap,
     convert::TryInto,
@@ -44,14 +43,9 @@ type DriverChannel = Receiver<Input>;
 
 pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data, ready: Arc<AtomicBool>) {
     std::thread::spawn(move || {
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "fusotao")] {
-                use crate::fusotao;
-                let (tx, rx) = std::sync::mpsc::channel();
-                let proved_event_id = fusotao::init(rx).unwrap();
-                let prover = fusotao::Prover::new(tx, proved_event_id);
-            }
-        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let proved_event_id = fusotao::init(rx).unwrap();
+        let prover = Prover::new(tx, proved_event_id);
         ready.store(true, Ordering::Relaxed);
         log::info!("event handler initialized");
         loop {
@@ -60,13 +54,7 @@ pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data, ready: A
                 Input::NonModifier(whistle) => {
                     let (s, r) = (whistle.session, whistle.req_id);
                     if let Ok(inspection) = whistle.try_into() {
-                        cfg_if::cfg_if! {
-                            if #[cfg(feature = "fusotao")] {
-                                do_inspect(inspection, &data, &prover).unwrap();
-                            } else {
-                                do_inspect(inspection, &data).unwrap();
-                            }
-                        }
+                        do_inspect(inspection, &data, &prover).unwrap();
                     } else {
                         server::publish(server::Message::with_payload(s, r, vec![]));
                     }
@@ -75,13 +63,7 @@ pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data, ready: A
                     let id = seq.id;
                     match seq.try_into() {
                         Ok(event) => {
-                            cfg_if::cfg_if! {
-                                if #[cfg(feature = "fusotao")] {
-                                    let result = handle_event(event, &mut data, &sender, &prover);
-                                } else {
-                                    let result = handle_event(event, &mut data, &sender);
-                                }
-                            }
+                            let result = handle_event(event, &mut data, &sender, &prover);
                             match result {
                                 Err(EventsError::EventRejected(id, msg)) => {
                                     log::info!("Error occur in sequence {}: {:?}", id, msg);
@@ -108,7 +90,7 @@ fn handle_event(
     event: Event,
     data: &mut Data,
     sender: &OutputChannel,
-    #[cfg(feature = "fusotao")] prover: &crate::fusotao::Prover,
+    prover: &Prover,
 ) -> EventExecutionResult {
     data.current_event_id = event.get_id();
     match event {
@@ -122,15 +104,17 @@ fn handle_event(
                     id,
                     anyhow!("order can't be accepted"),
                 ))?;
-            cfg_if::cfg_if! {
-                if #[cfg(feature = "fusotao")] {
-                    log::info!("predicate root=0x{} before applying {}", hex::encode(data.merkle_tree.root()), id);
-                    let (ask_size, bid_size) = orderbook.size();
-                    let (best_ask_before, best_bid_before) = orderbook.get_size_of_best();
-                    let taker_base_before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.0);
-                    let taker_quote_before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.1);
-                }
-            }
+            log::info!(
+                "predicate root=0x{} before applying {}",
+                hex::encode(data.merkle_tree.root()),
+                id
+            );
+            let (ask_size, bid_size) = orderbook.size();
+            let (best_ask_before, best_bid_before) = orderbook.get_size_of_best();
+            let taker_base_before =
+                assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.0);
+            let taker_quote_before =
+                assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.1);
             let (c, val) = assets::freeze_if(&cmd.symbol, cmd.ask_or_bid, cmd.price, cmd.amount);
             assets::try_freeze(&mut data.accounts, &cmd.user_id, c, val)
                 .map_err(|e| EventsError::EventRejected(id, e))?;
@@ -151,25 +135,21 @@ fn handle_event(
                 &mr,
                 time,
             );
-            cfg_if::cfg_if! {
-                if #[cfg(feature = "fusotao")] {
-                    let (maker_fee, taker_fee) = (orderbook.maker_fee, orderbook.taker_fee);
-                    prover.prove_trade_cmd(
-                        data,
-                        cmd.nonce,
-                        cmd.signature.clone(),
-                        (cmd, maker_fee, taker_fee).into(),
-                        ask_size,
-                        bid_size,
-                        best_ask_before.unwrap_or((Decimal::zero(), Decimal::zero())),
-                        best_bid_before.unwrap_or((Decimal::zero(), Decimal::zero())),
-                        &taker_base_before,
-                        &taker_quote_before,
-                        &out,
-                        &mr,
-                    );
-                }
-            }
+            let (maker_fee, taker_fee) = (orderbook.maker_fee, orderbook.taker_fee);
+            prover.prove_trade_cmd(
+                data,
+                cmd.nonce,
+                cmd.signature.clone(),
+                (cmd, maker_fee, taker_fee).into(),
+                ask_size,
+                bid_size,
+                best_ask_before.unwrap_or((Decimal::zero(), Decimal::zero())),
+                best_bid_before.unwrap_or((Decimal::zero(), Decimal::zero())),
+                &taker_base_before,
+                &taker_quote_before,
+                &out,
+                &mr,
+            );
             sender.send(out).map_err(|_| EventsError::Interrupted)?;
             Ok(())
         }
@@ -187,15 +167,18 @@ fn handle_event(
                 .find_order(cmd.order_id)
                 .filter(|o| o.user == cmd.user_id)
                 .ok_or(EventsError::EventRejected(id, anyhow!("order not exists")))?;
-            cfg_if::cfg_if! {
-                if #[cfg(feature = "fusotao")] {
-                    log::debug!("predicate root=0x{} before applying {}", hex::encode(data.merkle_tree.root()), id);
-                    let size = orderbook.size();
-                    let (best_ask_before, best_bid_before) = orderbook.get_size_of_best();
-                    let taker_base_before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.0);
-                    let taker_quote_before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.1);
-                }
-            }
+            log::debug!(
+                "predicate root=0x{} before applying {}",
+                hex::encode(data.merkle_tree.root()),
+                id
+            );
+            let size = orderbook.size();
+            let (best_ask_before, best_bid_before) = orderbook.get_size_of_best();
+            let taker_base_before =
+                assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.0);
+            let taker_quote_before =
+                assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.1);
+
             let mr = matcher::cancel(orderbook, cmd.order_id)
                 .ok_or(EventsError::EventRejected(id, anyhow!("")))?;
             let out = clearing::clear(
@@ -207,123 +190,110 @@ fn handle_event(
                 &mr,
                 time,
             );
-            cfg_if::cfg_if! {
-                if #[cfg(feature = "fusotao")] {
-                    prover.prove_trade_cmd(
-                        data,
-                        cmd.nonce,
-                        cmd.signature.clone(),
-                        cmd.into(),
-                        size.0,
-                        size.1,
-                        best_ask_before.unwrap_or((Decimal::zero(), Decimal::zero())),
-                        best_bid_before.unwrap_or((Decimal::zero(), Decimal::zero())),
-                        &taker_base_before,
-                        &taker_quote_before,
-                        &out,
-                        &mr,
-                    );
-                }
-            }
+            prover.prove_trade_cmd(
+                data,
+                cmd.nonce,
+                cmd.signature.clone(),
+                cmd.into(),
+                size.0,
+                size.1,
+                best_ask_before.unwrap_or((Decimal::zero(), Decimal::zero())),
+                best_bid_before.unwrap_or((Decimal::zero(), Decimal::zero())),
+                &taker_base_before,
+                &taker_quote_before,
+                &out,
+                &mr,
+            );
             sender.send(out).map_err(|_| EventsError::Interrupted)?;
             Ok(())
         }
-        #[cfg(not(feature = "fusotao"))]
-        Event::CancelAll(id, symbol, time) => {
-            let orderbook = data
-                .orderbooks
-                .get_mut(&symbol)
-                .ok_or(EventsError::EventRejected(
-                    id,
-                    anyhow!("orderbook not exists"),
-                ))?;
-            let ids = orderbook.indices.keys().copied().collect::<Vec<_>>();
-            let matches = ids
-                .into_iter()
-                .filter_map(|id| matcher::cancel(orderbook, id))
-                .collect::<Vec<_>>();
-            let (taker_fee, maker_fee) = (orderbook.taker_fee, orderbook.maker_fee);
-            matches.iter().for_each(|mr| {
-                let out = clearing::clear(
-                    &mut data.accounts,
-                    id,
-                    &symbol,
-                    taker_fee,
-                    maker_fee,
-                    mr,
-                    time,
-                );
-                sender.send(out).unwrap();
-            });
+        Event::CancelAll(..) => {
+            // let orderbook = data
+            //     .orderbooks
+            //     .get_mut(&symbol)
+            //     .ok_or(EventsError::EventRejected(
+            //         id,
+            //         anyhow!("orderbook not exists"),
+            //     ))?;
+            // let ids = orderbook.indices.keys().copied().collect::<Vec<_>>();
+            // let matches = ids
+            //     .into_iter()
+            //     .filter_map(|id| matcher::cancel(orderbook, id))
+            //     .collect::<Vec<_>>();
+            // let (taker_fee, maker_fee) = (orderbook.taker_fee, orderbook.maker_fee);
+            // matches.iter().for_each(|mr| {
+            //     let out = clearing::clear(
+            //         &mut data.accounts,
+            //         id,
+            //         &symbol,
+            //         taker_fee,
+            //         maker_fee,
+            //         mr,
+            //         time,
+            //     );
+            //     sender.send(out).unwrap();
+            // });
             Ok(())
         }
         Event::TransferOut(id, cmd, _) => {
-            cfg_if::cfg_if! {
-                if #[cfg(feature = "fusotao")] {
-                    log::info!("predicate root=0x{} before applying {}", hex::encode(data.merkle_tree.root()), id);
-                    let before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.currency);
-                    if data.tvl < cmd.amount {
-                        prover.prove_cmd_rejected(&mut data.merkle_tree, id, cmd, &before);
-                        log::error!("TVL less than transfer_out amount, event={}", id);
-                        return Err(EventsError::EventRejected(id, anyhow::anyhow!("LessThanTVL")));
-                    }
-                    match assets::deduct_available(
-                        &mut data.accounts,
-                        &cmd.user_id,
-                        cmd.currency,
-                        cmd.amount,
-                    ) {
-                        Ok(after) => {
-                            data.tvl -= cmd.amount;
-                            prover.prove_assets_cmd(&mut data.merkle_tree, id, cmd, &before, &after);
-                            Ok(())
-                        }
-                        Err(e) => {
-                            prover.prove_cmd_rejected(&mut data.merkle_tree, id, cmd, &before);
-                            Err(EventsError::EventRejected(id, e))
-                        }
-                    }
-                } else {
-                    assets::deduct_available(
-                        &mut data.accounts,
-                        &cmd.user_id,
-                        cmd.currency,
-                        cmd.amount,
-                    ).map_err(|e|EventsError::EventRejected(id, e))?;
+            log::info!(
+                "predicate root=0x{} before applying {}",
+                hex::encode(data.merkle_tree.root()),
+                id
+            );
+            let before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.currency);
+            if data.tvl < cmd.amount {
+                prover.prove_cmd_rejected(&mut data.merkle_tree, id, cmd, &before);
+                log::error!("TVL less than transfer_out amount, event={}", id);
+                return Err(EventsError::EventRejected(
+                    id,
+                    anyhow::anyhow!("LessThanTVL"),
+                ));
+            }
+            match assets::deduct_available(
+                &mut data.accounts,
+                &cmd.user_id,
+                cmd.currency,
+                cmd.amount,
+            ) {
+                Ok(after) => {
+                    data.tvl -= cmd.amount;
+                    prover.prove_assets_cmd(&mut data.merkle_tree, id, cmd, &before, &after);
                     Ok(())
+                }
+                Err(e) => {
+                    prover.prove_cmd_rejected(&mut data.merkle_tree, id, cmd, &before);
+                    Err(EventsError::EventRejected(id, e))
                 }
             }
         }
         Event::TransferIn(id, cmd, _) => {
-            cfg_if::cfg_if! {
-                if #[cfg(feature = "fusotao")] {
-                    if data.tvl + cmd.amount >= crate::core::max_number() {
-                        let before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.currency);
-                        prover.prove_rejecting_no_reason(&mut data.merkle_tree, id, cmd, &before);
-                        log::error!("TVL out of limit, event={}", id);
-                        return Err(EventsError::EventRejected(id, anyhow::anyhow!("TVLOutOfLimit")));
-                    }
-                    log::info!("predicate root=0x{} before applying {}", hex::encode(data.merkle_tree.root()), id);
-                    let before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.currency);
-                    let after = assets::add_to_available(
-                        &mut data.accounts,
-                        &cmd.user_id,
-                        cmd.currency,
-                        cmd.amount,
-                    ).map_err(|e| EventsError::EventRejected(id, e))?;
-                    data.tvl = data.tvl + cmd.amount;
-                    prover.prove_assets_cmd(&mut data.merkle_tree, id, cmd, &before, &after);
-                    Ok(())
-                } else {
-                    assets::add_to_available(
-                        &mut data.accounts,
-                        &cmd.user_id,
-                        cmd.currency,
-                        cmd.amount,
-                    ).map_err(|e| EventsError::EventRejected(id, e))?;
-                    Ok(())
-                }
+            if data.tvl + cmd.amount >= crate::core::max_number() {
+                let before =
+                    assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.currency);
+                prover.prove_rejecting_no_reason(&mut data.merkle_tree, id, cmd, &before);
+                log::error!("TVL out of limit, event={}", id);
+                return Err(EventsError::EventRejected(
+                    id,
+                    anyhow::anyhow!("TVLOutOfLimit"),
+                ));
             }
+            log::info!(
+                "predicate root=0x{} before applying {}",
+                hex::encode(data.merkle_tree.root()),
+                id
+            );
+            let before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.currency);
+            let after = assets::add_to_available(
+                &mut data.accounts,
+                &cmd.user_id,
+                cmd.currency,
+                cmd.amount,
+            )
+            .map_err(|e| EventsError::EventRejected(id, e))?;
+            data.tvl = data.tvl + cmd.amount;
+            prover.prove_assets_cmd(&mut data.merkle_tree, id, cmd, &before, &after);
+            Ok(())
         }
         Event::UpdateSymbol(_, cmd, _) => {
             if !data.orderbooks.contains_key(&cmd.symbol) {
@@ -360,11 +330,7 @@ fn handle_event(
     }
 }
 
-fn do_inspect(
-    inspection: Inspection,
-    data: &Data,
-    #[cfg(feature = "fusotao")] prover: &crate::fusotao::Prover,
-) -> EventExecutionResult {
+fn do_inspect(inspection: Inspection, data: &Data, prover: &Prover) -> EventExecutionResult {
     match inspection {
         Inspection::QueryOrder(symbol, order_id, session, req_id) => {
             let v = match data.orderbooks.get(&symbol) {
@@ -396,7 +362,6 @@ fn do_inspect(
         Inspection::ConfirmAll(from, exclude) => {
             sequence::confirm(from, exclude).map_err(|_| EventsError::Interrupted)?;
         }
-        #[cfg(feature = "fusotao")]
         Inspection::QueryProvingPerfIndex(session, req_id) => {
             let current_proved_event = prover.proved_event_id.load(Ordering::Relaxed);
             let mut v: HashMap<String, u64> = HashMap::new();
@@ -409,7 +374,6 @@ fn do_inspect(
             let v = serde_json::to_vec(&v).unwrap_or_default();
             server::publish(server::Message::with_payload(session, req_id, v));
         }
-        #[cfg(feature = "fusotao")]
         Inspection::QueryScanHeight(session, req_id) => {
             let scaned_height = scaned_height();
             let chain_height = chain_height();
@@ -438,13 +402,11 @@ fn do_inspect(
         Inspection::Dump(id, time) => {
             snapshot::dump(id, time, data);
         }
-        #[cfg(feature = "fusotao")]
         Inspection::ProvingPerfIndexCheck(_id) => {}
     }
     Ok(())
 }
 
-#[cfg(feature = "fusotao")]
 fn scaned_height() -> u32 {
     let mut scaned_height = 0u32;
     let path: std::path::PathBuf = [&crate::config::C.sequence.coredump_dir, "fusotao.blk"]
@@ -465,7 +427,6 @@ fn scaned_height() -> u32 {
     scaned_height
 }
 
-#[cfg(feature = "fusotao")]
 fn chain_height() -> u32 {
     use crate::fusotao::{FusoApi, FusoBlock};
     std::panic::catch_unwind(|| {
