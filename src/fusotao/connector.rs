@@ -49,20 +49,9 @@ pub struct Dominator {
 
 impl FusoConnector {
     pub fn new() -> anyhow::Result<Self> {
-        let signer = Sr25519Key::from_string(
-            &C.fusotao
-                .as_ref()
-                .ok_or(anyhow!("Invalid fusotao config"))?
-                .key_seed,
-            None,
-        )
-        .map_err(|_| anyhow!("Invalid fusotao config"))?;
-        let client = sub_api::rpc::WsRpcClient::new(
-            &C.fusotao
-                .as_ref()
-                .ok_or(anyhow!("Invalid fusotao config"))?
-                .node_url,
-        );
+        let signer = Sr25519Key::from_string(&C.fusotao.key_seed, None)
+            .map_err(|_| anyhow!("Invalid fusotao config"))?;
+        let client = sub_api::rpc::WsRpcClient::new(&C.fusotao.node_url);
         let api = FusoApi::new(client)
             .map(|api| api.set_signer(signer.clone()))
             .map_err(|e| {
@@ -125,7 +114,7 @@ impl FusoConnector {
                     "couldn't load block number from mmap, add `-g` to force start from genesis"
                 );
             } else {
-                let at = C.fusotao.as_ref().unwrap().claim_block;
+                let at = C.fusotao.claim_block;
                 from_block_number = at;
             }
         }

@@ -469,8 +469,7 @@ fn scaned_height() -> u32 {
 fn chain_height() -> u32 {
     use crate::fusotao::{FusoApi, FusoBlock};
     std::panic::catch_unwind(|| {
-        let client =
-            sub_api::rpc::WsRpcClient::new(&crate::config::C.fusotao.as_ref().unwrap().node_url);
+        let client = sub_api::rpc::WsRpcClient::new(&crate::config::C.fusotao.node_url);
         let api = FusoApi::new(client)
             .map_err(|e| {
                 log::error!("{:?}", e);

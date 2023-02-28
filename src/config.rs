@@ -12,35 +12,78 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use argparse::{ArgumentParser, Store};
 use cfg_if::cfg_if;
+use clap::Parser;
 use lazy_static::lazy_static;
 use log4rs::config::{Logger, RawConfig as LogConfig};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Parser)]
+#[command(author, version, about = r#"
+                 **       **
+   *******     ******     **               **
+  ***               **    **     *****     **    ******
+ **              *****    **   ***   ***        **    *
+ **            *******    **   **     **   **   **
+ **    *****  **    **    **   *       *   **    **
+  **     ***  **    **    **   **     **   **     ****
+   *********   **  ****   **    *******    **        **
+      *    *    ****  *   **      ***      **    ** ***
+                                                  ****
+"#, long_about = None)]
+pub struct GaloisCli {
+    #[arg(short('c'), long("config"), required = true, value_name = "FILE")]
+    pub file: std::path::PathBuf,
+    #[arg(long)]
+    pub skip_decrypt: bool,
+    #[clap(subcommand)]
+    pub sub: Option<SubCmd>,
+    #[command(flatten)]
+    pub run: RunCmd,
+}
+
+#[derive(Debug, clap::Subcommand)]
+#[command(version)]
+pub enum SubCmd {
+    EncryptConfig,
+}
+
+#[derive(Debug, clap::Args)]
+#[command(version)]
+pub struct RunCmd {
+    #[arg(
+        long,
+        value_name = "EVENTID",
+        help = "Run galois in `dry-run` mode, skipping all output."
+    )]
+    dry_run: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Config {
     pub server: ServerConfig,
     pub sequence: SequenceConfig,
     pub mysql: MysqlConfig,
     pub redis: RedisConfig,
+    #[cfg(feature = "fusotao")]
+    pub fusotao: FusotaoConfig,
     #[serde(skip_serializing)]
     pub log: LogConfig,
-    pub fusotao: Option<FusotaoConfig>,
+    #[serde(skip_serializing)]
+    pub dry_run: Option<u64>,
 }
 
-#[cfg(feature = "enc-conf")]
 pub trait EncryptedConfig {
     fn decrypt(&mut self, key: &str) -> anyhow::Result<()>;
     fn encrypt(&mut self, key: &str) -> anyhow::Result<()>;
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ServerConfig {
     pub bind_addr: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SequenceConfig {
     pub coredump_dir: String,
     pub checkpoint: usize,
@@ -50,12 +93,11 @@ pub struct SequenceConfig {
     pub enable_from_genesis: bool,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct MysqlConfig {
     pub url: String,
 }
 
-#[cfg(feature = "enc-conf")]
 impl EncryptedConfig for MysqlConfig {
     fn decrypt(&mut self, key: &str) -> anyhow::Result<()> {
         use magic_crypt::MagicCryptTrait;
@@ -74,7 +116,8 @@ impl EncryptedConfig for MysqlConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[cfg(feature = "fusotao")]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct FusotaoConfig {
     pub node_url: String,
     pub key_seed: String,
@@ -83,6 +126,7 @@ pub struct FusotaoConfig {
     pub fee_adjust_threshold: u64,
 }
 
+#[cfg(feature = "fusotao")]
 impl Default for FusotaoConfig {
     fn default() -> Self {
         Self {
@@ -95,7 +139,7 @@ impl Default for FusotaoConfig {
     }
 }
 
-#[cfg(feature = "enc-conf")]
+#[cfg(feature = "fusotao")]
 impl EncryptedConfig for FusotaoConfig {
     fn decrypt(&mut self, key: &str) -> anyhow::Result<()> {
         use magic_crypt::MagicCryptTrait;
@@ -114,12 +158,11 @@ impl EncryptedConfig for FusotaoConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct RedisConfig {
     pub url: String,
 }
 
-#[cfg(feature = "enc-conf")]
 impl EncryptedConfig for RedisConfig {
     fn decrypt(&mut self, key: &str) -> anyhow::Result<()> {
         use magic_crypt::MagicCryptTrait;
@@ -143,53 +186,47 @@ lazy_static! {
 }
 
 fn init_config_file() -> anyhow::Result<Config> {
-    let mut file = String::new();
-    {
-        let mut args = ArgumentParser::new();
-        args.refer(&mut file)
-            .add_option(&["-c"], Store, "toml config file");
-        args.parse_args_or_exit();
+    let opts = GaloisCli::parse();
+    if opts.skip_decrypt {
+        init_config(&std::fs::read_to_string(&opts.file)?, None)
+    } else {
+        let key = std::env::var_os("MAGIC_KEY").ok_or(anyhow::anyhow!("env MAGIC_KEY not set"))?;
+        init_config(
+            &std::fs::read_to_string(&opts.file)?,
+            key.to_str().map(|s| s.to_string()),
+        )
     }
-    init_config(&std::fs::read_to_string(file)?)
 }
 
-#[cfg(feature = "enc-conf")]
-pub fn print_enc_config_file() -> anyhow::Result<()> {
-    let mut file = String::new();
-    let mut key = String::new();
-    {
-        let mut args = ArgumentParser::new();
-        args.refer(&mut file)
-            .add_option(&["-c"], Store, "toml config file");
-        args.refer(&mut key).add_option(&["-k"], Store, "key");
-        args.parse_args_or_exit();
-    }
-    let mut cfg: Config = toml::from_str(&std::fs::read_to_string(file)?)?;
+pub fn print_enc_config_file(mut cfg: Config) -> anyhow::Result<()> {
+    let key = std::env::var_os("MAGIC_KEY").ok_or(anyhow::anyhow!("env MAGIC_KEY not set"))?;
+    let key = key
+        .to_str()
+        .map(|s| s.to_string())
+        .ok_or(anyhow::anyhow!("env MAGIC_KEY not set"))?;
     cfg.mysql.encrypt(&key)?;
     cfg.redis.encrypt(&key)?;
-    if let Some(ref mut fuso) = cfg.fusotao {
-        fuso.encrypt(&key)?;
+    cfg_if! {
+        if #[cfg(feature = "fusotao")] {
+            cfg.fusotao.encrypt(&key)?;
+        }
     }
     println!("{}", toml::to_string(&cfg)?);
     Ok(())
 }
 
-fn init_config(toml: &str) -> anyhow::Result<Config> {
-    cfg_if! {
-        if #[cfg(feature = "enc-conf")] {
-            let mut cfg: Config = toml::from_str(toml)?;
-            let key = std::env::var_os("MAGIC_KEY")
-                .ok_or(anyhow::anyhow!("env MAGIC_KEY not set"))?;
-            let key = key.to_str().ok_or_else(||anyhow::anyhow!("env MAGIC_KEY not set"))?;
-            cfg.mysql.decrypt(&key)?;
-            cfg.redis.decrypt(&key)?;
-            if let Some(ref mut fuso) = cfg.fusotao {
-                fuso.decrypt(&key)?;
+fn init_config(toml: &str, key: Option<String>) -> anyhow::Result<Config> {
+    let mut cfg: Config = toml::from_str(toml)?;
+    if let Some(key) = key {
+        cfg.mysql.decrypt(&key)?;
+        cfg.redis.decrypt(&key)?;
+        cfg_if! {
+            if #[cfg(feature = "fusotao")] {
+                cfg.fusotao.decrypt(&key)?;
             }
-        } else {
-            let cfg: Config = toml::from_str(toml)?;
         }
     }
+    // TODO replace with env_log
     let mut loggers = cfg
         .log
         .loggers()

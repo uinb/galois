@@ -12,15 +12,9 @@ readme = "README.md"
 name = "galois"
 path = "bin/galois.rs"
 
-[[bin]]
-name = "enc-config"
-path = "bin/enc.rs"
-required-features = ["enc-conf"]
-
 [features]
 default = []
 fusotao = ["sub-api", "node-api", "parity-scale-codec", "smt", "memmap", "sp-core", "sp-runtime"]
-enc-conf = ["magic-crypt"]
 verify_compress = ["lz4_flex"]
 
 [dependencies]
@@ -33,7 +27,6 @@ serde_json = "1.0"
 flate2 = { version = "1.0", features = ["zlib"], default-features = false }
 mysql = "23.0"
 redis = { version = "0.17", features = ["tls", "tokio-rt-core", "tokio-tls-comp", "native-tls","async-native-tls", "async-std-tls-comp"] }
-argparse = "0.2"
 toml = "0.5"
 lazy_static = "1.4"
 linked-hash-map = { version = "0.5.3", features = ["serde_impl"] }
@@ -45,13 +38,14 @@ lz4_flex = { version = "0.10.0", optional = true }
 log = { version = "0.4", features = ["serde"] }
 log4rs = { version = "1.0", features = ["json_encoder", "toml_format"] }
 chrono = "0.4"
-magic-crypt = { version = "3.1", optional = true }
+magic-crypt = "3.1"
 anyhow =  "1"
 thiserror = "1"
 blake2 = "0.10"
 generic-array = "0.14"
 cfg-if = "1.0"
 hex = "0.4"
+structopt = "0.3.26"
 memmap = { version = "0.7", optional = true }
 smt = { git = "https://github.com/uinb/sparse-merkle-tree", tag = "v0.1.8", package = "sparse-merkle-tree", features = ["serde-rs", "blake2b"], optional = true }
 sub-api = { package = "substrate-api-client", git = "https://github.com/uinb/fusotao-rust-client.git", branch = "polkadot-v0.9.30", optional = true }
@@ -59,6 +53,7 @@ node-api = { package = "ac-node-api", git = "https://github.com/uinb/fusotao-rus
 parity-scale-codec = { version = "3", features = ["derive"], optional = true }
 sp-core = { git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.30", package = "sp-core", optional = true }
 sp-runtime = { git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.30", package = "sp-runtime", optional = true }
+clap = { version = "4.1.7", features = ["derive"] }
 
 [dev-dependencies]
 tempdir = "0.3"
