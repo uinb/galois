@@ -50,6 +50,9 @@ pub struct Output {
 }
 
 pub fn write_depth(depth: Vec<Depth>) {
+    if crate::config::C.dry_run.is_some() {
+        return;
+    }
     let redis = REDIS.get_connection();
     match redis {
         Ok(mut conn) => {
@@ -70,6 +73,9 @@ pub fn write_depth(depth: Vec<Depth>) {
 }
 
 pub fn init(sender: Sender<Vec<Output>>, recv: Receiver<Vec<Output>>) {
+    if crate::config::C.dry_run.is_some() {
+        return;
+    }
     let mut buf = HashMap::<Symbol, (u64, Vec<Output>)>::new();
     thread::spawn(move || loop {
         let cr = recv.recv().unwrap();

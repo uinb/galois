@@ -18,18 +18,12 @@ use serde::{Deserialize, Serialize};
 use smt::{blake2b::Blake2bHasher, default_store::DefaultStore, SparseMerkleTree, H256};
 use std::{
     convert::TryInto,
-    sync::{
-        atomic::AtomicU64,
-        mpsc::{Receiver, RecvTimeoutError},
-        Arc,
-    },
+    sync::mpsc::{Receiver, RecvTimeoutError},
 };
 
 use crate::fusotao::connector::FusoConnector;
 use crate::{config::C, core::*, sequence::*};
 pub use prover::Prover;
-use sp_core::Pair;
-use std::sync::atomic::Ordering;
 
 mod connector;
 mod persistence;
@@ -123,15 +117,16 @@ impl WrapperTypeEncode for UserId {}
 /// AccountId of chain = MultiAddress<sp_runtime::AccountId32, ()>::Id = GenericAddress::Id
 /// 1. from_ss58check() or from_ss58check_with_version()
 /// 2. new or from public
-pub fn init(rx: Receiver<Proof>) -> anyhow::Result<Arc<AtomicU64>> {
+pub fn init(rx: Receiver<Proof>) -> anyhow::Result<()> {
+    if C.dry_run.is_some() {
+        return Ok(Default::default());
+    }
     persistence::init(rx);
     let connector = FusoConnector::new()?;
-    let proved = FusoConnector::sync_proving_progress(&connector.signer.public(), &connector.api)?;
-    connector.proved_event_id.store(proved, Ordering::Relaxed);
     connector.start_submitting()?;
     connector.start_scanning()?;
     log::info!("fusotao prover initialized");
-    Ok(connector.proved_event_id.clone())
+    Ok(())
 }
 
 #[derive(Clone, Encode, Decode, Eq, PartialEq, Debug)]

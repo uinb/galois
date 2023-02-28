@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{db::DB, fusotao::*};
+use crate::{config::C, db::DB, fusotao::*};
 use mysql::{prelude::*, *};
 use std::{sync::mpsc::Receiver, time::Duration};
 
@@ -27,7 +27,14 @@ pub fn init(rx: Receiver<Proof>) {
                 break;
             }
         };
-        append(proof, &mut pending);
+        if C.dry_run.is_some() {
+            if let Some(p) = proof {
+                println!("0x{}", &hex::encode(p.root));
+            }
+            continue;
+        } else {
+            append(proof, &mut pending);
+        }
     });
 }
 

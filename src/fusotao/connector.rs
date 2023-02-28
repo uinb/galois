@@ -98,6 +98,7 @@ impl FusoConnector {
     pub fn start_scanning(&self) -> anyhow::Result<()> {
         let api = self.api.clone();
         let who = self.signer.public().clone();
+        // TODO fetch from chain
         let path: PathBuf = [&C.sequence.coredump_dir, "fusotao.blk"].iter().collect();
         let finalized_file = OpenOptions::new()
             .read(true)

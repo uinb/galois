@@ -212,6 +212,15 @@ pub fn init(sender: Sender<Input>, id: u64, startup: Arc<AtomicBool>) {
                     id += 1;
                     continue;
                 }
+                match C.dry_run {
+                    Some(0) => {}
+                    Some(n) => {
+                        if n > id {
+                            return;
+                        }
+                    }
+                    None => {}
+                }
                 event_sender.send(Input::Modifier(s)).unwrap();
                 counter += 1;
                 if counter >= C.sequence.checkpoint {
@@ -240,6 +249,9 @@ pub fn init(sender: Sender<Input>, id: u64, startup: Arc<AtomicBool>) {
         }
     });
     std::thread::spawn(move || loop {
+        if C.dry_run.is_some() {
+            break;
+        }
         std::thread::sleep(Duration::from_millis(500));
         let whistle = Whistle::new_update_depth_whistle();
         sender.send(Input::NonModifier(whistle)).unwrap();
@@ -315,6 +327,9 @@ pub fn insert_sequences(seq: &Vec<Command>) -> anyhow::Result<()> {
 }
 
 pub fn confirm(from: u64, exclude: u64) -> anyhow::Result<()> {
+    if crate::config::C.dry_run.is_some() {
+        return Ok(());
+    }
     let sql = "UPDATE t_sequence SET f_status=? WHERE f_status=? AND f_id>=? AND f_id<?";
     let mut conn = DB.get_conn()?;
     conn.exec_drop(sql, (ACCEPTED, PENDING, from, exclude))
