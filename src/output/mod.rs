@@ -73,16 +73,15 @@ pub fn write_depth(depth: Vec<Depth>) {
 }
 
 pub fn init(sender: Sender<Vec<Output>>, recv: Receiver<Vec<Output>>) {
-    if crate::config::C.dry_run.is_some() {
-        return;
-    }
     let mut buf = HashMap::<Symbol, (u64, Vec<Output>)>::new();
     thread::spawn(move || loop {
         let cr = recv.recv().unwrap();
-        if cr.is_empty() {
-            flush_all(&mut buf);
-        } else {
-            write(cr, &mut buf);
+        if crate::config::C.dry_run.is_none() {
+            if cr.is_empty() {
+                flush_all(&mut buf);
+            } else {
+                write(cr, &mut buf);
+            }
         }
     });
     thread::spawn(move || loop {

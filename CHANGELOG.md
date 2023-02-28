@@ -1,4 +1,4 @@
-# v0.4.0-dev.6
+# v0.4.0-dev.7
 
 - test dry-run
 

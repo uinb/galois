@@ -84,9 +84,7 @@ pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data, ready: A
                 }
             }
         }
-    })
-    .join()
-    .unwrap();
+    });
 }
 
 fn handle_event(
