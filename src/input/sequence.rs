@@ -215,7 +215,7 @@ pub fn init(sender: Sender<Input>, id: u64, startup: Arc<AtomicBool>) {
                 match C.dry_run {
                     Some(0) => {}
                     Some(n) => {
-                        if n > id {
+                        if id > n {
                             std::thread::park();
                         }
                     }
