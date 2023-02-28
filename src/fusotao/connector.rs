@@ -49,14 +49,12 @@ pub struct Dominator {
 impl FusoConnector {
     pub fn new() -> anyhow::Result<Self> {
         let signer = Sr25519Key::from_string(&C.fusotao.key_seed, None)
-            .map_err(|_| anyhow!("Invalid fusotao config"))?;
+            .map_err(|e| anyhow!("Invalid fusotao config: {:?}", e))?;
         let client = sub_api::rpc::WsRpcClient::new(&C.fusotao.node_url);
         let api = FusoApi::new(client)
             .map(|api| api.set_signer(signer.clone()))
-            .map_err(|e| {
-                log::error!("{:?}", e);
-                anyhow!("Fusotao node not available or runtime metadata check failed")
-            })?;
+            .inspect_err(|e| log::error!("{:?}", e))
+            .map_err(|e| anyhow!("Fusotao node not available or metadata check failed: {}", e))?;
         Ok(Self {
             api,
             signer,
@@ -162,10 +160,10 @@ impl FusoConnector {
         let key = api
             .metadata
             .storage_map_key::<FusoAccountId>("Verifier", "Dominators", *who)
-            .map_err(|_| anyhow!(""))?;
+            .map_err(|e| anyhow!("Read storage failed: {:?}", e))?;
         let payload = api
             .get_opaque_storage_by_key_hash(key, None)
-            .map_err(|_| anyhow!(""))?
+            .map_err(|e| anyhow!("Read storage failed: {:?}", e))?
             .ok_or(anyhow!(""))?;
         let result = Dominator::decode(&mut payload.as_slice())?;
         log::info!(
@@ -196,11 +194,13 @@ impl FusoConnector {
         decoder: &EventsDecoder,
     ) -> anyhow::Result<Vec<Command>> {
         use hex::ToHex;
-        let hash = api.get_block_hash(at).map_err(|_| anyhow!(""))?;
+        let hash = api
+            .get_block_hash(at)
+            .map_err(|e| anyhow!("Read storage failed: {:?}", e))?;
         let key = api
             .metadata
             .storage_value_key("System", "Events")
-            .map_err(|_| anyhow!(""))?;
+            .map_err(|e| anyhow!("Read storage failed: {:?}", e))?;
         let payload = api.get_opaque_storage_by_key_hash(key, hash)?;
         let events = decoder
             .decode_events(&mut payload.unwrap_or(vec![]).as_slice())

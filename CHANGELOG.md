@@ -1,3 +1,7 @@
+# v0.4.0-dev.2
+
+- test dry-run
+
 # v0.3.8
 
 - upgrade substrate version to 0.9.30
