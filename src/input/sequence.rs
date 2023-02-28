@@ -477,7 +477,7 @@ mod test {
 
     #[test]
     pub fn test_deserialize_cmd() {
-        let transfer_in = r#"{"currency":100, "amount":"100.0", "user_id":"0x0000000000000000000000000000000000000000000000000000000000000001", "cmd":11}"#;
+        let transfer_in = r#"{"currency":100, "amount":"100.0", "user_id":"5Ccr8Qcp6NBMCvdUHSoqDaQMJHnA5PAC879NbWkzaiUwBdMm", "cmd":11, "block_number":1000, "extrinsic_hash":""}"#;
         let e = serde_json::from_str::<Command>(transfer_in).unwrap();
         let s: anyhow::Result<Event> = Sequence {
             id: 1,
@@ -487,7 +487,7 @@ mod test {
         }
         .try_into();
         assert!(s.is_ok());
-        let bid_limit = r#"{"quote":100, "base":101, "cmd":1, "price":"10.0", "amount":"0.5", "order_id":1, "user_id":"0x0000000000000000000000000000000000000000000000000000000000000001"}"#;
+        let bid_limit = r#"{"quote":100, "base":101, "cmd":1, "price":"10.0", "amount":"0.5", "order_id":1, "user_id":"5Ccr8Qcp6NBMCvdUHSoqDaQMJHnA5PAC879NbWkzaiUwBdMm","nonce":1,"signature":""}"#;
         let e = serde_json::from_str::<Command>(bid_limit).unwrap();
         let s: anyhow::Result<Event> = Sequence {
             id: 2,

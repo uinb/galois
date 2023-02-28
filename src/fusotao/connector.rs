@@ -14,7 +14,6 @@
 
 use crate::{config::C, fusotao::*, input::Command, sequence};
 use anyhow::anyhow;
-use cfg_if::cfg_if;
 use chrono::Local;
 use memmap::MmapMut;
 use node_api::events::{EventsDecoder, Raw};
@@ -309,7 +308,6 @@ impl FusoConnector {
         Ok((r, from_block_included + i))
     }
 
-    #[cfg(feature = "verify_compress")]
     fn compress_proofs(raws: Vec<RawParameter>) -> Vec<u8> {
         let r = raws.encode();
         let uncompress_size = r.len();
@@ -328,28 +326,33 @@ impl FusoConnector {
             return Ok(());
         }
         log::info!(
-            "start to submit_proofs at {}",
+            "===> starting to submit_proofs at {}",
             Local::now().timestamp_millis()
         );
-        cfg_if! {
-            if #[cfg(feature = "verify_compress")] {
-                let batch = Self::compress_proofs(batch);
-            }
-        }
-        let xt: sub_api::UncheckedExtrinsicV4<_, _> =
-            sub_api::compose_extrinsic!(api, "Verifier", "verify", batch);
-        let hash = api
-            .send_extrinsic(xt.hex_encode(), sub_api::XtStatus::InBlock)
-            .map_err(|e| anyhow::anyhow!("submitting proofs failed, {:?}", e))?;
+        let hash = if C.fusotao.compress_proofs {
+            let xt: sub_api::UncheckedExtrinsicV4<_, _> = sub_api::compose_extrinsic!(
+                api,
+                "Verifier",
+                "verify_compress",
+                Self::compress_proofs(batch)
+            );
+            api.send_extrinsic(xt.hex_encode(), sub_api::XtStatus::InBlock)
+                .map_err(|e| anyhow::anyhow!("submitting proofs failed, {:?}", e))?
+        } else {
+            let xt: sub_api::UncheckedExtrinsicV4<_, _> =
+                sub_api::compose_extrinsic!(api, "Verifier", "verify", batch);
+            api.send_extrinsic(xt.hex_encode(), sub_api::XtStatus::InBlock)
+                .map_err(|e| anyhow::anyhow!("submitting proofs failed, {:?}", e))?
+        };
         log::info!(
-            "end submit_proofs time is {} now",
+            "<=== ending submit_proofs at {}",
             Local::now().timestamp_millis()
         );
         if hash.is_none() {
             Err(anyhow::anyhow!("extrinsic executed failed"))
         } else {
             log::info!(
-                "submitting proofs ok, extrinsic hash: {:?}",
+                "[+] submitting proofs ok, extrinsic hash: {:?}",
                 hex::encode(hash.unwrap())
             );
             Ok(())

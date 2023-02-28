@@ -120,6 +120,8 @@ pub struct FusotaoConfig {
     pub key_seed: String,
     pub claim_block: u32,
     pub proof_batch_limit: usize,
+    pub compress_proofs: bool,
+    // deprecated
     pub fee_adjust_threshold: u64,
 }
 
@@ -130,6 +132,7 @@ impl Default for FusotaoConfig {
             key_seed: String::from(""),
             claim_block: 1,
             proof_batch_limit: 20,
+            compress_proofs: true,
             fee_adjust_threshold: 10,
         }
     }
@@ -266,6 +269,7 @@ pub fn test_default() {
         key_seed = "//Alice"
         proof_batch_limit = 20
         claim_block = 1
+        compress_proofs = true
         fee_adjust_threshold = 1000
     "#;
     let config = init_config(&toml, None).unwrap();

@@ -27,6 +27,8 @@ events(mysql)  >>  |  galois  |  >> match results(mysql)/best n price(redis)
 
 Galois works as the prover(a.k.a Proof of Matches) component of [Fusotao](https://github.com/uinb/fusotao). The version without `fusotao` feature enabled can be used for building a high performance exchange with broker(refer to [Guide to implement a broker](#)). Buttttt, we *strongly* recommend you shall hire an expert before you do the business, seriously.
 
+NOTICE: From v0.4.0, we don't supporting running Galois in the standalone mode.
+
 
 ## Getting Started
 

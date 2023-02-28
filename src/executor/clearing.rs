@@ -316,19 +316,10 @@ pub fn clear(
 #[allow(unused_must_use)]
 #[cfg(test)]
 pub mod test {
+    use crate::{assets, core::*, matcher::*, orderbook::*};
     use rust_decimal::{prelude::Zero, Decimal};
     use rust_decimal_macros::dec;
-
-    use crate::{assets, core::*, matcher::*, orderbook::*};
-
-    // impl UserId {
-    //     // adapt to legacy code
-    //     pub fn from_low_u64_be(x: u64) -> Self {
-    //         let mut s = [0u8; 32];
-    //         s[24..].copy_from_slice(&x.to_be_bytes());
-    //         Self::new(s)
-    //     }
-    // }
+    use std::collections::BTreeMap;
 
     #[test]
     pub fn test_clearing_on_bid_taker_price_gt_ask() {
@@ -356,6 +347,7 @@ pub mod test {
                 dec!(1),
             )],
             taker: Taker::taker_filled(UserId::from_low_u64_be(1), 2, dec!(10000), AskOrBid::Bid),
+            page_delta: BTreeMap::from([(dec!(9999), (dec!(1), dec!(0)))]),
         };
         super::clear(
             &mut accounts,
@@ -406,6 +398,7 @@ pub mod test {
                 dec!(1),
             )],
             taker: Taker::taker_filled(UserId::from_low_u64_be(2), 2, dec!(9999), AskOrBid::Ask),
+            page_delta: BTreeMap::from([(dec!(9999), (dec!(1), dec!(0)))]),
         };
         super::clear(
             &mut accounts,
@@ -449,6 +442,7 @@ pub mod test {
                 dec!(0.5),
             )],
             taker: Taker::taker_filled(UserId::from_low_u64_be(2), 2, dec!(9999), AskOrBid::Ask),
+            page_delta: BTreeMap::from([(dec!(9999), (dec!(1), dec!(0)))]),
         };
         super::clear(
             &mut accounts,
@@ -481,6 +475,7 @@ pub mod test {
                 dec!(0.5),
                 AskOrBid::Bid,
             ),
+            page_delta: BTreeMap::from([(dec!(9999), (dec!(1), dec!(0)))]),
         };
         super::clear(
             &mut accounts,
@@ -523,6 +518,7 @@ pub mod test {
                 dec!(0.5),
                 AskOrBid::Ask,
             ),
+            page_delta: BTreeMap::from([(dec!(9999), (dec!(1), dec!(0)))]),
         };
         super::clear(
             &mut accounts,
@@ -557,6 +553,7 @@ pub mod test {
                 dec!(0.5),
                 AskOrBid::Ask,
             ),
+            page_delta: BTreeMap::from([(dec!(9999), (dec!(1), dec!(0)))]),
         };
         super::clear(
             &mut accounts,
@@ -594,6 +591,7 @@ pub mod test {
                 dec!(1),
             )],
             taker: Taker::taker_filled(UserId::from_low_u64_be(2), 2, dec!(9999), AskOrBid::Ask),
+            page_delta: BTreeMap::from([(dec!(9999), (dec!(1), dec!(0)))]),
         };
         super::clear(&mut accounts, 2, &symbol, dec!(0.001), dec!(0.001), &mr, 0);
 
