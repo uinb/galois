@@ -315,21 +315,20 @@ pub fn clear(
 
 #[allow(unused_must_use)]
 #[cfg(test)]
-#[cfg(not(feature = "fusotao"))]
 pub mod test {
     use rust_decimal::{prelude::Zero, Decimal};
     use rust_decimal_macros::dec;
 
     use crate::{assets, core::*, matcher::*, orderbook::*};
 
-    impl UserId {
-        // adapt to legacy code
-        pub fn from_low_u64_be(x: u64) -> Self {
-            let mut s = [0u8; 32];
-            s[24..].copy_from_slice(&x.to_be_bytes());
-            Self::new(s)
-        }
-    }
+    // impl UserId {
+    //     // adapt to legacy code
+    //     pub fn from_low_u64_be(x: u64) -> Self {
+    //         let mut s = [0u8; 32];
+    //         s[24..].copy_from_slice(&x.to_be_bytes());
+    //         Self::new(s)
+    //     }
+    // }
 
     #[test]
     pub fn test_clearing_on_bid_taker_price_gt_ask() {
