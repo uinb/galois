@@ -23,6 +23,9 @@ use crate::{config, core};
 
 /// dump snapshot at id(executed)
 pub fn dump(id: u64, time: u64, data: &core::Data) {
+    if config::C.dry_run.is_some() {
+        return;
+    }
     let data = data.clone();
     let timestamp = UNIX_EPOCH + Duration::from_secs(time);
     let datetime = DateTime::<Utc>::from(timestamp);

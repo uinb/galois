@@ -27,15 +27,11 @@ const ORDERPAGE_KEY: u8 = 0x03;
 
 pub struct Prover {
     pub sender: Sender<Proof>,
-    pub proved_event_id: Arc<AtomicU64>,
 }
 
 impl Prover {
-    pub fn new(tx: Sender<Proof>, proved_event_id: Arc<AtomicU64>) -> Self {
-        Self {
-            sender: tx,
-            proved_event_id,
-        }
+    pub fn new(tx: Sender<Proof>) -> Self {
+        Self { sender: tx }
     }
 
     pub fn prove_trade_cmd(
@@ -423,8 +419,6 @@ fn new_orderpage_merkle_leaf(
 
 #[cfg(test)]
 mod test {
-    use std::sync::{atomic::AtomicU64, Arc};
-
     use super::BlakeTwo256;
     use blake2::Digest;
     use rust_decimal_macros::dec;
@@ -553,7 +547,7 @@ mod test {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let mut merkle_tree = GlobalStates::default();
-            let pp = Prover::new(tx, Arc::new(AtomicU64::new(0)));
+            let pp = Prover::new(tx);
             let mut all = Accounts::new();
             let cmd0 = AssetsCmd {
                 user_id: UserId::from_low_u64_be(1),
@@ -644,7 +638,7 @@ mod test {
                 current_event_id: 0,
                 tvl: Amount::zero(),
             };
-            let pp = Prover::new(tx, Arc::new(AtomicU64::new(0)));
+            let pp = Prover::new(tx);
             let cmd0 = AssetsCmd {
                 user_id: UserId::from_low_u64_be(1),
                 in_or_out: InOrOut::In,
@@ -1077,7 +1071,7 @@ mod test {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let mut merkle_tree = GlobalStates::default();
-            let pp = Prover::new(tx, Arc::new(AtomicU64::new(0)));
+            let pp = Prover::new(tx);
             let mut all = Accounts::new();
             let orderbook = construct_pair();
             let cmd0 = AssetsCmd {
@@ -1432,7 +1426,7 @@ mod test {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let mut merkle_tree = GlobalStates::default();
-            let pp = Prover::new(tx, Arc::new(AtomicU64::new(0)));
+            let pp = Prover::new(tx);
             let mut all = Accounts::new();
             let orderbook = construct_pair();
             let cmd0 = AssetsCmd {

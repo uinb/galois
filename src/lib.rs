@@ -14,6 +14,7 @@
 
 #![feature(type_ascription)]
 #![feature(drain_filter)]
+#![feature(result_option_inspect)]
 #![allow(clippy::from_over_into)]
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::wrong_self_convention)]

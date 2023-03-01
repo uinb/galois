@@ -194,6 +194,10 @@ fn init_config_file() -> anyhow::Result<Config> {
             key.to_str().map(|s| s.to_string()),
         )
     }
+    .map(|mut c| {
+        c.dry_run = opts.run.dry_run;
+        c
+    })
 }
 
 pub fn print_enc_config_file(mut cfg: Config) -> anyhow::Result<()> {

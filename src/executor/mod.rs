@@ -44,17 +44,18 @@ type DriverChannel = Receiver<Input>;
 pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data, ready: Arc<AtomicBool>) {
     std::thread::spawn(move || {
         let (tx, rx) = std::sync::mpsc::channel();
-        let proved_event_id = fusotao::init(rx).unwrap();
-        let prover = Prover::new(tx, proved_event_id);
+        fusotao::init(rx).unwrap();
+        let prover = Prover::new(tx);
         ready.store(true, Ordering::Relaxed);
-        log::info!("event handler initialized");
+        log::info!("executor initialized");
         loop {
             let fusion = recv.recv().unwrap();
             match fusion {
                 Input::NonModifier(whistle) => {
                     let (s, r) = (whistle.session, whistle.req_id);
                     if let Ok(inspection) = whistle.try_into() {
-                        do_inspect(inspection, &data, &prover).unwrap();
+                        // only EventsError::Interrupted might return, so we have no choices
+                        do_inspect(inspection, &data).unwrap();
                     } else {
                         server::publish(server::Message::with_payload(s, r, vec![]));
                     }
@@ -330,7 +331,7 @@ fn handle_event(
     }
 }
 
-fn do_inspect(inspection: Inspection, data: &Data, prover: &Prover) -> EventExecutionResult {
+fn do_inspect(inspection: Inspection, data: &Data) -> EventExecutionResult {
     match inspection {
         Inspection::QueryOrder(symbol, order_id, session, req_id) => {
             let v = match data.orderbooks.get(&symbol) {
@@ -362,15 +363,10 @@ fn do_inspect(inspection: Inspection, data: &Data, prover: &Prover) -> EventExec
         Inspection::ConfirmAll(from, exclude) => {
             sequence::confirm(from, exclude).map_err(|_| EventsError::Interrupted)?;
         }
+        // TODO remove this
         Inspection::QueryProvingPerfIndex(session, req_id) => {
-            let current_proved_event = prover.proved_event_id.load(Ordering::Relaxed);
             let mut v: HashMap<String, u64> = HashMap::new();
-            let ppi = if data.current_event_id > current_proved_event {
-                data.current_event_id - current_proved_event
-            } else {
-                current_proved_event - data.current_event_id
-            };
-            v.insert(String::from("proving_perf_index"), ppi);
+            v.insert(String::from("proving_perf_index"), 0);
             let v = serde_json::to_vec(&v).unwrap_or_default();
             server::publish(server::Message::with_payload(session, req_id, v));
         }

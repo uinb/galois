@@ -119,6 +119,7 @@ async fn accept(
     ready: Arc<AtomicBool>,
 ) -> Result<()> {
     let listener = TcpListener::bind(addr).await?;
+    log::info!("server initialized");
     let mut incoming = listener.incoming();
     let mut session = 0_u64;
     while let Some(stream) = incoming.next().await {

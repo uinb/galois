@@ -23,8 +23,7 @@ use redis::Commands;
 use std::{
     collections::HashMap,
     convert::Into,
-    sync::mpsc::{Receiver, Sender},
-    thread,
+    sync::mpsc::{Receiver, RecvTimeoutError},
     time::Duration,
 };
 
@@ -50,6 +49,9 @@ pub struct Output {
 }
 
 pub fn write_depth(depth: Vec<Depth>) {
+    if crate::config::C.dry_run.is_some() {
+        return;
+    }
     let redis = REDIS.get_connection();
     match redis {
         Ok(mut conn) => {
@@ -69,21 +71,26 @@ pub fn write_depth(depth: Vec<Depth>) {
     }
 }
 
-pub fn init(sender: Sender<Vec<Output>>, recv: Receiver<Vec<Output>>) {
+pub fn init(rx: Receiver<Vec<Output>>) {
     let mut buf = HashMap::<Symbol, (u64, Vec<Output>)>::new();
-    thread::spawn(move || loop {
-        let cr = recv.recv().unwrap();
-        if cr.is_empty() {
-            flush_all(&mut buf);
-        } else {
-            write(cr, &mut buf);
+    std::thread::spawn(move || loop {
+        let cr = match rx.recv_timeout(Duration::from_millis(10_000)) {
+            Ok(p) => p,
+            Err(RecvTimeoutError::Timeout) => vec![],
+            Err(RecvTimeoutError::Disconnected) => {
+                log::error!("Output persistence thread interrupted!");
+                break;
+            }
+        };
+        if crate::config::C.dry_run.is_none() {
+            if cr.is_empty() {
+                flush_all(&mut buf);
+            } else {
+                write(cr, &mut buf);
+            }
         }
     });
-    thread::spawn(move || loop {
-        thread::sleep(Duration::from_millis(1000));
-        sender.send(vec![]).unwrap();
-    });
-    log::info!("Output initialized");
+    log::info!("dumper initialized");
 }
 
 fn get_max_record(symbol: Symbol) -> u64 {
