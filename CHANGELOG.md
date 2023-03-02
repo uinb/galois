@@ -1,7 +1,7 @@
-# v0.4.0-rc.0
 
-- remove some features
-- some refactor 
+# v0.4.0-dev.9
+
+- update client version
 
 # v0.3.8
 
