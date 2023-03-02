@@ -29,7 +29,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --release --all-features
+          args: --release
       - uses: montudor/action-zip@v1
         with:
           args: zip -j -r galois.zip target/release/galois galois.toml.example README.md LICENSE
