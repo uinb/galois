@@ -1,3 +1,8 @@
+# v0.4.0
+
+- remove some features
+- some refactor 
+
 # v0.3.8
 
 - upgrade substrate version to 0.9.30
