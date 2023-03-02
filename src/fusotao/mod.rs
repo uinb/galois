@@ -39,7 +39,7 @@ pub type FusoHeader = sp_runtime::generic::Header<BlockNumber, FusoHash>;
 pub type FusoExtrinsic = sp_runtime::OpaqueExtrinsic;
 pub type FusoBlock = sp_runtime::generic::Block<FusoHeader, FusoExtrinsic>;
 pub type FusoApi =
-    sub_api::Api<Sr25519Key, sub_api::rpc::WsRpcClient, sub_api::AssetTipExtrinsicParams>;
+    sub_api::Api<Sr25519Key, sub_api::rpc::WsRpcClient>;
 
 const ONE_ONCHAIN: u128 = 1_000_000_000_000_000_000;
 const MILL: u32 = 1_000_000;
