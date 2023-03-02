@@ -1,3 +1,8 @@
+
+# v0.4.0-rc.1
+
+- update rpc client
+
 # v0.4.0-rc.0
 
 - remove some features

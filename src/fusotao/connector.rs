@@ -332,7 +332,7 @@ impl FusoConnector {
             Local::now().timestamp_millis()
         );
         let hash = if C.fusotao.compress_proofs {
-            let xt: sub_api::UncheckedExtrinsicV4<_, _> = sub_api::compose_extrinsic!(
+            let xt: sub_api::UncheckedExtrinsicV4<_> = sub_api::compose_extrinsic!(
                 api,
                 "Verifier",
                 "verify_compress",
@@ -341,7 +341,7 @@ impl FusoConnector {
             api.send_extrinsic(xt.hex_encode(), sub_api::XtStatus::InBlock)
                 .map_err(|e| anyhow::anyhow!("submitting proofs failed, {:?}", e))?
         } else {
-            let xt: sub_api::UncheckedExtrinsicV4<_, _> =
+            let xt: sub_api::UncheckedExtrinsicV4<_> =
                 sub_api::compose_extrinsic!(api, "Verifier", "verify", batch);
             api.send_extrinsic(xt.hex_encode(), sub_api::XtStatus::InBlock)
                 .map_err(|e| anyhow::anyhow!("submitting proofs failed, {:?}", e))?
