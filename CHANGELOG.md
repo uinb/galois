@@ -1,3 +1,7 @@
+# v0.4.0-dev.8
+
+- fix bug about proof
+
 # v0.4.0-dryrun.1
 
 - test dry-run

@@ -55,10 +55,11 @@ impl FusoConnector {
             .map(|api| api.set_signer(signer.clone()))
             .inspect_err(|e| log::error!("{:?}", e))
             .map_err(|e| anyhow!("Fusotao node not available or metadata check failed: {}", e))?;
+        let proved = Self::sync_proving_progress(&signer.public(), &api)?;
         Ok(Self {
             api,
             signer,
-            proved_event_id: Arc::new(AtomicU64::new(0)),
+            proved_event_id: Arc::new(AtomicU64::new(proved)),
         })
     }
 
