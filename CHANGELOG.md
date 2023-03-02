@@ -1,4 +1,4 @@
-# v0.4.0
+# v0.4.0-rc.0
 
 - remove some features
 - some refactor 
