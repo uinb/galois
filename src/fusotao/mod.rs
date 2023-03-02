@@ -16,6 +16,8 @@ use parity_scale_codec::{Compact, Decode, Encode, WrapperTypeEncode};
 use rust_decimal::{prelude::*, Decimal};
 use serde::{Deserialize, Serialize};
 use smt::{blake2b::Blake2bHasher, default_store::DefaultStore, SparseMerkleTree, H256};
+use sp_core::Pair;
+use std::cmp::Ordering;
 use std::{
     convert::TryInto,
     sync::mpsc::{Receiver, RecvTimeoutError},
