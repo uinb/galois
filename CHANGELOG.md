@@ -1,3 +1,8 @@
+# v0.4.0
+
+- add: verify compress
+- add: some refactor
+- remove: unused features
 
 # v0.4.0-rc.1
 
