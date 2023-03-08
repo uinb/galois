@@ -74,7 +74,7 @@ pub fn write_depth(depth: Vec<Depth>) {
 pub fn init(rx: Receiver<Vec<Output>>) {
     let mut buf = HashMap::<Symbol, (u64, Vec<Output>)>::new();
     std::thread::spawn(move || loop {
-        let cr = match rx.recv_timeout(Duration::from_millis(10_000)) {
+        let cr = match rx.recv_timeout(Duration::from_millis(500)) {
             Ok(p) => p,
             Err(RecvTimeoutError::Timeout) => vec![],
             Err(RecvTimeoutError::Disconnected) => {
@@ -109,6 +109,9 @@ fn get_max_record(symbol: Symbol) -> u64 {
 }
 
 fn flush(symbol: Symbol, pending: &mut Vec<Output>) {
+    if pending.is_empty() {
+        return;
+    }
     let sql = format!(
         r#"INSERT IGNORE INTO t_clearing_result_{}_{}
 (f_event_id,f_order_id,f_user_id,f_status,f_role,f_ask_or_bid,f_price,f_quote_delta,f_base_delta,f_quote_charge,f_base_charge,f_quote_available,f_base_available,f_quote_frozen,f_base_frozen,f_timestamp)

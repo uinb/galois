@@ -1,5 +1,10 @@
+# v0.4.1
+
+- reduce output flush delay
+
 # v0.4.0
 
+(don't use this version)
 - add: verify compress
 - add: some refactor
 - remove: unused features
