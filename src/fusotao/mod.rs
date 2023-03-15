@@ -160,26 +160,6 @@ pub struct Proof {
 }
 
 #[derive(Encode, Decode, Clone, Debug)]
-pub struct DominatorClaimedEvent {
-    dominator: FusoAccountId,
-    pledge: u128,
-}
-
-#[derive(Encode, Decode, Clone, Debug)]
-pub struct CoinHostedEvent {
-    fund_owner: FusoAccountId,
-    dominator: FusoAccountId,
-    amount: u128,
-}
-
-#[derive(Encode, Decode, Clone, Debug)]
-pub struct CoinRevokedEvent {
-    fund_owner: FusoAccountId,
-    dominator: FusoAccountId,
-    amount: u128,
-}
-
-#[derive(Encode, Decode, Clone, Debug)]
 pub struct TokenHostedEvent {
     fund_owner: FusoAccountId,
     dominator: FusoAccountId,
@@ -193,6 +173,35 @@ pub struct TokenRevokedEvent {
     dominator: FusoAccountId,
     token_id: u32,
     amount: u128,
+}
+
+#[derive(Encode, Decode, Clone, Debug)]
+pub struct TokenIssuedEvent {
+    token_id: u32,
+    symbol_name: Vec<u8>,
+}
+
+#[derive(Encode, Decode, Clone, Debug)]
+pub struct BrokerRegisteredEvent {
+    broker_account: FusoAccountId,
+    beneficiary_account: FusoAccountId,
+}
+
+#[derive(Encode, Decode, Clone, Debug)]
+pub struct MarketOpenedEvent {
+    dominator: FusoAccountId,
+    base: u32,
+    quote: u32,
+    base_scale: u8,
+    quote_scale: u8,
+    min_base: u128,
+}
+
+#[derive(Encode, Decode, Clone, Debug)]
+pub struct MarketClosedEvent {
+    dominator: FusoAccountId,
+    base: u32,
+    quote: u32,
 }
 
 impl WrapperTypeEncode for UserId {}

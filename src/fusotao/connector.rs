@@ -20,36 +20,39 @@ use node_api::decoder::{Raw, RuntimeDecoder, StorageHasher};
 use parity_scale_codec::{Decode, Error as CodecError};
 use sp_core::{sr25519::Public, Pair};
 use std::{sync::atomic::Ordering, time::Duration};
-use sub_api::Hash;
+use sub_api::{rpc::WsRpcClient, Hash};
 
 pub struct FusoConnector {
     pub api: FusoApi,
     pub signer: Sr25519Key,
-    pub state: FusoState,
+    pub state: Arc<FusoState>,
 }
 
 impl FusoConnector {
     pub fn new() -> anyhow::Result<Self> {
         let signer = Sr25519Key::from_string(&C.fusotao.key_seed, None)
             .map_err(|e| anyhow!("Invalid fusotao config: {:?}", e))?;
-        let client = sub_api::rpc::WsRpcClient::new(&C.fusotao.node_url);
+        let client = WsRpcClient::new(&C.fusotao.node_url);
         let api = FusoApi::new(client)
             .map(|api| api.set_signer(signer.clone()))
             .inspect_err(|e| log::error!("{:?}", e))
             .map_err(|_| anyhow!("Fusotao node not available or metadata check failed."))?;
         let (block_number, hash) = Self::get_finalized_block(&api)?;
-        let state = Self::fully_sync_chain(&signer.public(), &api, hash, block_number)?;
+        let state = Arc::new(Self::fully_sync_chain(
+            &signer.public(),
+            &api,
+            hash,
+            block_number,
+        )?);
         Ok(Self { api, signer, state })
     }
 
     pub fn start_submitting(&self) -> anyhow::Result<()> {
         let api = self.api.clone();
-        let proved_event_id = self.state.proved_event_id.clone();
-        let who = self.signer.public();
-        let mut last_proved_check_time = Local::now().timestamp();
+        let proving_progress = self.state.proved_event_id.clone();
         std::thread::spawn(move || loop {
-            let start_from = proved_event_id.load(Ordering::Relaxed);
-            let mut new_max_submitted = std::panic::catch_unwind(|| -> u64 {
+            let start_from = proving_progress.load(Ordering::Relaxed);
+            let new_max_submitted = std::panic::catch_unwind(|| -> u64 {
                 let (end_to, truncated) = Self::fetch_proofs(start_from);
                 log::info!("found proofs to submit {}-{}", start_from, end_to);
                 let submit_result = Self::submit_batch(&api, truncated);
@@ -60,15 +63,7 @@ impl FusoConnector {
                 std::thread::sleep(Duration::from_millis(1000));
                 continue;
             }
-            let now = Local::now().timestamp();
-            if now - last_proved_check_time > 60 {
-                new_max_submitted = std::panic::catch_unwind(|| -> u64 {
-                    Self::sync_proving_progress(&who, &api).unwrap_or(new_max_submitted)
-                })
-                .unwrap_or(new_max_submitted);
-                last_proved_check_time = now;
-            }
-            proved_event_id.store(new_max_submitted, Ordering::Relaxed);
+            proving_progress.store(new_max_submitted, Ordering::Relaxed);
         });
         Ok(())
     }
@@ -76,34 +71,19 @@ impl FusoConnector {
     pub fn start_scanning(&self) -> anyhow::Result<()> {
         let api = self.api.clone();
         let who = self.signer.public().clone();
-        let scanning_block = self.state.scanning_progress.clone();
-        log::info!(
-            "start synchronizing from block {}",
-            self.state.scanning_progress.load(Ordering::Relaxed)
-        );
+        let decoder = RuntimeDecoder::new(api.metadata.clone());
+        // after we fully synchronized on-chain data, we should start from here
+        let fuso_state = self.state.clone();
         std::thread::spawn(move || loop {
-            let decoder = RuntimeDecoder::new(api.metadata.clone());
-            let at = scanning_block.load(Ordering::Relaxed);
-            match Self::sync_blocks_or_wait(at, &api, &who, &decoder) {
-                Ok((cmds, sync)) => {
-                    if !cmds.is_empty() {
-                        log::info!("prepare handle {} events at block {:?}", cmds.len(), at);
-                        match sequence::insert_sequences(&cmds) {
-                            Ok(()) => {
-                                scanning_block.fetch_add(1, Ordering::Relaxed);
-                                log::info!("all events before block {} synchronized", at);
-                            }
-                            Err(e) => {
-                                log::error!("save sequences at block {} failed, {:?}", at, e);
-                            }
-                        }
-                    } else {
-                        scanning_block.fetch_add(1, Ordering::Relaxed);
-                        log::debug!("no interested events found before block {:?}", sync);
-                    }
+            let at = fuso_state.scanning_progress.load(Ordering::Relaxed);
+            log::info!("handle block {} ==>", at);
+            match Self::handle_block(&api, &who, at, &decoder, &fuso_state) {
+                Ok(()) => {
+                    fuso_state.scanning_progress.fetch_add(1, Ordering::Relaxed);
                 }
-                Err(e) => log::error!("sync block {} failed, {:?}", at, e),
+                Err(e) => log::error!("handle block {} failed, {:?}", at, e),
             }
+            std::thread::sleep(Duration::from_millis(4000));
         });
         Ok(())
     }
@@ -112,18 +92,17 @@ impl FusoConnector {
         who: &Public,
         api: &FusoApi,
         hash: Hash,
-        block_number: u32,
+        util: u32,
     ) -> anyhow::Result<FusoState> {
         let state = FusoState::new();
         let decoder = RuntimeDecoder::new(api.metadata.clone());
+
         // proving progress, map AccountId -> Dominator
         let key = api
             .metadata
-            .storage_map_key::<FusoAccountId>("Verifier", "Dominators", *who)
-            .map_err(|e| anyhow!("Read storage failed: {:?}", e))?;
+            .storage_map_key::<FusoAccountId>("Verifier", "Dominators", *who)?;
         let payload = api
-            .get_opaque_storage_by_key_hash(key, Some(hash))
-            .map_err(|e| anyhow!("Read storage failed: {:?}", e))?
+            .get_opaque_storage_by_key_hash(key, Some(hash))?
             .ok_or(anyhow!(""))?;
         let result = Dominator::decode(&mut payload.as_slice())?;
         state
@@ -133,136 +112,90 @@ impl FusoConnector {
         // market list, double map AccountId, Symbol -> Market
         let key = api
             .metadata
-            .storage_double_map_partial_key::<FusoAccountId>("Market", "Markets", who)
-            .map_err(|e| anyhow!("Read storage failed: {:?}", e))?;
+            .storage_double_map_partial_key::<FusoAccountId>("Market", "Markets", who)?;
         let payload = api
-            .get_opaque_storage_pairs_by_key_hash(key, Some(hash))
-            .map_err(|e| anyhow!("Read storage failed: {:?}", e))?
+            .get_opaque_storage_pairs_by_key_hash(key, Some(hash))?
             .ok_or(anyhow!(""))?;
         for (k, v) in payload.into_iter() {
-            let symbol =
-                RuntimeDecoder::extract_double_map_identifier::<(u32, u32), FusoAccountId>(
-                    StorageHasher::Blake2_128Concat,
-                    StorageHasher::Blake2_128Concat,
-                    who,
-                    &mut k.as_slice(),
-                )
-                .map_err(|e| anyhow!("Decode storage key failed: {:?}", e))?;
-            let market = OnchainSymbol::decode(&mut v.as_slice())
-                .map_err(|e| anyhow!("Decode market failed: {:?}", e))?;
+            let symbol = RuntimeDecoder::extract_double_map_identifier::<(u32, u32), FusoAccountId>(
+                StorageHasher::Blake2_128Concat,
+                StorageHasher::Blake2_128Concat,
+                who,
+                &mut k.as_slice(),
+            )?;
+            let market = OnchainSymbol::decode(&mut v.as_slice())?;
             state.symbols.insert(symbol, market);
         }
+
         // token list, map TokenId -> Token
-        let key = api
-            .metadata
-            .storage_map_key_prefix("Token", "Tokens")
-            .map_err(|e| anyhow!("Read storage failed: {:?}", e))?;
+        let key = api.metadata.storage_map_key_prefix("Token", "Tokens")?;
         let payload = api
-            .get_opaque_storage_pairs_by_key_hash(key, Some(hash))
-            .map_err(|e| anyhow!("Read storage failed: {:?}", e))?
+            .get_opaque_storage_pairs_by_key_hash(key, Some(hash))?
             .ok_or(anyhow!(""))?;
         for (k, v) in payload.into_iter() {
             let token_id: u32 = RuntimeDecoder::extract_map_identifier(
                 StorageHasher::Twox64Concat,
                 &mut k.as_slice(),
-            )
-            .map_err(|e| anyhow!("Decode storage key failed: {:?}", e))?;
-            let token = OnchainToken::decode(&mut v.as_slice())
-                .map_err(|e| anyhow!("Decode token failed: {:?}", e))?;
+            )?;
+            let token = OnchainToken::decode(&mut v.as_slice())?;
             state.currencies.insert(token_id, token);
         }
+
         // broker list, map AccountId -> Broker
-        let key = api
-            .metadata
-            .storage_map_key_prefix("Market", "Brokers")
-            .map_err(|e| anyhow!("Read storage failed: {:?}", e))?;
-        let payload = api
-            .get_keys(key, Some(hash))
-            .map_err(|e| anyhow!("Read storage failed: {:?}", e))?
-            .ok_or(anyhow!(""))?;
+        let key = api.metadata.storage_map_key_prefix("Market", "Brokers")?;
+        let payload = api.get_keys(key, Some(hash))?.ok_or(anyhow!(""))?;
         for k in payload.into_iter() {
             let broker: FusoAccountId = RuntimeDecoder::extract_map_identifier(
                 StorageHasher::Blake2_128Concat,
                 &mut k.as_slice(),
-            )
-            .map_err(|e| anyhow!("Decode storage key failed: {:?}", e))?;
+            )?;
             state.brokers.insert(broker, rand::random());
         }
+
         // pending receipts, double map AccountId, AccountId -> Receipt
         let key = api
             .metadata
-            .storage_double_map_partial_key::<FusoAccountId>("Verifier", "Receipts", who)
-            .map_err(|e| anyhow!("Read storage failed: {:?}", e))?;
+            .storage_double_map_partial_key::<FusoAccountId>("Verifier", "Receipts", who)?;
         let payload = api
-            .get_opaque_storage_pairs_by_key_hash(key, Some(hash))
-            .map_err(|e| anyhow!("Read storage failed: {:?}", e))?
+            .get_opaque_storage_pairs_by_key_hash(key, Some(hash))?
             .ok_or(anyhow!(""))?;
+        let mut commands = vec![];
         for (k, v) in payload.into_iter() {
-            let user =
-                RuntimeDecoder::extract_double_map_identifier::<FusoAccountId, FusoAccountId>(
-                    StorageHasher::Blake2_128Concat,
-                    StorageHasher::Blake2_128Concat,
-                    who,
-                    &mut k.as_slice(),
-                )
-                .map_err(|e| anyhow!("Decode storage key failed: {:?}", e))?;
-            let unexecuted = decoder
-                .decode_raw_enum(
-                    &mut v.as_slice(),
-                    move |i, stream| -> Result<Command, CodecError> {
-                        let mut cmd = Command::default();
-                        cmd.cmd = crate::cmd::TRANSFER_IN;
-                        cmd.currency = u32::decode(stream).ok();
-                        cmd.amount = to_decimal_represent(u128::decode(stream)?);
-                        cmd.user_id = Some(format!("{}", user));
-                        cmd.block_number = u32::decode(stream).ok();
-                        // TODO not a good idea to read the hash if the node isn't a full node
-                        cmd.extrinsic_hash = Some(Default::default());
-                        match i {
-                            0 => {
-                                cmd.cmd = crate::cmd::TRANSFER_IN;
-                                Ok(cmd)
-                            }
-                            1 | 2 => {
-                                cmd.cmd = crate::cmd::TRANSFER_OUT;
-                                Ok(cmd)
-                            }
-                            _ => Err("Invalid enum variant".into()),
+            let user = RuntimeDecoder::extract_double_map_identifier::<FusoAccountId, FusoAccountId>(
+                StorageHasher::Blake2_128Concat,
+                StorageHasher::Blake2_128Concat,
+                who,
+                &mut k.as_slice(),
+            )?;
+            let unexecuted = decoder.decode_raw_enum(
+                &mut v.as_slice(),
+                move |i, stream| -> Result<Command, CodecError> {
+                    let mut cmd = Command::default();
+                    cmd.cmd = crate::cmd::TRANSFER_IN;
+                    cmd.currency = Some(u32::decode(stream)?);
+                    cmd.amount = to_decimal_represent(u128::decode(stream)?);
+                    cmd.user_id = Some(format!("{}", user));
+                    cmd.block_number = Some(u32::decode(stream)?);
+                    // FIXME not a good idea to read the hash if the node isn't a full node
+                    cmd.extrinsic_hash = Some(Default::default());
+                    match i {
+                        0 => {
+                            cmd.cmd = crate::cmd::TRANSFER_IN;
+                            Ok(cmd)
                         }
-                    },
-                )
-                .map_err(|_| anyhow!("couldn't decode onchain Receipt"))?;
-            println!("{:?}", unexecuted);
-            // TODO insert sequence
+                        1 | 2 => {
+                            cmd.cmd = crate::cmd::TRANSFER_OUT;
+                            Ok(cmd)
+                        }
+                        _ => Err("Invalid enum variant".into()),
+                    }
+                },
+            )?;
+            commands.push(unexecuted);
         }
-        state
-            .scanning_progress
-            .store(block_number, Ordering::Relaxed);
-        println!("{:?}", state);
-        // Ok(state)
-        Err(anyhow!(""))
-    }
-
-    pub fn sync_proving_progress(who: &Public, api: &FusoApi) -> anyhow::Result<u64> {
-        log::info!(
-            "start to synchronize proving progress, time is {} now",
-            Local::now().timestamp_millis()
-        );
-        let key = api
-            .metadata
-            .storage_map_key::<FusoAccountId>("Verifier", "Dominators", *who)
-            .map_err(|e| anyhow!("Read storage failed: {:?}", e))?;
-        let payload = api
-            .get_opaque_storage_by_key_hash(key, None)
-            .map_err(|e| anyhow!("Read storage failed: {:?}", e))?
-            .ok_or(anyhow!(""))?;
-        let result = Dominator::decode(&mut payload.as_slice())?;
-        log::info!(
-            "synchronizing proving progress: {}, time is {} now",
-            result.sequence.0,
-            Local::now().timestamp_millis()
-        );
-        Ok(result.sequence.0)
+        sequence::insert_sequences(&commands)?;
+        state.scanning_progress.store(util + 1, Ordering::Relaxed);
+        Ok(state)
     }
 
     fn handle_submit_result(result: anyhow::Result<()>, (start_from, end_to): (u64, u64)) -> u64 {
@@ -272,69 +205,120 @@ impl FusoConnector {
                 end_to
             }
             Err(e) => {
-                log::error!("error occur while submitting proofs, {:?}", e);
+                log::error!("error occured while submitting proofs, {:?}", e);
                 start_from
             }
         }
     }
 
-    async fn resolve_block(
+    fn handle_block(
         api: &FusoApi,
         signer: &FusoAccountId,
-        at: Option<u32>,
+        at: u32,
         decoder: &RuntimeDecoder,
-    ) -> anyhow::Result<Vec<Command>> {
+        state: &Arc<FusoState>,
+    ) -> anyhow::Result<()> {
         use hex::ToHex;
+        // TODO block not ready
         let hash = api
-            .get_block_hash(at)
-            .map_err(|e| anyhow!("Read storage failed: {:?}", e))?;
+            .get_block_hash(Some(at))?
+            .ok_or(anyhow!("Read block at {} failed", at))?;
         let key = api
             .metadata
             .storage_value_key("System", "Events")
             .map_err(|e| anyhow!("Read storage failed: {:?}", e))?;
-        let payload = api.get_opaque_storage_by_key_hash(key, hash)?;
+        let payload = api.get_opaque_storage_by_key_hash(key, Some(hash))?;
         let events = decoder
             .decode_events(&mut payload.unwrap_or(vec![]).as_slice())
             .unwrap_or(vec![]);
-        let mut cmds = vec![];
         for (_, event) in events.into_iter() {
-            match event {
-                Raw::Event(raw) if raw.pallet == "Verifier" => match raw.variant.as_ref() {
-                    "TokenHosted" => {
-                        let decoded = TokenHostedEvent::decode(&mut &raw.data[..]).unwrap();
+            if let Raw::Event(raw) = event {
+                match (raw.pallet.as_ref(), raw.variant.as_ref()) {
+                    ("Verifier", "TokenHosted") => {
+                        let decoded = TokenHostedEvent::decode(&mut &raw.data[..])?;
                         if &decoded.dominator == signer {
                             let mut cmd = Command::default();
                             cmd.cmd = crate::cmd::TRANSFER_IN;
                             cmd.currency = Some(decoded.token_id);
                             cmd.amount = to_decimal_represent(decoded.amount);
                             cmd.user_id = Some(format!("{}", decoded.fund_owner));
-                            cmd.block_number = at.or(Some(0));
-                            cmd.extrinsic_hash =
-                                hash.map(|h| h.encode_hex()).or(Some("".to_string()));
-                            cmds.push(cmd);
+                            cmd.block_number = Some(at);
+                            cmd.extrinsic_hash = Some(hash.encode_hex());
+                            sequence::insert_sequences(&mut vec![cmd])?;
                         }
                     }
-                    "TokenRevoked" => {
-                        let decoded = TokenRevokedEvent::decode(&mut &raw.data[..]).unwrap();
+                    ("Verifier", "TokenRevoked") => {
+                        let decoded = TokenHostedEvent::decode(&mut &raw.data[..])?;
                         if &decoded.dominator == signer {
                             let mut cmd = Command::default();
                             cmd.cmd = crate::cmd::TRANSFER_OUT;
                             cmd.currency = Some(decoded.token_id);
                             cmd.amount = to_decimal_represent(decoded.amount);
                             cmd.user_id = Some(format!("{}", decoded.fund_owner));
-                            cmd.block_number = at.or(Some(0));
-                            cmd.extrinsic_hash =
-                                hash.map(|h| h.encode_hex()).or(Some("".to_string()));
-                            cmds.push(cmd);
+                            cmd.block_number = Some(at);
+                            cmd.extrinsic_hash = Some(hash.encode_hex());
+                            sequence::insert_sequences(&mut vec![cmd])?;
+                        }
+                    }
+                    ("Token", "TokenIssued") => {
+                        let decoded = TokenIssuedEvent::decode(&mut &raw.data[..])?;
+                        let key = api
+                            .metadata
+                            .storage_map_key::<u32>("Token", "Tokens", decoded.token_id)
+                            .map_err(|e| anyhow!("Read storage failed: {:?}", e))?;
+                        let payload = api
+                            .get_opaque_storage_by_key_hash(key, Some(hash))?
+                            .ok_or(anyhow::anyhow!(""))?;
+                        let token = OnchainToken::decode(&mut payload.as_slice())?;
+                        state.currencies.insert(decoded.token_id, token);
+                    }
+                    ("Market", "BrokerRegistered") => {
+                        let decoded = BrokerRegisteredEvent::decode(&mut &raw.data[..])?;
+                        state.brokers.insert(decoded.broker_account, rand::random());
+                    }
+                    ("Market", "MarketOpened") => {
+                        let decoded = MarketOpenedEvent::decode(&mut &raw.data[..])?;
+                        if &decoded.dominator == signer {
+                            state.symbols.insert(
+                                (decoded.base, decoded.quote),
+                                OnchainSymbol {
+                                    min_base: decoded.min_base,
+                                    base_scale: decoded.base_scale,
+                                    quote_scale: decoded.quote_scale,
+                                    status: MarketStatus::Open,
+                                    trading_rewards: true,
+                                    liquidity_rewards: true,
+                                    unavailable_after: None,
+                                },
+                            );
+                            // let mut cmd = Command::default();
+                            // cmd.cmd = crate::cmd::UPDATE_SYMBOL;
+                            // cmd.symbol = Some((decoded.base, decoded.quote));
+                            // cmd.open = Some(true);
+                            // cmd.base_scale = Some(decoded.base_scale);
+                            // cmd.quote_scale = Some(decoded.quote_scale);
+                            // cmd.taker_fee = Some();
+                            // cmd.maker_fee = Some();
+                            // cmd.base_maker_fee = Some();
+                            // cmd.base_taker_fee = Some();
+                            // fee_times = Some();
+                            // min_amount = Some();
+                            // min_vol = Some();
+                            // enable_market_order = Some(false);
+                            // sequence::insert_sequences(&mut vec![cmd])?;
+                        }
+                    }
+                    ("Market", "MarketClosed") => {
+                        let decoded = MarketClosedEvent::decode(&mut &raw.data[..])?;
+                        if &decoded.dominator == signer {
+                            state.symbols.remove(&(decoded.base, decoded.quote));
                         }
                     }
                     _ => {}
-                },
-                Raw::Event(event) => log::debug!("other event: {:?}", event),
-                Raw::Error(error) => log::debug!("runtime error: {:?}", error),
+                }
             }
         }
-        Ok(cmds)
+        Ok(())
     }
 
     fn fetch_proofs(start_from: u64) -> (u64, Vec<RawParameter>) {
@@ -364,53 +348,6 @@ impl FusoConnector {
         Ok((block_number, hash))
     }
 
-    fn sync_blocks_or_wait(
-        from_block_included: u32,
-        api: &FusoApi,
-        who: &FusoAccountId,
-        decoder: &RuntimeDecoder,
-    ) -> anyhow::Result<(Vec<Command>, u32)> {
-        let finalized_block_hash = api
-            .get_finalized_head()?
-            .ok_or(anyhow!("finalized headers couldn't be found"))?;
-        let finalized_block: sub_api::SignedBlock<FusoBlock> = api
-            .get_signed_block(Some(finalized_block_hash))?
-            .ok_or(anyhow!(
-                "signed block {} couldn't be found",
-                finalized_block_hash
-            ))?;
-        let finalized_block_number = finalized_block.block.header.number;
-        log::info!(
-            "current block: {}, finalized block: {}, {:?}",
-            from_block_included,
-            finalized_block_number,
-            finalized_block_hash,
-        );
-        if from_block_included > finalized_block_number {
-            std::thread::sleep(Duration::from_millis(7000));
-            return Ok((vec![], from_block_included));
-        }
-        let mut f = vec![];
-        let mut i = 0;
-        while from_block_included + i <= finalized_block_number {
-            f.push(Self::resolve_block(
-                api,
-                who,
-                Some(from_block_included + i),
-                decoder,
-            ));
-            i += 1;
-            if f.len() == 10 {
-                break;
-            }
-        }
-        let r = async_std::task::block_on(futures::future::try_join_all(f))?
-            .into_iter()
-            .flatten()
-            .collect();
-        Ok((r, from_block_included + i))
-    }
-
     fn compress_proofs(raws: Vec<RawParameter>) -> Vec<u8> {
         let r = raws.encode();
         let uncompress_size = r.len();
@@ -429,7 +366,7 @@ impl FusoConnector {
             return Ok(());
         }
         log::info!(
-            "===> starting to submit_proofs at {}",
+            "[+] starting to submit_proofs at {}",
             Local::now().timestamp_millis()
         );
         let hash = if C.fusotao.compress_proofs {
@@ -440,19 +377,21 @@ impl FusoConnector {
                 Self::compress_proofs(batch)
             );
             api.send_extrinsic(xt.hex_encode(), sub_api::XtStatus::InBlock)
-                .map_err(|e| anyhow!("submitting proofs failed, {:?}", e))?
+                .map_err(|e| anyhow!("[-] submitting proofs failed, {:?}", e))?
         } else {
             let xt: sub_api::UncheckedExtrinsicV4<_> =
                 sub_api::compose_extrinsic!(api, "Verifier", "verify", batch);
             api.send_extrinsic(xt.hex_encode(), sub_api::XtStatus::InBlock)
-                .map_err(|e| anyhow!("submitting proofs failed, {:?}", e))?
+                .map_err(|e| anyhow!("[-] submitting proofs failed, {:?}", e))?
         };
         log::info!(
-            "<=== ending submit_proofs at {}",
+            "[+] ending submit_proofs at {}",
             Local::now().timestamp_millis()
         );
         if hash.is_none() {
-            Err(anyhow!("extrinsic executed failed"))
+            Err(anyhow!(
+                "[-] verify extrinsic executed failed, no extrinsic returns"
+            ))
         } else {
             log::info!(
                 "[+] submitting proofs ok, extrinsic hash: {:?}",
