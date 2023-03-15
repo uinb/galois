@@ -291,27 +291,52 @@ impl FusoConnector {
                                     unavailable_after: None,
                                 },
                             );
-                            // let mut cmd = Command::default();
-                            // cmd.cmd = crate::cmd::UPDATE_SYMBOL;
-                            // cmd.symbol = Some((decoded.base, decoded.quote));
-                            // cmd.open = Some(true);
-                            // cmd.base_scale = Some(decoded.base_scale);
-                            // cmd.quote_scale = Some(decoded.quote_scale);
-                            // cmd.taker_fee = Some();
-                            // cmd.maker_fee = Some();
-                            // cmd.base_maker_fee = Some();
-                            // cmd.base_taker_fee = Some();
-                            // fee_times = Some();
-                            // min_amount = Some();
-                            // min_vol = Some();
-                            // enable_market_order = Some(false);
-                            // sequence::insert_sequences(&mut vec![cmd])?;
+                            // TODO impl Into<Command> for SymbolCmd
+                            let mut cmd = Command::default();
+                            let milli = Decimal::from_str("0.001").unwrap();
+                            cmd.cmd = crate::cmd::UPDATE_SYMBOL;
+                            cmd.base = Some(decoded.base);
+                            cmd.quote = Some(decoded.quote);
+                            cmd.open = Some(true);
+                            cmd.base_scale = Some(decoded.base_scale.into());
+                            cmd.quote_scale = Some(decoded.quote_scale.into());
+                            cmd.taker_fee = Some(milli);
+                            cmd.maker_fee = Some(milli);
+                            cmd.min_amount = to_decimal_represent(decoded.min_base);
+                            // DEPRECATED
+                            cmd.base_maker_fee = Some(milli);
+                            cmd.base_taker_fee = Some(milli);
+                            cmd.fee_times = Some(1);
+                            cmd.min_vol = Some(Decimal::from_str("10").unwrap());
+                            cmd.enable_market_order = Some(false);
+                            sequence::insert_sequences(&mut vec![cmd])?;
                         }
                     }
                     ("Market", "MarketClosed") => {
                         let decoded = MarketClosedEvent::decode(&mut &raw.data[..])?;
                         if &decoded.dominator == signer {
-                            state.symbols.remove(&(decoded.base, decoded.quote));
+                            let market = state.symbols.remove(&(decoded.base, decoded.quote));
+                            let mut cmd = Command::default();
+                            let milli = Decimal::from_str("0.001").unwrap();
+                            cmd.cmd = crate::cmd::UPDATE_SYMBOL;
+                            cmd.base = Some(decoded.base);
+                            cmd.quote = Some(decoded.quote);
+                            cmd.open = Some(false);
+                            cmd.taker_fee = Some(milli);
+                            cmd.maker_fee = Some(milli);
+                            let (base_scale, quote_scale, min_amount) = market
+                                .map(|(_, m)| (m.base_scale, m.quote_scale, m.min_base))
+                                .ok_or(anyhow!(""))?;
+                            cmd.base_scale = Some(base_scale.into());
+                            cmd.quote_scale = Some(quote_scale.into());
+                            cmd.min_amount = to_decimal_represent(min_amount);
+                            // DEPRECATED
+                            cmd.base_maker_fee = Some(milli);
+                            cmd.base_taker_fee = Some(milli);
+                            cmd.fee_times = Some(1);
+                            cmd.min_vol = Some(Decimal::from_str("10").unwrap());
+                            cmd.enable_market_order = Some(false);
+                            sequence::insert_sequences(&mut vec![cmd])?;
                         }
                     }
                     _ => {}
