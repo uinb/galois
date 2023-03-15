@@ -13,22 +13,31 @@
 // limitations under the License.
 
 use crate::core::{Currency, Symbol};
-use async_std::sync::RwLock;
 use parity_scale_codec::{Decode, Encode};
-use std::{collections::HashMap, sync::Arc};
 
-pub type FusoTradingMetadata = Arc<RwLock<TradingMetadata>>;
-
-#[derive(Clone, Decode, Encode)]
-pub struct OnchainCurrency {}
-
-#[derive(Clone, Decode, Encode)]
-pub struct OnchainSymbol {}
-
-#[derive(Clone)]
-pub struct TradingMetadata {
-    symbols: HashMap<Symbol, OnchainSymbol>,
-    currencies: HashMap<Currency, OnchainCurrency>,
+#[derive(Clone, Encode, Decode, Eq, PartialEq, Debug)]
+pub enum MarketStatus {
+    Registered,
+    Open,
+    Closed,
 }
 
-impl TradingMetadata {}
+#[derive(Clone, Decode, Encode, Debug)]
+pub struct OnchainSymbol {
+    pub min_base: u128,
+    pub base_scale: u8,
+    pub quote_scale: u8,
+    pub status: MarketStatus,
+    pub trading_rewards: bool,
+    pub liquidity_rewards: bool,
+    pub unavailable_after: Option<super::BlockNumber>,
+}
+
+#[derive(Encode, Decode, Clone, PartialEq, Eq, Debug)]
+pub enum OnchainToken {
+    // symbol, contract_address, total, stable, decimals
+    NEP141(Vec<u8>, Vec<u8>, u128, bool, u8),
+    ERC20(Vec<u8>, Vec<u8>, u128, bool, u8),
+    BEP20(Vec<u8>, Vec<u8>, u128, bool, u8),
+    FND10(Vec<u8>, u128),
+}

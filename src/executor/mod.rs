@@ -32,7 +32,7 @@ use std::{
     convert::TryInto,
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc::{Receiver, Sender},
+        mpsc::{self, Receiver, Sender},
         Arc,
     },
 };
@@ -43,10 +43,11 @@ type DriverChannel = Receiver<Input>;
 
 pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data, ready: Arc<AtomicBool>) {
     std::thread::spawn(move || {
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = mpsc::channel();
         fusotao::init(rx).unwrap();
         let prover = Prover::new(tx);
         ready.store(true, Ordering::Relaxed);
+        let mut ephemeral = Ephemeral::new();
         log::info!("executor initialized");
         loop {
             let fusion = recv.recv().unwrap();
@@ -54,7 +55,7 @@ pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data, ready: A
                 Input::NonModifier(whistle) => {
                     let (s, r) = (whistle.session, whistle.req_id);
                     if let Ok(inspection) = whistle.try_into() {
-                        // only EventsError::Interrupted might return, so we have no choices
+                        // potential EventsError::Interrupted
                         do_inspect(inspection, &data).unwrap();
                     } else {
                         server::publish(server::Message::with_payload(s, r, vec![]));
@@ -64,7 +65,8 @@ pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data, ready: A
                     let id = seq.id;
                     match seq.try_into() {
                         Ok(event) => {
-                            let result = handle_event(event, &mut data, &sender, &prover);
+                            let result =
+                                handle_event(event, &mut data, &mut ephemeral, &sender, &prover);
                             match result {
                                 Err(EventsError::EventRejected(id, msg)) => {
                                     log::info!("Error occur in sequence {}: {:?}", id, msg);
@@ -90,6 +92,7 @@ pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data, ready: A
 fn handle_event(
     event: Event,
     data: &mut Data,
+    ephemeral: &mut Ephemeral,
     sender: &OutputChannel,
     prover: &Prover,
 ) -> EventExecutionResult {
@@ -237,6 +240,12 @@ fn handle_event(
             Ok(())
         }
         Event::TransferOut(id, cmd, _) => {
+            if !ephemeral.save_receipt((cmd.block_number, cmd.user_id)) {
+                return Err(EventsError::EventRejected(
+                    id,
+                    anyhow::anyhow!("Duplicated transfer_out extrinsic"),
+                ));
+            }
             log::info!(
                 "predicate root=0x{} before applying {}",
                 hex::encode(data.merkle_tree.root()),
@@ -269,6 +278,12 @@ fn handle_event(
             }
         }
         Event::TransferIn(id, cmd, _) => {
+            if !ephemeral.save_receipt((cmd.block_number, cmd.user_id)) {
+                return Err(EventsError::EventRejected(
+                    id,
+                    anyhow::anyhow!("Duplicated transfer_in extrinsic"),
+                ));
+            }
             if data.tvl + cmd.amount >= crate::core::max_number() {
                 let before =
                     assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.currency);

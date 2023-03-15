@@ -12,38 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{config::C, fusotao::*, input::Command, sequence};
+use super::*;
+use crate::{config::C, input::Command, sequence};
 use anyhow::anyhow;
 use chrono::Local;
-use memmap::MmapMut;
-use node_api::events::{EventsDecoder, Raw};
-use parity_scale_codec::Decode;
+use node_api::decoder::{Raw, RuntimeDecoder, StorageHasher};
+use parity_scale_codec::{Decode, Error as CodecError};
 use sp_core::{sr25519::Public, Pair};
-use std::{
-    convert::TryInto,
-    fs::OpenOptions,
-    path::PathBuf,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
+use std::{sync::atomic::Ordering, time::Duration};
+use sub_api::Hash;
 
 pub struct FusoConnector {
     pub api: FusoApi,
     pub signer: Sr25519Key,
-    pub proved_event_id: Arc<AtomicU64>,
-}
-
-#[derive(Clone, Decode, Debug, Default)]
-pub struct Dominator {
-    pub name: Vec<u8>,
-    pub staked: u128,
-    pub merkle_root: [u8; 32],
-    pub start_from: u32,
-    pub sequence: (u64, u32),
-    pub status: u8,
+    pub state: FusoState,
 }
 
 impl FusoConnector {
@@ -54,18 +36,15 @@ impl FusoConnector {
         let api = FusoApi::new(client)
             .map(|api| api.set_signer(signer.clone()))
             .inspect_err(|e| log::error!("{:?}", e))
-            .map_err(|e| anyhow!("Fusotao node not available or metadata check failed: {}", e))?;
-        let proved = Self::sync_proving_progress(&signer.public(), &api)?;
-        Ok(Self {
-            api,
-            signer,
-            proved_event_id: Arc::new(AtomicU64::new(proved)),
-        })
+            .map_err(|_| anyhow!("Fusotao node not available or metadata check failed."))?;
+        let (block_number, hash) = Self::get_finalized_block(&api)?;
+        let state = Self::fully_sync_chain(&signer.public(), &api, hash, block_number)?;
+        Ok(Self { api, signer, state })
     }
 
     pub fn start_submitting(&self) -> anyhow::Result<()> {
         let api = self.api.clone();
-        let proved_event_id = self.proved_event_id.clone();
+        let proved_event_id = self.state.proved_event_id.clone();
         let who = self.signer.public();
         let mut last_proved_check_time = Local::now().timestamp();
         std::thread::spawn(move || loop {
@@ -97,60 +76,171 @@ impl FusoConnector {
     pub fn start_scanning(&self) -> anyhow::Result<()> {
         let api = self.api.clone();
         let who = self.signer.public().clone();
-        // TODO fetch from chain
-        let path: PathBuf = [&C.sequence.coredump_dir, "fusotao.blk"].iter().collect();
-        let finalized_file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(&path)?;
-        finalized_file.set_len(4)?;
-        let mut blk = unsafe { MmapMut::map_mut(&finalized_file)? };
-        let mut from_block_number = u32::from_le_bytes(blk.as_ref().try_into()?);
-        if from_block_number == 0 {
-            if !C.sequence.enable_from_genesis {
-                panic!(
-                    "couldn't load block number from mmap, add `-g` to force start from genesis"
-                );
-            } else {
-                let at = C.fusotao.claim_block;
-                from_block_number = at;
-            }
-        }
-        let decoder = EventsDecoder::new(api.metadata.clone());
-        log::info!("start synchronizing from block {}", from_block_number);
+        let scanning_block = self.state.scanning_progress.clone();
+        log::info!(
+            "start synchronizing from block {}",
+            self.state.scanning_progress.load(Ordering::Relaxed)
+        );
         std::thread::spawn(move || loop {
-            match Self::sync_blocks_or_wait(from_block_number, &api, &who, &decoder) {
+            let decoder = RuntimeDecoder::new(api.metadata.clone());
+            let at = scanning_block.load(Ordering::Relaxed);
+            match Self::sync_blocks_or_wait(at, &api, &who, &decoder) {
                 Ok((cmds, sync)) => {
                     if !cmds.is_empty() {
-                        log::info!(
-                            "prepare handle {} events before block {:?}",
-                            cmds.len(),
-                            sync
-                        );
+                        log::info!("prepare handle {} events at block {:?}", cmds.len(), at);
                         match sequence::insert_sequences(&cmds) {
                             Ok(()) => {
-                                from_block_number = sync;
-                                blk[..].copy_from_slice(&sync.to_le_bytes()[..]);
-                                // FIXME commit manually after memmap flush ok
-                                blk.flush().unwrap();
-                                log::info!("all events before block {} synchronized", sync);
+                                scanning_block.fetch_add(1, Ordering::Relaxed);
+                                log::info!("all events before block {} synchronized", at);
                             }
-                            Err(_) => {
-                                log::warn!("save sequences from block {} failed", from_block_number)
+                            Err(e) => {
+                                log::error!("save sequences at block {} failed, {:?}", at, e);
                             }
                         }
                     } else {
-                        from_block_number = sync;
-                        blk[..].copy_from_slice(&sync.to_le_bytes()[..]);
-                        blk.flush().unwrap();
+                        scanning_block.fetch_add(1, Ordering::Relaxed);
                         log::debug!("no interested events found before block {:?}", sync);
                     }
                 }
-                Err(e) => log::error!("sync blocks failed, {:?}", e),
+                Err(e) => log::error!("sync block {} failed, {:?}", at, e),
             }
         });
         Ok(())
+    }
+
+    fn fully_sync_chain(
+        who: &Public,
+        api: &FusoApi,
+        hash: Hash,
+        block_number: u32,
+    ) -> anyhow::Result<FusoState> {
+        let state = FusoState::new();
+        let decoder = RuntimeDecoder::new(api.metadata.clone());
+        // proving progress, map AccountId -> Dominator
+        let key = api
+            .metadata
+            .storage_map_key::<FusoAccountId>("Verifier", "Dominators", *who)
+            .map_err(|e| anyhow!("Read storage failed: {:?}", e))?;
+        let payload = api
+            .get_opaque_storage_by_key_hash(key, Some(hash))
+            .map_err(|e| anyhow!("Read storage failed: {:?}", e))?
+            .ok_or(anyhow!(""))?;
+        let result = Dominator::decode(&mut payload.as_slice())?;
+        state
+            .proved_event_id
+            .store(result.sequence.0, Ordering::Relaxed);
+
+        // market list, double map AccountId, Symbol -> Market
+        let key = api
+            .metadata
+            .storage_double_map_partial_key::<FusoAccountId>("Market", "Markets", who)
+            .map_err(|e| anyhow!("Read storage failed: {:?}", e))?;
+        let payload = api
+            .get_opaque_storage_pairs_by_key_hash(key, Some(hash))
+            .map_err(|e| anyhow!("Read storage failed: {:?}", e))?
+            .ok_or(anyhow!(""))?;
+        for (k, v) in payload.into_iter() {
+            let symbol =
+                RuntimeDecoder::extract_double_map_identifier::<(u32, u32), FusoAccountId>(
+                    StorageHasher::Blake2_128Concat,
+                    StorageHasher::Blake2_128Concat,
+                    who,
+                    &mut k.as_slice(),
+                )
+                .map_err(|e| anyhow!("Decode storage key failed: {:?}", e))?;
+            let market = OnchainSymbol::decode(&mut v.as_slice())
+                .map_err(|e| anyhow!("Decode market failed: {:?}", e))?;
+            state.symbols.insert(symbol, market);
+        }
+        // token list, map TokenId -> Token
+        let key = api
+            .metadata
+            .storage_map_key_prefix("Token", "Tokens")
+            .map_err(|e| anyhow!("Read storage failed: {:?}", e))?;
+        let payload = api
+            .get_opaque_storage_pairs_by_key_hash(key, Some(hash))
+            .map_err(|e| anyhow!("Read storage failed: {:?}", e))?
+            .ok_or(anyhow!(""))?;
+        for (k, v) in payload.into_iter() {
+            let token_id: u32 = RuntimeDecoder::extract_map_identifier(
+                StorageHasher::Twox64Concat,
+                &mut k.as_slice(),
+            )
+            .map_err(|e| anyhow!("Decode storage key failed: {:?}", e))?;
+            let token = OnchainToken::decode(&mut v.as_slice())
+                .map_err(|e| anyhow!("Decode token failed: {:?}", e))?;
+            state.currencies.insert(token_id, token);
+        }
+        // broker list, map AccountId -> Broker
+        let key = api
+            .metadata
+            .storage_map_key_prefix("Market", "Brokers")
+            .map_err(|e| anyhow!("Read storage failed: {:?}", e))?;
+        let payload = api
+            .get_keys(key, Some(hash))
+            .map_err(|e| anyhow!("Read storage failed: {:?}", e))?
+            .ok_or(anyhow!(""))?;
+        for k in payload.into_iter() {
+            let broker: FusoAccountId = RuntimeDecoder::extract_map_identifier(
+                StorageHasher::Blake2_128Concat,
+                &mut k.as_slice(),
+            )
+            .map_err(|e| anyhow!("Decode storage key failed: {:?}", e))?;
+            state.brokers.insert(broker, rand::random());
+        }
+        // pending receipts, double map AccountId, AccountId -> Receipt
+        let key = api
+            .metadata
+            .storage_double_map_partial_key::<FusoAccountId>("Verifier", "Receipts", who)
+            .map_err(|e| anyhow!("Read storage failed: {:?}", e))?;
+        let payload = api
+            .get_opaque_storage_pairs_by_key_hash(key, Some(hash))
+            .map_err(|e| anyhow!("Read storage failed: {:?}", e))?
+            .ok_or(anyhow!(""))?;
+        for (k, v) in payload.into_iter() {
+            let user =
+                RuntimeDecoder::extract_double_map_identifier::<FusoAccountId, FusoAccountId>(
+                    StorageHasher::Blake2_128Concat,
+                    StorageHasher::Blake2_128Concat,
+                    who,
+                    &mut k.as_slice(),
+                )
+                .map_err(|e| anyhow!("Decode storage key failed: {:?}", e))?;
+            let unexecuted = decoder
+                .decode_raw_enum(
+                    &mut v.as_slice(),
+                    move |i, stream| -> Result<Command, CodecError> {
+                        let mut cmd = Command::default();
+                        cmd.cmd = crate::cmd::TRANSFER_IN;
+                        cmd.currency = u32::decode(stream).ok();
+                        cmd.amount = to_decimal_represent(u128::decode(stream)?);
+                        cmd.user_id = Some(format!("{}", user));
+                        cmd.block_number = u32::decode(stream).ok();
+                        // TODO not a good idea to read the hash if the node isn't a full node
+                        cmd.extrinsic_hash = Some(Default::default());
+                        match i {
+                            0 => {
+                                cmd.cmd = crate::cmd::TRANSFER_IN;
+                                Ok(cmd)
+                            }
+                            1 | 2 => {
+                                cmd.cmd = crate::cmd::TRANSFER_OUT;
+                                Ok(cmd)
+                            }
+                            _ => Err("Invalid enum variant".into()),
+                        }
+                    },
+                )
+                .map_err(|_| anyhow!("couldn't decode onchain Receipt"))?;
+            println!("{:?}", unexecuted);
+            // TODO insert sequence
+        }
+        state
+            .scanning_progress
+            .store(block_number, Ordering::Relaxed);
+        println!("{:?}", state);
+        // Ok(state)
+        Err(anyhow!(""))
     }
 
     pub fn sync_proving_progress(who: &Public, api: &FusoApi) -> anyhow::Result<u64> {
@@ -192,7 +282,7 @@ impl FusoConnector {
         api: &FusoApi,
         signer: &FusoAccountId,
         at: Option<u32>,
-        decoder: &EventsDecoder,
+        decoder: &RuntimeDecoder,
     ) -> anyhow::Result<Vec<Command>> {
         use hex::ToHex;
         let hash = api
@@ -263,11 +353,22 @@ impl FusoConnector {
         (last_submit, truncated)
     }
 
+    fn get_finalized_block(api: &FusoApi) -> anyhow::Result<(u32, Hash)> {
+        let hash = api
+            .get_finalized_head()?
+            .ok_or(anyhow!("Finalized headers couldn't be found"))?;
+        let block_number = api
+            .get_signed_block(Some(hash))?
+            .ok_or(anyhow!("signed block {} couldn't be found", hash))
+            .map(|b: sub_api::SignedBlock<FusoBlock>| b.block.header.number)?;
+        Ok((block_number, hash))
+    }
+
     fn sync_blocks_or_wait(
         from_block_included: u32,
         api: &FusoApi,
         who: &FusoAccountId,
-        decoder: &EventsDecoder,
+        decoder: &RuntimeDecoder,
     ) -> anyhow::Result<(Vec<Command>, u32)> {
         let finalized_block_hash = api
             .get_finalized_head()?
@@ -339,19 +440,19 @@ impl FusoConnector {
                 Self::compress_proofs(batch)
             );
             api.send_extrinsic(xt.hex_encode(), sub_api::XtStatus::InBlock)
-                .map_err(|e| anyhow::anyhow!("submitting proofs failed, {:?}", e))?
+                .map_err(|e| anyhow!("submitting proofs failed, {:?}", e))?
         } else {
             let xt: sub_api::UncheckedExtrinsicV4<_> =
                 sub_api::compose_extrinsic!(api, "Verifier", "verify", batch);
             api.send_extrinsic(xt.hex_encode(), sub_api::XtStatus::InBlock)
-                .map_err(|e| anyhow::anyhow!("submitting proofs failed, {:?}", e))?
+                .map_err(|e| anyhow!("submitting proofs failed, {:?}", e))?
         };
         log::info!(
             "<=== ending submit_proofs at {}",
             Local::now().timestamp_millis()
         );
         if hash.is_none() {
-            Err(anyhow::anyhow!("extrinsic executed failed"))
+            Err(anyhow!("extrinsic executed failed"))
         } else {
             log::info!(
                 "[+] submitting proofs ok, extrinsic hash: {:?}",

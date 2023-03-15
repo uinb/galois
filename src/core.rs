@@ -12,12 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{
-    collections::HashMap,
-    fs::File,
-    io::{BufReader, BufWriter},
-};
-
 use crate::fusotao::GlobalStates;
 use crate::{assets::Balance, orderbook::OrderBook};
 pub use crate::{
@@ -26,9 +20,15 @@ pub use crate::{
     sequence::InOrOut,
 };
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
+use indexmap::IndexSet;
 use rust_decimal::{prelude::Zero, Decimal};
 use serde::{Deserialize, Serialize};
 use sp_core::ByteArray;
+use std::{
+    collections::HashMap,
+    fs::File,
+    io::{BufReader, BufWriter},
+};
 
 pub type Base = u32;
 pub type Quote = u32;
@@ -156,6 +156,29 @@ pub fn max_number() -> Amount {
     u64::MAX.into()
 }
 
+// we only keep the last 1000 transfer_in/out receipts to remove duplicates
+const RECEIPTS_RECORDS_CAPACITY: usize = 1000;
+
+#[derive(Clone, Debug)]
+pub struct Ephemeral {
+    onchain_receipt_records: IndexSet<(u32, UserId)>,
+}
+
+impl Ephemeral {
+    pub fn new() -> Self {
+        Self {
+            onchain_receipt_records: IndexSet::with_capacity(RECEIPTS_RECORDS_CAPACITY),
+        }
+    }
+
+    pub fn save_receipt(&mut self, id: (u32, UserId)) -> bool {
+        if self.onchain_receipt_records.len() >= RECEIPTS_RECORDS_CAPACITY {
+            self.onchain_receipt_records.pop();
+        }
+        self.onchain_receipt_records.insert(id)
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Data {
     pub orderbooks: HashMap<Symbol, OrderBook>,
@@ -164,8 +187,6 @@ pub struct Data {
     pub current_event_id: u64,
     pub tvl: Amount,
 }
-
-unsafe impl Sync for Data {}
 
 impl Data {
     pub fn new() -> Self {
