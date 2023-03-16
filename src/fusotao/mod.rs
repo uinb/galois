@@ -55,15 +55,14 @@ const MAX_EXTRINSIC_WEIGHT: u128 = 1_000_000_000_000_000_000;
 /// AccountId of chain = MultiAddress<sp_runtime::AccountId32, ()>::Id = GenericAddress::Id
 /// 1. from_ss58check() or from_ss58check_with_version()
 /// 2. new or from public
-pub fn init(rx: Receiver<Proof>) -> anyhow::Result<()> {
+pub fn init(rx: Receiver<Proof>) {
     persistence::init(rx);
     if C.dry_run.is_none() {
-        let connector = FusoConnector::new()?;
-        connector.start_submitting()?;
-        connector.start_scanning()?;
+        let connector = FusoConnector::new().unwrap();
+        connector.start_submitting();
+        connector.start_scanning();
     }
     log::info!("prover initialized");
-    Ok(())
 }
 
 #[derive(Clone, Debug)]

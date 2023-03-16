@@ -19,7 +19,7 @@ pub mod orderbook;
 
 use crate::{
     core::*,
-    fusotao::{self, Prover},
+    fusotao::{Proof, Prover},
     input::{Event, EventsError, Input, Inspection},
     orderbook::*,
     output::{self, Output},
@@ -30,23 +30,17 @@ use rust_decimal::{prelude::*, Decimal};
 use std::{
     collections::HashMap,
     convert::TryInto,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, Sender},
-        Arc,
-    },
+    sync::mpsc::{Receiver, Sender},
 };
 
 type EventExecutionResult = Result<(), EventsError>;
 type OutputChannel = Sender<Vec<Output>>;
 type DriverChannel = Receiver<Input>;
+type ProofChannel = Sender<Proof>;
 
-pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data, ready: Arc<AtomicBool>) {
+pub fn init(recv: DriverChannel, sender: OutputChannel, proofs: ProofChannel, mut data: Data) {
     std::thread::spawn(move || {
-        let (tx, rx) = mpsc::channel();
-        fusotao::init(rx).unwrap();
-        let prover = Prover::new(tx);
-        ready.store(true, Ordering::Relaxed);
+        let prover = Prover::new(proofs);
         let mut ephemeral = Ephemeral::new();
         log::info!("executor initialized");
         loop {

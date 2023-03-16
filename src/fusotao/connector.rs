@@ -47,7 +47,7 @@ impl FusoConnector {
         Ok(Self { api, signer, state })
     }
 
-    pub fn start_submitting(&self) -> anyhow::Result<()> {
+    pub fn start_submitting(&self) {
         let api = self.api.clone();
         let proving_progress = self.state.proved_event_id.clone();
         std::thread::spawn(move || loop {
@@ -65,10 +65,9 @@ impl FusoConnector {
             }
             proving_progress.store(new_max_submitted, Ordering::Relaxed);
         });
-        Ok(())
     }
 
-    pub fn start_scanning(&self) -> anyhow::Result<()> {
+    pub fn start_scanning(&self) {
         let api = self.api.clone();
         let who = self.signer.public().clone();
         let decoder = RuntimeDecoder::new(api.metadata.clone());
@@ -85,7 +84,6 @@ impl FusoConnector {
             }
             std::thread::sleep(Duration::from_millis(4000));
         });
-        Ok(())
     }
 
     fn fully_sync_chain(

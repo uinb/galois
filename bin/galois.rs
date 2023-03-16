@@ -13,34 +13,27 @@
 // limitations under the License.
 
 use clap::Parser;
-use galois::{config, executor, output, sequence, server, snapshot};
+use galois::{config, executor, fusotao, output, sequence, server, snapshot};
 use std::sync::{atomic, mpsc, Arc};
 
 fn start() {
     let (id, coredump) = snapshot::load().unwrap();
     let (output_tx, output_rx) = mpsc::channel();
     let (event_tx, event_rx) = mpsc::channel();
+    let (proof_tx, proof_rx) = mpsc::channel();
     output::init(output_rx);
-    let handler_ready = Arc::new(atomic::AtomicBool::new(false));
-    executor::init(event_rx, output_tx, coredump, handler_ready.clone());
-    while !handler_ready.load(atomic::Ordering::Relaxed) {
-        std::thread::sleep(std::time::Duration::from_millis(500));
-    }
-    let source_ready = Arc::new(atomic::AtomicBool::new(false));
-    sequence::init(event_tx.clone(), id, source_ready.clone());
-    server::init(event_tx, source_ready);
+    fusotao::init(proof_rx);
+    executor::init(event_rx, output_tx, proof_tx, coredump);
+    let ready = Arc::new(atomic::AtomicBool::new(false));
+    sequence::init(event_tx.clone(), id, ready.clone());
+    server::init(event_tx, ready);
 }
 
 fn main() {
     lazy_static::initialize(&config::C);
     let opts = config::GaloisCli::parse();
     match opts.sub {
-        Some(config::SubCmd::EncryptConfig) => {
-            config::print_enc_config_file(config::C.clone()).unwrap();
-            return;
-        }
-        None => {
-            start();
-        }
+        Some(config::SubCmd::EncryptConfig) => config::print_config(config::C.clone()).unwrap(),
+        None => start(),
     }
 }

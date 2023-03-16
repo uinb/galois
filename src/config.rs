@@ -200,7 +200,7 @@ fn init_config_file() -> anyhow::Result<Config> {
     })
 }
 
-pub fn print_enc_config_file(mut cfg: Config) -> anyhow::Result<()> {
+pub fn print_config(mut cfg: Config) -> anyhow::Result<()> {
     let key = std::env::var_os("MAGIC_KEY").ok_or(anyhow::anyhow!("env MAGIC_KEY not set"))?;
     let key = key
         .to_str()
