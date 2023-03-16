@@ -21,12 +21,13 @@ fn start() {
     let (output_tx, output_rx) = mpsc::channel();
     let (event_tx, event_rx) = mpsc::channel();
     let (proof_tx, proof_rx) = mpsc::channel();
+    let (msg_tx, msg_rx) = mpsc::channel();
     output::init(output_rx);
     fusotao::init(proof_rx);
-    executor::init(event_rx, output_tx, proof_tx, coredump);
+    executor::init(event_rx, output_tx, proof_tx, msg_tx, coredump);
     let ready = Arc::new(atomic::AtomicBool::new(false));
     sequence::init(event_tx.clone(), id, ready.clone());
-    server::init(event_tx, ready);
+    server::init(event_tx, msg_rx, ready);
 }
 
 fn main() {

@@ -23,7 +23,9 @@ use crate::{
     input::{Event, EventsError, Input, Inspection},
     orderbook::*,
     output::{self, Output},
-    sequence, server, snapshot,
+    sequence,
+    server::Message,
+    snapshot,
 };
 use anyhow::anyhow;
 use rust_decimal::{prelude::*, Decimal};
@@ -37,8 +39,15 @@ type EventExecutionResult = Result<(), EventsError>;
 type OutputChannel = Sender<Vec<Output>>;
 type DriverChannel = Receiver<Input>;
 type ProofChannel = Sender<Proof>;
+type BackToServer = Sender<Message>;
 
-pub fn init(recv: DriverChannel, sender: OutputChannel, proofs: ProofChannel, mut data: Data) {
+pub fn init(
+    recv: DriverChannel,
+    sender: OutputChannel,
+    proofs: ProofChannel,
+    messages: BackToServer,
+    mut data: Data,
+) {
     std::thread::spawn(move || {
         let prover = Prover::new(proofs);
         let mut ephemeral = Ephemeral::new();
@@ -49,19 +58,18 @@ pub fn init(recv: DriverChannel, sender: OutputChannel, proofs: ProofChannel, mu
                 Input::NonModifier(whistle) => {
                     let (s, r) = (whistle.session, whistle.req_id);
                     if let Ok(inspection) = whistle.try_into() {
-                        // potential EventsError::Interrupted
-                        do_inspect(inspection, &data).unwrap();
+                        do_inspect(inspection, &data, &messages).unwrap();
                     } else {
-                        server::publish(server::Message::with_payload(s, r, vec![]));
+                        // TODO
+                        let _ = messages.send(Message::with_payload(s, r, vec![]));
                     }
                 }
                 Input::Modifier(seq) => {
                     let id = seq.id;
                     match seq.try_into() {
                         Ok(event) => {
-                            let result =
-                                handle_event(event, &mut data, &mut ephemeral, &sender, &prover);
-                            match result {
+                            let r = do_event(event, &mut data, &mut ephemeral, &sender, &prover);
+                            match r {
                                 Err(EventsError::EventRejected(id, msg)) => {
                                     log::info!("Error occur in sequence {}: {:?}", id, msg);
                                     sequence::update_sequence_status(id, sequence::ERROR).unwrap();
@@ -83,7 +91,7 @@ pub fn init(recv: DriverChannel, sender: OutputChannel, proofs: ProofChannel, mu
     });
 }
 
-fn handle_event(
+fn do_event(
     event: Event,
     data: &mut Data,
     ephemeral: &mut Ephemeral,
@@ -340,7 +348,11 @@ fn handle_event(
     }
 }
 
-fn do_inspect(inspection: Inspection, data: &Data) -> EventExecutionResult {
+fn do_inspect(
+    inspection: Inspection,
+    data: &Data,
+    messages: &BackToServer,
+) -> EventExecutionResult {
     match inspection {
         Inspection::QueryOrder(symbol, order_id, session, req_id) => {
             let v = match data.orderbooks.get(&symbol) {
@@ -349,17 +361,17 @@ fn do_inspect(inspection: Inspection, data: &Data) -> EventExecutionResult {
                 }),
                 None => vec![],
             };
-            server::publish(server::Message::with_payload(session, req_id, v));
+            let _ = messages.send(Message::with_payload(session, req_id, v));
         }
         Inspection::QueryBalance(user_id, currency, session, req_id) => {
             let a = assets::get_balance_to_owned(&data.accounts, &user_id, currency);
             let v = serde_json::to_vec(&a).unwrap_or_default();
-            server::publish(server::Message::with_payload(session, req_id, v));
+            let _ = messages.send(Message::with_payload(session, req_id, v));
         }
         Inspection::QueryAccounts(user_id, session, req_id) => {
             let a = assets::get_account_to_owned(&data.accounts, &user_id);
             let v = serde_json::to_vec(&a).unwrap_or_default();
-            server::publish(server::Message::with_payload(session, req_id, v));
+            let _ = messages.send(Message::with_payload(session, req_id, v));
         }
         Inspection::UpdateDepth => {
             let writing = data
@@ -377,7 +389,7 @@ fn do_inspect(inspection: Inspection, data: &Data) -> EventExecutionResult {
             let mut v: HashMap<String, u64> = HashMap::new();
             v.insert(String::from("proving_perf_index"), 0);
             let v = serde_json::to_vec(&v).unwrap_or_default();
-            server::publish(server::Message::with_payload(session, req_id, v));
+            let _ = messages.send(Message::with_payload(session, req_id, v));
         }
         Inspection::QueryScanHeight(session, req_id) => {
             let scaned_height = scaned_height();
@@ -386,7 +398,7 @@ fn do_inspect(inspection: Inspection, data: &Data) -> EventExecutionResult {
             v.insert(String::from("scaned_height"), scaned_height);
             v.insert(String::from("chain_height"), chain_height);
             let v = serde_json::to_vec(&v).unwrap_or_default();
-            server::publish(server::Message::with_payload(session, req_id, v));
+            let _ = messages.send(Message::with_payload(session, req_id, v));
         }
         Inspection::QueryExchangeFee(symbol, session, req_id) => {
             let mut v: HashMap<String, Fee> = HashMap::new();
@@ -402,7 +414,7 @@ fn do_inspect(inspection: Inspection, data: &Data) -> EventExecutionResult {
                 }
             }
             let v = serde_json::to_vec(&v).unwrap_or_default();
-            server::publish(server::Message::with_payload(session, req_id, v));
+            let _ = messages.send(Message::with_payload(session, req_id, v));
         }
         Inspection::Dump(id, time) => {
             snapshot::dump(id, time, data);

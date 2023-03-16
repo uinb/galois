@@ -31,12 +31,12 @@ pub struct FusoConnector {
 impl FusoConnector {
     pub fn new() -> anyhow::Result<Self> {
         let signer = Sr25519Key::from_string(&C.fusotao.key_seed, None)
-            .map_err(|e| anyhow!("Invalid fusotao config: {:?}", e))?;
+            .map_err(|e| anyhow!("invalid fusotao config: {:?}", e))?;
         let client = WsRpcClient::new(&C.fusotao.node_url);
         let api = FusoApi::new(client)
             .map(|api| api.set_signer(signer.clone()))
             .inspect_err(|e| log::error!("{:?}", e))
-            .map_err(|_| anyhow!("Fusotao node not available or metadata check failed."))?;
+            .map_err(|_| anyhow!("fusotao node not available or metadata check failed."))?;
         let (block_number, hash) = Self::get_finalized_block(&api)?;
         let state = Arc::new(Self::fully_sync_chain(
             &signer.public(),
@@ -54,7 +54,7 @@ impl FusoConnector {
             let start_from = proving_progress.load(Ordering::Relaxed);
             let new_max_submitted = std::panic::catch_unwind(|| -> u64 {
                 let (end_to, truncated) = Self::fetch_proofs(start_from);
-                log::info!("found proofs to submit {}-{}", start_from, end_to);
+                log::info!("[+] unsubmitted proofs [{}:{}] found", start_from, end_to);
                 let submit_result = Self::submit_batch(&api, truncated);
                 Self::handle_submit_result(submit_result, (start_from, end_to))
             })
@@ -75,12 +75,13 @@ impl FusoConnector {
         let fuso_state = self.state.clone();
         std::thread::spawn(move || loop {
             let at = fuso_state.scanning_progress.load(Ordering::Relaxed);
-            log::info!("handle block {} ==>", at);
+            log::info!("[*] handle block {}", at);
             match Self::handle_block(&api, &who, at, &decoder, &fuso_state) {
                 Ok(()) => {
                     fuso_state.scanning_progress.fetch_add(1, Ordering::Relaxed);
+                    log::info!("[*] handle block {} done", at);
                 }
-                Err(e) => log::error!("handle block {} failed, {:?}", at, e),
+                Err(e) => log::error!("[*] {:?}", e),
             }
             std::thread::sleep(Duration::from_millis(4000));
         });
@@ -185,7 +186,9 @@ impl FusoConnector {
                             cmd.cmd = crate::cmd::TRANSFER_OUT;
                             Ok(cmd)
                         }
-                        _ => Err("Invalid enum variant".into()),
+                        _ => {
+                            Err("invalid enum variant of Receipt, check the fusotao version".into())
+                        }
                     }
                 },
             )?;
@@ -199,11 +202,11 @@ impl FusoConnector {
     fn handle_submit_result(result: anyhow::Result<()>, (start_from, end_to): (u64, u64)) -> u64 {
         match result {
             Ok(()) => {
-                log::info!("rotate proved event to {}", end_to);
+                log::info!("[+] rotating proved event to {}", end_to);
                 end_to
             }
             Err(e) => {
-                log::error!("error occured while submitting proofs, {:?}", e);
+                log::error!("[-] error occured while submitting proofs, {:?}", e);
                 start_from
             }
         }
@@ -217,10 +220,9 @@ impl FusoConnector {
         state: &Arc<FusoState>,
     ) -> anyhow::Result<()> {
         use hex::ToHex;
-        // TODO block not ready
         let hash = api
             .get_block_hash(Some(at))?
-            .ok_or(anyhow!("Read block at {} failed", at))?;
+            .ok_or(anyhow!("block {} not ready", at))?;
         let key = api
             .metadata
             .storage_value_key("System", "Events")
@@ -363,10 +365,10 @@ impl FusoConnector {
     fn get_finalized_block(api: &FusoApi) -> anyhow::Result<(u32, Hash)> {
         let hash = api
             .get_finalized_head()?
-            .ok_or(anyhow!("Finalized headers couldn't be found"))?;
+            .ok_or(anyhow!("finalized headers cant be found"))?;
         let block_number = api
             .get_signed_block(Some(hash))?
-            .ok_or(anyhow!("signed block {} couldn't be found", hash))
+            .ok_or(anyhow!("signed block {} can't be found", hash))
             .map(|b: sub_api::SignedBlock<FusoBlock>| b.block.header.number)?;
         Ok((block_number, hash))
     }

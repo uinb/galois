@@ -18,20 +18,20 @@ use crate::{
     whistle::Whistle,
 };
 use async_std::{
-    net::{TcpListener, TcpStream, ToSocketAddrs},
+    net::{TcpListener, TcpStream},
     prelude::*,
     task,
 };
-use chashmap::CHashMap;
-use futures::{channel::mpsc, sink::SinkExt};
-use lazy_static::lazy_static;
+use dashmap::DashMap;
+use futures::{
+    channel::mpsc::{self, UnboundedReceiver, UnboundedSender},
+    sink::SinkExt,
+};
 use std::{
-    borrow::BorrowMut,
     net::Shutdown,
-    str,
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc::Sender,
+        mpsc::{Receiver, Sender},
         Arc,
     },
 };
@@ -40,9 +40,10 @@ pub const MAX_FRAME_SIZE: usize = 64 * 1024;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-lazy_static! {
-    static ref CHAN: CHashMap<u64, mpsc::UnboundedSender<Message>> = CHashMap::new();
-}
+type ToSession = UnboundedSender<Message>;
+type FromSession = UnboundedReceiver<Message>;
+type ToBackend = Sender<Input>;
+type FromBackend = Receiver<Message>;
 
 #[derive(Debug)]
 pub struct Message {
@@ -108,68 +109,95 @@ const fn has_next_frame(header: u64) -> bool {
     (header & _NXT_FRM_MASK) == _NXT_FRM_MASK
 }
 
-pub fn init(sender: Sender<Input>, ready: Arc<AtomicBool>) {
-    let future = accept(&C.server.bind_addr, sender, ready);
+pub fn init(sender: ToBackend, receiver: FromBackend, ready: Arc<AtomicBool>) {
+    let listener = task::block_on(async { TcpListener::bind(&C.server.bind_addr).await }).unwrap();
+    let sessions = Arc::new(DashMap::<u64, ToSession>::new());
+    let sx = sessions.clone();
+    std::thread::spawn(move || loop {
+        let msg = receiver.recv().unwrap();
+        if let Some(session) = sx.get_mut(&msg.session) {
+            let mut s = session.clone();
+            // relay the messages from backend to session, need to switch the runtime using async
+            task::spawn(async move {
+                let _ = s.send(msg).await;
+            });
+        }
+    });
+    log::info!("server initialized");
+    let future = accept(listener, sender, sessions, ready);
     task::block_on(future).unwrap();
 }
 
 async fn accept(
-    addr: impl ToSocketAddrs,
-    cmd_acc: Sender<Input>,
+    listener: TcpListener,
+    to_backend: ToBackend,
+    sessions: Arc<DashMap<u64, ToSession>>,
     ready: Arc<AtomicBool>,
 ) -> Result<()> {
-    let listener = TcpListener::bind(addr).await?;
-    log::info!("server initialized");
     let mut incoming = listener.incoming();
     let mut session = 0_u64;
     while let Some(stream) = incoming.next().await {
         if ready.load(Ordering::Relaxed) {
             let stream = stream?;
-            register(session, stream, cmd_acc.clone());
+            register(session, stream, to_backend.clone(), &sessions);
             session += 1;
         }
     }
     Ok(())
 }
 
-fn register(session: u64, stream: TcpStream, cmd_acc: Sender<Input>) {
-    let (tx, rx) = mpsc::unbounded();
+fn register(
+    session: u64,
+    stream: TcpStream,
+    to_backend: ToBackend,
+    sessions: &Arc<DashMap<u64, ToSession>>,
+) {
     match stream.set_nodelay(true) {
         Ok(_) => {}
         Err(_) => return,
     }
-    CHAN.insert(session, tx);
+    let (tx, rx) = mpsc::unbounded();
+    sessions.insert(session, tx);
     let stream = Arc::new(stream);
-    task::spawn(write_loop(rx, stream.clone()));
-    task::spawn(read_loop(cmd_acc, session, stream));
+    task::spawn(write_loop(rx, stream.clone(), sessions.clone()));
+    task::spawn(read_loop(
+        to_backend.clone(),
+        session,
+        stream,
+        sessions.clone(),
+    ));
 }
 
 async fn write_loop(
-    recv_queue: mpsc::UnboundedReceiver<Message>,
+    mut recv: FromSession,
     stream: Arc<TcpStream>,
+    sessions: Arc<DashMap<u64, ToSession>>,
 ) -> Result<()> {
-    let mut recv_queue = recv_queue;
     let mut stream = &*stream;
-    while let Some(output) = recv_queue.next().await {
-        stream.write_all(&output.encode()).await?;
+    while let Some(output) = recv.next().await {
+        let session = output.session;
+        match stream.write_all(&output.encode()).await {
+            Ok(_) => {}
+            Err(_) => {
+                // for some reasons we didn't read errors to remove the session
+                sessions.remove(&session);
+                break;
+            }
+        }
     }
     Ok(())
 }
 
 /// if r: (query order/assets) validate to sequence push to cmd_acc
-async fn handle_req(upstream: &mut Sender<Input>, session: u64, req_id: u64, json: String) {
-    let cmd: Command = match serde_json::from_str(&json) {
-        Ok(cmd) => cmd,
-        Err(_) => {
-            send(Message::with_payload(session, req_id, vec![]))
-                .await
-                .unwrap();
-            return;
-        }
-    };
-    // TODO
+async fn handle_req(
+    upstream: &mut ToBackend,
+    session: u64,
+    req_id: u64,
+    json: String,
+) -> Result<()> {
+    let cmd: Command = serde_json::from_str(&json).map_err(|_| anyhow::anyhow!(""))?;
     if !cmd.is_read() {
-        return;
+        return Err(anyhow::anyhow!("").into());
     }
     upstream
         .send(Input::NonModifier(Whistle {
@@ -177,10 +205,16 @@ async fn handle_req(upstream: &mut Sender<Input>, session: u64, req_id: u64, jso
             req_id,
             cmd,
         }))
-        .unwrap();
+        .map_err(|_| anyhow::anyhow!(""))?;
+    Ok(())
 }
 
-async fn read_loop(cmd_acc: Sender<Input>, session: u64, stream: Arc<TcpStream>) -> Result<()> {
+async fn read_loop(
+    cmd_acc: ToBackend,
+    session: u64,
+    stream: Arc<TcpStream>,
+    sessions: Arc<DashMap<u64, ToSession>>,
+) -> Result<()> {
     let mut cmd_acc = cmd_acc;
     let mut stream = &*stream;
     let mut buf = Vec::<u8>::with_capacity(4096);
@@ -204,36 +238,30 @@ async fn read_loop(cmd_acc: Sender<Input>, session: u64, stream: Arc<TcpStream>)
         }
         buf.extend_from_slice(&tmp[..]);
         if !has_next_frame(header) {
-            let json = match str::from_utf8(&buf[..]) {
+            let json = match std::str::from_utf8(&buf[..]) {
                 Ok(json) => json.to_string(),
                 Err(_) => {
-                    send(Message::with_payload(session, req_id, vec![]))
-                        .await
-                        .unwrap();
+                    send(&sessions, Message::with_payload(session, req_id, vec![])).await;
                     buf.clear();
                     continue;
                 }
             };
-            handle_req(&mut cmd_acc, session, req_id, json).await;
+            if let Err(_) = handle_req(&mut cmd_acc, session, req_id, json).await {
+                break;
+            }
             buf.clear();
         }
     }
-    close(session);
     let _ = stream.shutdown(Shutdown::Both);
+    sessions.remove(&session);
     Ok(())
 }
 
-fn close(session: u64) {
-    CHAN.remove(&session);
-}
-
-pub fn publish(output: Message) {
-    let _ = task::block_on(send(output));
-}
-
-async fn send(output: Message) -> std::result::Result<(), mpsc::SendError> {
-    match CHAN.get_mut(&output.session) {
-        None => Ok(()),
-        Some(mut channel) => channel.borrow_mut().send(output).await,
+async fn send(sessions: &Arc<DashMap<u64, ToSession>>, output: Message) {
+    match sessions.get_mut(&output.session) {
+        None => {}
+        Some(mut channel) => {
+            let _ = channel.send(output).await;
+        }
     }
 }
