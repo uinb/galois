@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::fusotao::GlobalStates;
+use crate::fusotao::{FusoState, GlobalStates};
 use crate::{assets::Balance, orderbook::OrderBook};
 pub use crate::{
     matcher::{Role, State as OrderState},
@@ -28,6 +28,7 @@ use std::{
     collections::HashMap,
     fs::File,
     io::{BufReader, BufWriter},
+    sync::Arc,
 };
 
 pub type Base = u32;
@@ -178,6 +179,13 @@ impl Ephemeral {
         self.onchain_receipt_records.insert(id)
     }
 }
+
+#[derive(Clone, Debug)]
+pub struct Shared {
+    pub fuso_state: Arc<FusoState>,
+}
+
+impl Shared {}
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Data {

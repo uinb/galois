@@ -179,7 +179,7 @@ async fn write_loop(
         match stream.write_all(&output.encode()).await {
             Ok(_) => {}
             Err(_) => {
-                // for some reasons we didn't read errors to remove the session
+                // for some reasons we didn't read errors
                 sessions.remove(&session);
                 break;
             }
@@ -188,7 +188,6 @@ async fn write_loop(
     Ok(())
 }
 
-/// if r: (query order/assets) validate to sequence push to cmd_acc
 async fn handle_req(
     upstream: &mut ToBackend,
     session: u64,
@@ -196,17 +195,19 @@ async fn handle_req(
     json: String,
 ) -> Result<()> {
     let cmd: Command = serde_json::from_str(&json).map_err(|_| anyhow::anyhow!(""))?;
-    if !cmd.is_read() {
-        return Err(anyhow::anyhow!("").into());
-    }
-    upstream
-        .send(Input::NonModifier(Whistle {
+    if cmd.is_querying_core_data() {
+        let w = Input::NonModifier(Whistle {
             session,
             req_id,
             cmd,
-        }))
-        .map_err(|_| anyhow::anyhow!(""))?;
-    Ok(())
+        });
+        upstream.send(w).map_err(|_| anyhow::anyhow!(""))?;
+        Ok(())
+    } else if cmd.is_querying_share_data() {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("").into())
+    }
 }
 
 async fn read_loop(

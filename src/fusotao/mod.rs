@@ -49,41 +49,24 @@ const ONE_ONCHAIN: u128 = 1_000_000_000_000_000_000;
 const MILL: u32 = 1_000_000;
 const QUINTILL: u64 = 1_000_000_000_000_000_000;
 const MAX_EXTRINSIC_SIZE: usize = 3 * 1024 * 1024;
-#[allow(dead_code)]
-const MAX_EXTRINSIC_WEIGHT: u128 = 1_000_000_000_000_000_000;
 
 /// AccountId of chain = MultiAddress<sp_runtime::AccountId32, ()>::Id = GenericAddress::Id
 /// 1. from_ss58check() or from_ss58check_with_version()
 /// 2. new or from public
-pub fn init(rx: Receiver<Proof>) {
+pub fn init(rx: Receiver<Proof>) -> FusoConnector {
     persistence::init(rx);
-    if C.dry_run.is_none() {
-        let connector = FusoConnector::new().unwrap();
-        connector.start_submitting();
-        connector.start_scanning();
-    }
+    let connector = FusoConnector::new(C.dry_run.is_some()).unwrap();
     log::info!("prover initialized");
+    connector
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct FusoState {
     proved_event_id: Arc<AtomicU64>,
     scanning_progress: Arc<AtomicU32>,
     symbols: DashMap<Symbol, OnchainSymbol>,
     currencies: DashMap<Currency, OnchainToken>,
     brokers: DashMap<FusoAccountId, u32>,
-}
-
-impl FusoState {
-    pub fn new() -> Self {
-        Self {
-            proved_event_id: Arc::new(Default::default()),
-            scanning_progress: Arc::new(Default::default()),
-            symbols: Default::default(),
-            currencies: Default::default(),
-            brokers: Default::default(),
-        }
-    }
 }
 
 #[derive(Clone, Debug)]

@@ -29,7 +29,7 @@ pub struct FusoConnector {
 }
 
 impl FusoConnector {
-    pub fn new() -> anyhow::Result<Self> {
+    pub fn new(dry_run: bool) -> anyhow::Result<Self> {
         let signer = Sr25519Key::from_string(&C.fusotao.key_seed, None)
             .map_err(|e| anyhow!("invalid fusotao config: {:?}", e))?;
         let client = WsRpcClient::new(&C.fusotao.node_url);
@@ -37,23 +37,36 @@ impl FusoConnector {
             .map(|api| api.set_signer(signer.clone()))
             .inspect_err(|e| log::error!("{:?}", e))
             .map_err(|_| anyhow!("fusotao node not available or metadata check failed."))?;
-        let (block_number, hash) = Self::get_finalized_block(&api)?;
-        let state = Arc::new(Self::fully_sync_chain(
-            &signer.public(),
-            &api,
-            hash,
-            block_number,
-        )?);
+        let state = if dry_run {
+            Arc::new(Default::default())
+        } else {
+            let (block_number, hash) = Self::get_finalized_block(&api)?;
+            let state = Arc::new(Self::fully_sync_chain(
+                &signer.public(),
+                &api,
+                hash,
+                block_number,
+            )?);
+            Self::start_submitting(api.clone(), state.proved_event_id.clone());
+            Self::start_scanning(api.clone(), signer.public().clone(), state.clone());
+            state
+        };
         Ok(Self { api, signer, state })
     }
 
-    pub fn start_submitting(&self) {
-        let api = self.api.clone();
-        let proving_progress = self.state.proved_event_id.clone();
+    fn start_submitting(api: FusoApi, proving_progress: Arc<AtomicU64>) {
+        let api = api.clone();
+        log::info!(
+            "submitting proofs from {}",
+            proving_progress.load(Ordering::Relaxed)
+        );
         std::thread::spawn(move || loop {
             let start_from = proving_progress.load(Ordering::Relaxed);
             let new_max_submitted = std::panic::catch_unwind(|| -> u64 {
                 let (end_to, truncated) = Self::fetch_proofs(start_from);
+                if start_from == end_to {
+                    return end_to;
+                }
                 log::info!("[+] unsubmitted proofs [{}:{}] found", start_from, end_to);
                 let submit_result = Self::submit_batch(&api, truncated);
                 Self::handle_submit_result(submit_result, (start_from, end_to))
@@ -67,16 +80,16 @@ impl FusoConnector {
         });
     }
 
-    pub fn start_scanning(&self) {
-        let api = self.api.clone();
-        let who = self.signer.public().clone();
+    fn start_scanning(api: FusoApi, signer: Public, fuso_state: Arc<FusoState>) {
         let decoder = RuntimeDecoder::new(api.metadata.clone());
-        // after we fully synchronized on-chain data, we should start from here
-        let fuso_state = self.state.clone();
+        log::info!(
+            "scanning blocks from {}",
+            fuso_state.scanning_progress.load(Ordering::Relaxed)
+        );
         std::thread::spawn(move || loop {
             let at = fuso_state.scanning_progress.load(Ordering::Relaxed);
             log::info!("[*] handle block {}", at);
-            match Self::handle_block(&api, &who, at, &decoder, &fuso_state) {
+            match Self::handle_block(&api, &signer, at, &decoder, &fuso_state) {
                 Ok(()) => {
                     fuso_state.scanning_progress.fetch_add(1, Ordering::Relaxed);
                     log::info!("[*] handle block {} done", at);
@@ -93,7 +106,7 @@ impl FusoConnector {
         hash: Hash,
         util: u32,
     ) -> anyhow::Result<FusoState> {
-        let state = FusoState::new();
+        let state = FusoState::default();
         let decoder = RuntimeDecoder::new(api.metadata.clone());
 
         // proving progress, map AccountId -> Dominator
@@ -170,7 +183,6 @@ impl FusoConnector {
                 &mut v.as_slice(),
                 move |i, stream| -> Result<Command, CodecError> {
                     let mut cmd = Command::default();
-                    cmd.cmd = crate::cmd::TRANSFER_IN;
                     cmd.currency = Some(u32::decode(stream)?);
                     cmd.amount = to_decimal_represent(u128::decode(stream)?);
                     cmd.user_id = Some(format!("{}", user));
@@ -194,6 +206,7 @@ impl FusoConnector {
             )?;
             commands.push(unexecuted);
         }
+        println!("{:?}", commands);
         sequence::insert_sequences(&commands)?;
         state.scanning_progress.store(util + 1, Ordering::Relaxed);
         Ok(state)

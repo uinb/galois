@@ -60,7 +60,6 @@ pub fn init(
                     if let Ok(inspection) = whistle.try_into() {
                         do_inspect(inspection, &data, &messages).unwrap();
                     } else {
-                        // TODO
                         let _ = messages.send(Message::with_payload(s, r, vec![]));
                     }
                 }
@@ -110,7 +109,7 @@ fn do_event(
                     id,
                     anyhow!("order can't be accepted"),
                 ))?;
-            log::info!(
+            log::debug!(
                 "predicate root=0x{} before applying {}",
                 hex::encode(data.merkle_tree.root()),
                 id
@@ -248,7 +247,7 @@ fn do_event(
                     anyhow::anyhow!("Duplicated transfer_out extrinsic"),
                 ));
             }
-            log::info!(
+            log::debug!(
                 "predicate root=0x{} before applying {}",
                 hex::encode(data.merkle_tree.root()),
                 id
@@ -296,7 +295,7 @@ fn do_event(
                     anyhow::anyhow!("TVLOutOfLimit"),
                 ));
             }
-            log::info!(
+            log::debug!(
                 "predicate root=0x{} before applying {}",
                 hex::encode(data.merkle_tree.root()),
                 id

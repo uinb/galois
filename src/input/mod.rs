@@ -42,16 +42,28 @@ pub mod cmd {
     pub const TRANSFER_OUT: u32 = 10;
     pub const TRANSFER_IN: u32 = 11;
     pub const UPDATE_SYMBOL: u32 = 13;
+
     pub const QUERY_ORDER: u32 = 14;
     pub const QUERY_BALANCE: u32 = 15;
     pub const QUERY_ACCOUNTS: u32 = 16;
     pub const DUMP: u32 = 17;
+    // DEPRECATED
     pub const UPDATE_DEPTH: u32 = 18;
+    // DEPRECATED
     pub const CONFIRM_ALL: u32 = 19;
+
+    // DEPRECATED
     pub const PROVING_PERF_INDEX_CHECK: u32 = 20;
     pub const QUERY_EXCHANGE_FEE: u32 = 21;
+    // DEPRECATED
     pub const QUERY_PROVING_PERF_INDEX: u32 = 22;
+    // DEPRECATED
     pub const QUERY_SCAN_HEIGHT: u32 = 23;
+    pub const QUERY_OPEN_MARKETS: u32 = 24;
+    // used for handshaking with enduser
+    pub const ACQUIRE_X25519_KEY: u32 = 25;
+    // used for handshaking with broker
+    pub const GET_AND_INCR_BROKER_NONCE: u32 = 26;
 }
 
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone, Default)]
@@ -123,17 +135,22 @@ impl Command {
     }
 
     #[must_use]
-    pub const fn is_read(&self) -> bool {
+    pub const fn is_querying_core_data(&self) -> bool {
         matches!(
             self.cmd,
-            QUERY_ACCOUNTS
-                | QUERY_BALANCE
-                | QUERY_ORDER
-                | DUMP
-                | QUERY_EXCHANGE_FEE
-                | QUERY_PROVING_PERF_INDEX
+            QUERY_ACCOUNTS | QUERY_BALANCE | QUERY_ORDER | DUMP | QUERY_EXCHANGE_FEE
+        )
+    }
+
+    #[must_use]
+    pub const fn is_querying_share_data(&self) -> bool {
+        matches!(
+            self.cmd,
+            QUERY_PROVING_PERF_INDEX
                 | PROVING_PERF_INDEX_CHECK
                 | QUERY_SCAN_HEIGHT
+                | ACQUIRE_X25519_KEY
+                | QUERY_OPEN_MARKETS
         )
     }
 }

@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Parser)]
 #[command(author, version, about = r#"
+
                  **       **
    *******     ******     **               **
   ***               **    **     *****     **    ******
