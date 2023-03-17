@@ -19,7 +19,6 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Parser)]
 #[command(author, version, about = r#"
-
                  **       **
    *******     ******     **               **
   ***               **    **     *****     **    ******
@@ -29,8 +28,8 @@ use serde::{Deserialize, Serialize};
   **     ***  **    **    **   **     **   **     ****
    *********   **  ****   **    *******    **        **
       *    *    ****  *   **      ***      **    ** ***
-                                                  ****
-"#, long_about = None)]
+                                                  ****"#,
+          long_about = None)]
 pub struct GaloisCli {
     #[arg(short('c'), long("config"), required = true, value_name = "FILE")]
     pub file: std::path::PathBuf,
@@ -53,7 +52,7 @@ pub enum SubCmd {
 pub struct RunCmd {
     #[arg(
         long,
-        value_name = "EVENTID",
+        value_name = "EVENT-ID",
         help = "Run galois in `dry-run` mode, skipping all output."
     )]
     dry_run: Option<u64>,

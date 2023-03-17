@@ -27,6 +27,7 @@ pub mod executor;
 pub mod fusotao;
 pub mod input;
 pub mod output;
+pub mod shared;
 pub mod snapshot;
 
 pub use executor::*;

@@ -64,8 +64,11 @@ pub fn init(rx: Receiver<Proof>) -> FusoConnector {
 pub struct FusoState {
     proved_event_id: Arc<AtomicU64>,
     scanning_progress: Arc<AtomicU32>,
+    // TODO transform OnchainSymbol to offchain symbol
     symbols: DashMap<Symbol, OnchainSymbol>,
+    // TODO transform OnchainCurrency to offchain currency
     currencies: DashMap<Currency, OnchainToken>,
+    // TODO transform FusoAccountId to UserId
     brokers: DashMap<FusoAccountId, u32>,
 }
 

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use clap::Parser;
-use galois::{config, executor, fusotao, output, sequence, server, snapshot};
+use galois::{config, executor, fusotao, output, sequence, server, shared::Shared, snapshot};
 use std::sync::{atomic, mpsc, Arc};
 
 fn start() {
@@ -23,11 +23,12 @@ fn start() {
     let (proof_tx, proof_rx) = mpsc::channel();
     let (msg_tx, msg_rx) = mpsc::channel();
     output::init(output_rx);
-    fusotao::init(proof_rx);
+    let fuso = fusotao::init(proof_rx);
+    let shared = Shared::new(fuso.state);
     executor::init(event_rx, output_tx, proof_tx, msg_tx, coredump);
     let ready = Arc::new(atomic::AtomicBool::new(false));
     sequence::init(event_tx.clone(), id, ready.clone());
-    server::init(event_tx, msg_rx, ready);
+    server::init(event_tx, msg_rx, shared, ready);
 }
 
 fn main() {

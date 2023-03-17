@@ -206,7 +206,9 @@ impl FusoConnector {
             )?;
             commands.push(unexecuted);
         }
-        println!("{:?}", commands);
+        if !commands.is_empty() {
+            log::info!("pending receipts detected: {:?}", commands);
+        }
         sequence::insert_sequences(&commands)?;
         state.scanning_progress.store(util + 1, Ordering::Relaxed);
         Ok(state)

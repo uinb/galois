@@ -15,6 +15,7 @@
 use crate::{
     config::C,
     input::{Command, Input},
+    shared::Shared,
     whistle::Whistle,
 };
 use async_std::{
@@ -109,7 +110,7 @@ const fn has_next_frame(header: u64) -> bool {
     (header & _NXT_FRM_MASK) == _NXT_FRM_MASK
 }
 
-pub fn init(sender: ToBackend, receiver: FromBackend, ready: Arc<AtomicBool>) {
+pub fn init(sender: ToBackend, receiver: FromBackend, shared: Shared, ready: Arc<AtomicBool>) {
     let listener = task::block_on(async { TcpListener::bind(&C.server.bind_addr).await }).unwrap();
     let sessions = Arc::new(DashMap::<u64, ToSession>::new());
     let sx = sessions.clone();
@@ -124,13 +125,14 @@ pub fn init(sender: ToBackend, receiver: FromBackend, ready: Arc<AtomicBool>) {
         }
     });
     log::info!("server initialized");
-    let future = accept(listener, sender, sessions, ready);
+    let future = accept(listener, sender, shared, sessions, ready);
     task::block_on(future).unwrap();
 }
 
 async fn accept(
     listener: TcpListener,
     to_backend: ToBackend,
+    shared: Shared,
     sessions: Arc<DashMap<u64, ToSession>>,
     ready: Arc<AtomicBool>,
 ) -> Result<()> {
@@ -139,7 +141,13 @@ async fn accept(
     while let Some(stream) = incoming.next().await {
         if ready.load(Ordering::Relaxed) {
             let stream = stream?;
-            register(session, stream, to_backend.clone(), &sessions);
+            register(
+                session,
+                stream,
+                to_backend.clone(),
+                shared.clone(),
+                &sessions,
+            );
             session += 1;
         }
     }
@@ -150,6 +158,7 @@ fn register(
     session: u64,
     stream: TcpStream,
     to_backend: ToBackend,
+    shared: Shared,
     sessions: &Arc<DashMap<u64, ToSession>>,
 ) {
     match stream.set_nodelay(true) {
@@ -162,6 +171,7 @@ fn register(
     task::spawn(write_loop(rx, stream.clone(), sessions.clone()));
     task::spawn(read_loop(
         to_backend.clone(),
+        shared,
         session,
         stream,
         sessions.clone(),
@@ -188,37 +198,16 @@ async fn write_loop(
     Ok(())
 }
 
-async fn handle_req(
-    upstream: &mut ToBackend,
-    session: u64,
-    req_id: u64,
-    json: String,
-) -> Result<()> {
-    let cmd: Command = serde_json::from_str(&json).map_err(|_| anyhow::anyhow!(""))?;
-    if cmd.is_querying_core_data() {
-        let w = Input::NonModifier(Whistle {
-            session,
-            req_id,
-            cmd,
-        });
-        upstream.send(w).map_err(|_| anyhow::anyhow!(""))?;
-        Ok(())
-    } else if cmd.is_querying_share_data() {
-        Ok(())
-    } else {
-        Err(anyhow::anyhow!("").into())
-    }
-}
-
 async fn read_loop(
-    cmd_acc: ToBackend,
+    mut to_back: ToBackend,
+    shared: Shared,
     session: u64,
     stream: Arc<TcpStream>,
     sessions: Arc<DashMap<u64, ToSession>>,
 ) -> Result<()> {
-    let mut cmd_acc = cmd_acc;
     let mut stream = &*stream;
     let mut buf = Vec::<u8>::with_capacity(4096);
+    let mut to_session = sessions.get_mut(&session).unwrap();
     loop {
         let mut header = [0_u8; 8];
         let mut req_id = [0_u8; 8];
@@ -242,12 +231,20 @@ async fn read_loop(
             let json = match std::str::from_utf8(&buf[..]) {
                 Ok(json) => json.to_string(),
                 Err(_) => {
-                    send(&sessions, Message::with_payload(session, req_id, vec![])).await;
                     buf.clear();
-                    continue;
+                    break;
                 }
             };
-            if let Err(_) = handle_req(&mut cmd_acc, session, req_id, json).await {
+            if let Err(_) = handle_req(
+                &mut to_back,
+                &mut to_session,
+                &shared,
+                session,
+                req_id,
+                json,
+            )
+            .await
+            {
                 break;
             }
             buf.clear();
@@ -258,11 +255,31 @@ async fn read_loop(
     Ok(())
 }
 
-async fn send(sessions: &Arc<DashMap<u64, ToSession>>, output: Message) {
-    match sessions.get_mut(&output.session) {
-        None => {}
-        Some(mut channel) => {
-            let _ = channel.send(output).await;
-        }
+async fn handle_req(
+    to_back: &mut ToBackend,
+    to_session: &mut ToSession,
+    shared: &Shared,
+    session: u64,
+    req_id: u64,
+    json: String,
+) -> Result<()> {
+    let cmd: Command = serde_json::from_str(&json).map_err(|_| anyhow::anyhow!(""))?;
+    if cmd.is_querying_core_data() {
+        let w = Input::NonModifier(Whistle {
+            session,
+            req_id,
+            cmd,
+        });
+        to_back.send(w).map_err(|_| anyhow::anyhow!(""))?;
+        Ok(())
+    } else if cmd.is_querying_share_data() {
+        let w = shared.handle_req(&cmd).await?;
+        to_session
+            .send(Message::with_payload(session, req_id, w))
+            .await
+            .map_err(|_| anyhow::anyhow!(""))?;
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("").into())
     }
 }
