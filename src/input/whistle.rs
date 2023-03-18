@@ -88,17 +88,6 @@ impl Whistle {
         }
     }
 
-    pub fn new_proving_perf_check_whistle(at: u64) -> Self {
-        let mut cmd = Command::default();
-        cmd.cmd = PROVING_PERF_INDEX_CHECK;
-        cmd.event_id = Some(at);
-        Self {
-            session: 0,
-            req_id: 0,
-            cmd,
-        }
-    }
-
     pub fn new_confirm_whistle(from: u64, exclude: u64) -> Self {
         let mut cmd = Command::default();
         cmd.cmd = CONFIRM_ALL;

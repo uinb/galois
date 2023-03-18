@@ -13,14 +13,14 @@
 // limitations under the License.
 
 use dashmap::DashMap;
-use parity_scale_codec::{Compact, Decode, Encode, WrapperTypeEncode};
+use parity_scale_codec::{Compact, Decode, Encode, WrapperTypeDecode, WrapperTypeEncode};
 use rust_decimal::{prelude::*, Decimal};
 use serde::{Deserialize, Serialize};
 use smt::{blake2b::Blake2bHasher, default_store::DefaultStore, SparseMerkleTree, H256};
 use std::{
     convert::TryInto,
     sync::{
-        atomic::{AtomicU32, AtomicU64},
+        atomic::{AtomicU32, AtomicU64, Ordering},
         mpsc::{Receiver, RecvTimeoutError},
         Arc,
     },
@@ -62,14 +62,23 @@ pub fn init(rx: Receiver<Proof>) -> FusoConnector {
 
 #[derive(Clone, Debug, Default)]
 pub struct FusoState {
-    proved_event_id: Arc<AtomicU64>,
-    scanning_progress: Arc<AtomicU32>,
+    pub proved_event_id: Arc<AtomicU64>,
+    pub scanning_progress: Arc<AtomicU32>,
     // TODO transform OnchainSymbol to offchain symbol
-    symbols: DashMap<Symbol, OnchainSymbol>,
+    pub symbols: DashMap<Symbol, OnchainSymbol>,
     // TODO transform OnchainCurrency to offchain currency
-    currencies: DashMap<Currency, OnchainToken>,
-    // TODO transform FusoAccountId to UserId
-    brokers: DashMap<FusoAccountId, u32>,
+    pub currencies: DashMap<Currency, OnchainToken>,
+    pub brokers: DashMap<UserId, u32>,
+}
+
+impl FusoState {
+    pub fn get_proving_progress(&self) -> u64 {
+        self.proved_event_id.load(Ordering::Relaxed)
+    }
+
+    pub fn get_scanning_progress(&self) -> u32 {
+        self.scanning_progress.load(Ordering::Relaxed)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -168,7 +177,8 @@ pub struct TokenIssuedEvent {
 
 #[derive(Encode, Decode, Clone, Debug)]
 pub struct BrokerRegisteredEvent {
-    broker_account: FusoAccountId,
+    // decode into UserId
+    broker_account: UserId,
     beneficiary_account: FusoAccountId,
 }
 
@@ -190,6 +200,10 @@ pub struct MarketClosedEvent {
 }
 
 impl WrapperTypeEncode for UserId {}
+
+impl WrapperTypeDecode for UserId {
+    type Wrapped = [u8; 32];
+}
 
 #[derive(Clone, Encode, Decode, Eq, PartialEq, Debug)]
 pub enum FusoCommand {

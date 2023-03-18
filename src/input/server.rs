@@ -273,7 +273,7 @@ async fn handle_req(
         to_back.send(w).map_err(|_| anyhow::anyhow!(""))?;
         Ok(())
     } else if cmd.is_querying_share_data() {
-        let w = shared.handle_req(&cmd).await?;
+        let w = shared.handle_req(&cmd)?;
         to_session
             .send(Message::with_payload(session, req_id, w))
             .await

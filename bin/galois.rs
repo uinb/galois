@@ -24,7 +24,7 @@ fn start() {
     let (msg_tx, msg_rx) = mpsc::channel();
     output::init(output_rx);
     let fuso = fusotao::init(proof_rx);
-    let shared = Shared::new(fuso.state);
+    let shared = Shared::new(fuso.state, config::C.fusotao.get_x25519_pubkey().unwrap());
     executor::init(event_rx, output_tx, proof_tx, msg_tx, coredump);
     let ready = Arc::new(atomic::AtomicBool::new(false));
     sequence::init(event_tx.clone(), id, ready.clone());

@@ -161,7 +161,7 @@ impl FusoConnector {
                 StorageHasher::Blake2_128Concat,
                 &mut k.as_slice(),
             )?;
-            state.brokers.insert(broker, rand::random());
+            state.brokers.insert(broker.0.into(), rand::random());
         }
 
         // pending receipts, double map AccountId, AccountId -> Receipt

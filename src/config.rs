@@ -121,20 +121,17 @@ pub struct FusotaoConfig {
     pub claim_block: u32,
     pub proof_batch_limit: usize,
     pub compress_proofs: bool,
-    // deprecated
-    pub fee_adjust_threshold: u64,
+    pub x25519_priv: String,
 }
 
-impl Default for FusotaoConfig {
-    fn default() -> Self {
-        Self {
-            node_url: String::from(""),
-            key_seed: String::from(""),
-            claim_block: 1,
-            proof_batch_limit: 20,
-            compress_proofs: true,
-            fee_adjust_threshold: 10,
-        }
+impl FusotaoConfig {
+    pub fn get_x25519_pubkey(&self) -> anyhow::Result<String> {
+        let hex = self.x25519_priv.trim_start_matches("0x");
+        let mut bytes = [0u8; 32];
+        hex::decode_to_slice(hex, &mut bytes).map_err(|_| anyhow::anyhow!("invalid hex string"))?;
+        let x25519_priv = x25519_dalek::StaticSecret::from(bytes);
+        let pubkey = x25519_dalek::PublicKey::from(&x25519_priv);
+        Ok(format!("0x{}", hex::encode(pubkey.to_bytes())))
     }
 }
 
@@ -144,6 +141,8 @@ impl EncryptedConfig for FusotaoConfig {
         let mc = magic_crypt::new_magic_crypt!(key, 64);
         let dec = mc.decrypt_base64_to_string(&self.key_seed)?;
         self.key_seed.replace_range(.., &dec);
+        let dec = mc.decrypt_base64_to_string(&self.x25519_priv)?;
+        self.x25519_priv.replace_range(.., &dec);
         Ok(())
     }
 
@@ -152,6 +151,8 @@ impl EncryptedConfig for FusotaoConfig {
         let mc = magic_crypt::new_magic_crypt!(key, 64);
         let enc = mc.encrypt_str_to_base64(&self.key_seed);
         self.key_seed.replace_range(.., &enc);
+        let enc = mc.encrypt_str_to_base64(&self.x25519_priv);
+        self.x25519_priv.replace_range(.., &enc);
         Ok(())
     }
 }
@@ -271,6 +272,7 @@ pub fn test_default() {
         [fusotao]
         node_url = "ws://localhost:9944"
         key_seed = "//Alice"
+        x25519_priv = "0xedcff0c69e4c0fa7e9a36e2e6d07f2cc355c8d25907a0ad2ab7e03b24f8e90f3"
         proof_batch_limit = 20
         claim_block = 1
         compress_proofs = true

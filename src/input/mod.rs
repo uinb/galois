@@ -54,15 +54,12 @@ pub mod cmd {
     pub const DUMP: u32 = 17;
     pub const UPDATE_DEPTH: u32 = 18;
     pub const CONFIRM_ALL: u32 = 19;
-    // from timer to core but DEPRECATED
-    pub const PROVING_PERF_INDEX_CHECK: u32 = 20;
 
     // from tcp to shared
-    pub const QUERY_PROVING_PERF_INDEX: u32 = 22;
-    pub const QUERY_SCAN_HEIGHT: u32 = 23;
     pub const QUERY_OPEN_MARKETS: u32 = 24;
-    pub const ACQUIRE_X25519_KEY: u32 = 25;
+    pub const GET_X25519_KEY: u32 = 25;
     pub const GET_AND_INCR_BROKER_NONCE: u32 = 26;
+    pub const QUERY_FUSOTAO_PROGRESS: u32 = 27;
 }
 
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone, Default)]
@@ -146,18 +143,14 @@ impl Command {
         matches!(
             self.cmd,
             GET_AND_INCR_BROKER_NONCE
-                | ACQUIRE_X25519_KEY
-                | QUERY_PROVING_PERF_INDEX
-                | QUERY_SCAN_HEIGHT
+                | GET_X25519_KEY
                 | QUERY_OPEN_MARKETS
+                | QUERY_FUSOTAO_PROGRESS
         )
     }
 
     #[must_use]
     pub const fn is_internally_generated(&self) -> bool {
-        matches!(
-            self.cmd,
-            UPDATE_DEPTH | CONFIRM_ALL | PROVING_PERF_INDEX_CHECK | DUMP
-        )
+        matches!(self.cmd, UPDATE_DEPTH | CONFIRM_ALL | DUMP)
     }
 }
