@@ -60,8 +60,10 @@ pub fn init(rx: Receiver<Proof>) -> FusoConnector {
     connector
 }
 
+/// tracking essential onchain states
 #[derive(Clone, Debug, Default)]
 pub struct FusoState {
+    pub chain_height: Arc<AtomicU32>,
     pub proved_event_id: Arc<AtomicU64>,
     pub scanning_progress: Arc<AtomicU32>,
     // TODO transform OnchainSymbol to offchain symbol
@@ -78,6 +80,10 @@ impl FusoState {
 
     pub fn get_scanning_progress(&self) -> u32 {
         self.scanning_progress.load(Ordering::Relaxed)
+    }
+
+    pub fn get_chain_height(&self) -> u32 {
+        self.chain_height.load(Ordering::Relaxed)
     }
 }
 

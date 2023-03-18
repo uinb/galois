@@ -88,15 +88,27 @@ impl FusoConnector {
         );
         std::thread::spawn(move || loop {
             let at = fuso_state.scanning_progress.load(Ordering::Relaxed);
-            log::info!("[*] handle block {}", at);
-            match Self::handle_block(&api, &signer, at, &decoder, &fuso_state) {
-                Ok(()) => {
-                    fuso_state.scanning_progress.fetch_add(1, Ordering::Relaxed);
-                    log::info!("[*] handle block {} done", at);
+            if let Ok((finalized, _)) = Self::get_finalized_block(&api) {
+                log::info!(
+                    "[*] block {} finalized, current scanning progress={}",
+                    finalized,
+                    at
+                );
+                fuso_state.chain_height.store(finalized, Ordering::Relaxed);
+                if finalized >= at {
+                    match Self::handle_finalized_block(&api, &signer, at, &decoder, &fuso_state) {
+                        Ok(()) => {
+                            fuso_state.scanning_progress.fetch_add(1, Ordering::Relaxed);
+                            log::info!("[*] handled block {}", at);
+                        }
+                        Err(e) => log::error!("[*] {:?}", e),
+                    }
+                } else {
+                    std::thread::sleep(Duration::from_millis(6000));
                 }
-                Err(e) => log::error!("[*] {:?}", e),
+            } else {
+                log::error!("[*] scanning connection temporarily unavailable, retrying...");
             }
-            std::thread::sleep(Duration::from_millis(4000));
         });
     }
 
@@ -211,6 +223,7 @@ impl FusoConnector {
         }
         sequence::insert_sequences(&commands)?;
         state.scanning_progress.store(util + 1, Ordering::Relaxed);
+        state.chain_height.store(util, Ordering::Relaxed);
         Ok(state)
     }
 
@@ -227,7 +240,7 @@ impl FusoConnector {
         }
     }
 
-    fn handle_block(
+    fn handle_finalized_block(
         api: &FusoApi,
         signer: &FusoAccountId,
         at: u32,

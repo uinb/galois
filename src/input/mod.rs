@@ -56,6 +56,8 @@ pub mod cmd {
     pub const CONFIRM_ALL: u32 = 19;
 
     // from tcp to shared
+    pub const QUERY_PROVING_PERF_INDEX: u32 = 22; /* DEPRECATED  */
+    pub const QUERY_SCAN_HEIGHT: u32 = 23; /* DEPRECATED */
     pub const QUERY_OPEN_MARKETS: u32 = 24;
     pub const GET_X25519_KEY: u32 = 25;
     pub const GET_AND_INCR_BROKER_NONCE: u32 = 26;

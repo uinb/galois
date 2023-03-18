@@ -39,7 +39,8 @@ impl Shared {
     fn query_progress(&self) -> Vec<u8> {
         let ans = json!({
             "proving_progress": self.fuso_state.get_proving_progress(),
-            "scanning_progress": self.fuso_state.get_scanning_progress()
+            "scanning_progress": self.fuso_state.get_scanning_progress(),
+            "chain_height": self.fuso_state.get_chain_height(),
         });
         to_vec(&ans).unwrap()
     }
@@ -78,6 +79,14 @@ impl Shared {
                 let broker = UserId::from_str(cmd.user_id.as_ref().ok_or(anyhow::anyhow!(""))?)?;
                 Ok(self.get_and_incr_broker_nonce(&broker))
             }
+            QUERY_PROVING_PERF_INDEX => {
+                to_vec(&json!({"proving_perf_index": 0})).map_err(|e| e.into())
+            }
+            QUERY_SCAN_HEIGHT => to_vec(&json!({
+                "scaned_height": self.fuso_state.get_scanning_progress(),
+                "chain_height": self.fuso_state.get_chain_height(),
+            }))
+            .map_err(|e| e.into()),
             _ => Err(anyhow::anyhow!("")),
         }
     }
