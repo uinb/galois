@@ -119,9 +119,14 @@ pub fn init(sender: ToBackend, receiver: FromBackend, shared: Shared, ready: Arc
         if let Some(session) = sx.get_mut(&msg.session) {
             let mut s = session.clone();
             // relay the messages from backend to session, need to switch the runtime using async
-            task::spawn(async move {
+            task::block_on(async move {
                 let _ = s.send(msg).await;
             });
+        } else {
+            log::error!(
+                "received reply from executor, but session {} not found",
+                msg.session
+            );
         }
     });
     log::info!("server initialized");
@@ -230,12 +235,9 @@ async fn read_loop(
         if !has_next_frame(header) {
             let json = match std::str::from_utf8(&buf[..]) {
                 Ok(json) => json.to_string(),
-                Err(_) => {
-                    buf.clear();
-                    break;
-                }
+                Err(_) => break,
             };
-            if let Err(_) = handle_req(
+            if let Err(e) = handle_req(
                 &mut to_back,
                 &mut to_session,
                 &shared,
@@ -245,7 +247,7 @@ async fn read_loop(
             )
             .await
             {
-                buf.clear();
+                log::error!("{:?}, will close session {}", e, session);
                 break;
             }
             buf.clear();
@@ -264,21 +266,24 @@ async fn handle_req(
     req_id: u64,
     json: String,
 ) -> Result<()> {
-    let cmd: Command = serde_json::from_str(&json).map_err(|_| anyhow::anyhow!(""))?;
+    let cmd: Command = serde_json::from_str(&json)
+        .map_err(|e| anyhow::anyhow!("deser command failed, {:?}", e))?;
     if cmd.is_querying_core_data() {
         let w = Input::NonModifier(Whistle {
             session,
             req_id,
             cmd,
         });
-        to_back.send(w).map_err(|_| anyhow::anyhow!(""))?;
+        to_back
+            .send(w)
+            .map_err(|e| anyhow::anyhow!("read loop -> executor -> {:?}", e))?;
         Ok(())
     } else if cmd.is_querying_share_data() {
         let w = shared.handle_req(&cmd)?;
         to_session
             .send(Message::with_payload(session, req_id, w))
             .await
-            .map_err(|_| anyhow::anyhow!(""))?;
+            .map_err(|e| anyhow::anyhow!("read loop -> write loop -> {:?}", e))?;
         Ok(())
     } else {
         Err(anyhow::anyhow!("unsupported command {} from sidecar", cmd.cmd).into())
