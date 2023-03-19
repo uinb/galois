@@ -245,6 +245,7 @@ async fn read_loop(
             )
             .await
             {
+                buf.clear();
                 break;
             }
             buf.clear();
@@ -280,6 +281,6 @@ async fn handle_req(
             .map_err(|_| anyhow::anyhow!(""))?;
         Ok(())
     } else {
-        Err(anyhow::anyhow!("").into())
+        Err(anyhow::anyhow!("unsupported command {} from sidecar", cmd.cmd).into())
     }
 }

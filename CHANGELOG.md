@@ -1,4 +1,4 @@
-# v0.4.2-dev.2
+# v0.4.2-dev.3
 
 - extend fusotao events scanning to support markets/x25519_key
 - remove mmap
