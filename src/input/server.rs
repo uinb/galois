@@ -126,7 +126,8 @@ pub fn init(sender: ToBackend, receiver: FromBackend, shared: Shared, ready: Arc
             let mut s = session.clone();
             // relay the messages from backend to session, need to switch the runtime using async
             task::block_on(async move {
-                let _ = s.send(msg).await;
+                let r = s.send(msg).await;
+                log::error!("{:?}", r);
             });
         } else {
             log::error!(
@@ -198,14 +199,18 @@ async fn write_loop(
     while let Some(output) = recv.next().await {
         let session = output.session;
         match stream.write_all(&output.encode()).await {
-            Ok(_) => {}
-            Err(_) => {
+            Ok(_) => {
+                log::info!("replying to sidecar -> OK");
+            }
+            Err(e) => {
+                log::error!("replying to sidecar -> {:?}", e);
                 // for some reasons we didn't read errors
                 sessions.remove(&session);
                 break;
             }
         }
     }
+    log::info!("bye! {:?}", stream);
     Ok(())
 }
 
