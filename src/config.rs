@@ -201,12 +201,14 @@ fn init_config_file() -> anyhow::Result<Config> {
     })
 }
 
-pub fn print_config(mut cfg: Config) -> anyhow::Result<()> {
+pub fn print_config(f: &std::path::PathBuf) -> anyhow::Result<()> {
     let key = std::env::var_os("MAGIC_KEY").ok_or(anyhow::anyhow!("env MAGIC_KEY not set"))?;
     let key = key
         .to_str()
         .map(|s| s.to_string())
         .ok_or(anyhow::anyhow!("env MAGIC_KEY not set"))?;
+    let toml = std::fs::read_to_string(f)?;
+    let mut cfg: Config = toml::from_str(&toml)?;
     cfg.mysql.encrypt(&key)?;
     cfg.redis.encrypt(&key)?;
     cfg.fusotao.encrypt(&key)?;

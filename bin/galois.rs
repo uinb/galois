@@ -32,10 +32,12 @@ fn start() {
 }
 
 fn main() {
-    lazy_static::initialize(&config::C);
     let opts = config::GaloisCli::parse();
     match opts.sub {
-        Some(config::SubCmd::EncryptConfig) => config::print_config(config::C.clone()).unwrap(),
-        None => start(),
+        Some(config::SubCmd::EncryptConfig) => config::print_config(&opts.file).unwrap(),
+        None => {
+            lazy_static::initialize(&config::C);
+            start();
+        }
     }
 }
