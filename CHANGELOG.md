@@ -1,3 +1,10 @@
+# v0.4.2-dev.1
+
+- extend fusotao events scanning to support markets/x25519_key
+- remove mmap
+- seperate some shared data reading from core data
+- add broker signature support
+
 # v0.4.1
 
 - reduce output flush delay
