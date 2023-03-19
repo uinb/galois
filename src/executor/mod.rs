@@ -57,10 +57,12 @@ pub fn init(
             match fusion {
                 Input::NonModifier(whistle) => {
                     let (s, r) = (whistle.session, whistle.req_id);
+                    log::error!("executor received whistle: {:?}", whistle);
                     if let Ok(inspection) = whistle.try_into() {
                         do_inspect(inspection, &data, &messages).unwrap();
                     } else {
-                        let _ = messages.send(Message::with_payload(s, r, vec![]));
+                        let r = messages.send(Message::with_payload(s, r, vec![]));
+                        log::error!("{:?}", r);
                     }
                 }
                 Input::Modifier(seq) => {
@@ -359,7 +361,8 @@ fn do_inspect(
         Inspection::QueryBalance(user_id, currency, session, req_id) => {
             let a = assets::get_balance_to_owned(&data.accounts, &user_id, currency);
             let v = serde_json::to_vec(&a).unwrap_or_default();
-            let _ = messages.send(Message::with_payload(session, req_id, v));
+            let r = messages.send(Message::with_payload(session, req_id, v));
+            log::error!("{:?}", r);
         }
         Inspection::QueryAccounts(user_id, session, req_id) => {
             let a = assets::get_account_to_owned(&data.accounts, &user_id);
