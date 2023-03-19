@@ -364,20 +364,10 @@ fn do_inspect(
         Inspection::QueryAccounts(user_id, session, req_id) => {
             let a = assets::get_account_to_owned(&data.accounts, &user_id);
             let v = serde_json::to_vec(&a).unwrap_or_default();
-            let _ = messages.send(Message::with_payload(session, req_id, v));
+            if let Err(e) = messages.send(Message::with_payload(session, req_id, v)) {
+                log::error!("send to server failed: {:?}", e);
+            }
         }
-        Inspection::UpdateDepth => {
-            let writing = data
-                .orderbooks
-                .iter()
-                .map(|(k, v)| v.as_depth(32, *k))
-                .collect::<Vec<_>>();
-            output::write_depth(writing);
-        }
-        Inspection::ConfirmAll(from, exclude) => {
-            sequence::confirm(from, exclude).map_err(|_| EventsError::Interrupted)?;
-        }
-
         Inspection::QueryExchangeFee(symbol, session, req_id) => {
             let mut v: HashMap<String, Fee> = HashMap::new();
             let orderbook = data.orderbooks.get(&symbol);
@@ -393,6 +383,17 @@ fn do_inspect(
             }
             let v = serde_json::to_vec(&v).unwrap_or_default();
             let _ = messages.send(Message::with_payload(session, req_id, v));
+        }
+        Inspection::UpdateDepth => {
+            let writing = data
+                .orderbooks
+                .iter()
+                .map(|(k, v)| v.as_depth(32, *k))
+                .collect::<Vec<_>>();
+            output::write_depth(writing);
+        }
+        Inspection::ConfirmAll(from, exclude) => {
+            sequence::confirm(from, exclude).map_err(|_| EventsError::Interrupted)?;
         }
         Inspection::Dump(id, time) => {
             snapshot::dump(id, time, data);

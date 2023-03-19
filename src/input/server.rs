@@ -115,7 +115,13 @@ pub fn init(sender: ToBackend, receiver: FromBackend, shared: Shared, ready: Arc
     let sessions = Arc::new(DashMap::<u64, ToSession>::new());
     let sx = sessions.clone();
     std::thread::spawn(move || loop {
-        let msg = receiver.recv().unwrap();
+        let msg = match receiver.recv() {
+            Ok(msg) => msg,
+            Err(e) => {
+                log::error!("message relayer interrupted: {:?}", e);
+                panic!("");
+            }
+        };
         if let Some(session) = sx.get_mut(&msg.session) {
             let mut s = session.clone();
             // relay the messages from backend to session, need to switch the runtime using async

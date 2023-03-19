@@ -108,6 +108,7 @@ impl FusoConnector {
                 }
             } else {
                 log::error!("[*] scanning connection temporarily unavailable, retrying...");
+                std::thread::sleep(Duration::from_millis(1000));
             }
         });
     }
