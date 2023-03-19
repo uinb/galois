@@ -127,7 +127,7 @@ pub fn init(sender: ToBackend, receiver: FromBackend, shared: Shared, ready: Arc
             // relay the messages from backend to session, need to switch the runtime using async
             task::block_on(async move {
                 let r = s.send(msg).await;
-                log::error!("{:?}", r);
+                log::error!("------> {:?}", r);
             });
         } else {
             log::error!(

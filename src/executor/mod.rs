@@ -57,7 +57,6 @@ pub fn init(
             match fusion {
                 Input::NonModifier(whistle) => {
                     let (s, r) = (whistle.session, whistle.req_id);
-                    log::error!("executor received whistle: {:?}", whistle);
                     if let Ok(inspection) = whistle.try_into() {
                         do_inspect(inspection, &data, &messages).unwrap();
                     } else {
@@ -367,9 +366,8 @@ fn do_inspect(
         Inspection::QueryAccounts(user_id, session, req_id) => {
             let a = assets::get_account_to_owned(&data.accounts, &user_id);
             let v = serde_json::to_vec(&a).unwrap_or_default();
-            if let Err(e) = messages.send(Message::with_payload(session, req_id, v)) {
-                log::error!("send to server failed: {:?}", e);
-            }
+            let r = messages.send(Message::with_payload(session, req_id, v));
+            log::error!("send to server failed: {:?}", r);
         }
         Inspection::QueryExchangeFee(symbol, session, req_id) => {
             let mut v: HashMap<String, Fee> = HashMap::new();
