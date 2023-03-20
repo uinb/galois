@@ -60,7 +60,8 @@ pub fn init(
                     if let Ok(inspection) = whistle.try_into() {
                         do_inspect(inspection, &data, &messages).unwrap();
                     } else {
-                        let _ = messages.send(Message::with_payload(s, r, vec![]));
+                        let r = messages.send(Message::with_payload(s, r, vec![]));
+                        log::error!("{:?}", r);
                     }
                 }
                 Input::Modifier(seq) => {
@@ -366,18 +367,6 @@ fn do_inspect(
             let v = serde_json::to_vec(&a).unwrap_or_default();
             let _ = messages.send(Message::with_payload(session, req_id, v));
         }
-        Inspection::UpdateDepth => {
-            let writing = data
-                .orderbooks
-                .iter()
-                .map(|(k, v)| v.as_depth(32, *k))
-                .collect::<Vec<_>>();
-            output::write_depth(writing);
-        }
-        Inspection::ConfirmAll(from, exclude) => {
-            sequence::confirm(from, exclude).map_err(|_| EventsError::Interrupted)?;
-        }
-
         Inspection::QueryExchangeFee(symbol, session, req_id) => {
             let mut v: HashMap<String, Fee> = HashMap::new();
             let orderbook = data.orderbooks.get(&symbol);
@@ -393,6 +382,17 @@ fn do_inspect(
             }
             let v = serde_json::to_vec(&v).unwrap_or_default();
             let _ = messages.send(Message::with_payload(session, req_id, v));
+        }
+        Inspection::UpdateDepth => {
+            let writing = data
+                .orderbooks
+                .iter()
+                .map(|(k, v)| v.as_depth(32, *k))
+                .collect::<Vec<_>>();
+            output::write_depth(writing);
+        }
+        Inspection::ConfirmAll(from, exclude) => {
+            sequence::confirm(from, exclude).map_err(|_| EventsError::Interrupted)?;
         }
         Inspection::Dump(id, time) => {
             snapshot::dump(id, time, data);

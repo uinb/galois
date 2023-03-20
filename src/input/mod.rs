@@ -148,7 +148,7 @@ impl Command {
                 | GET_X25519_KEY
                 | QUERY_OPEN_MARKETS
                 | QUERY_FUSOTAO_PROGRESS
-                | QUERY_PRIVING_PERF_INDEX
+                | QUERY_PROVING_PERF_INDEX
                 | QUERY_SCAN_HEIGHT
         )
     }

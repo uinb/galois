@@ -114,19 +114,29 @@ pub fn init(sender: ToBackend, receiver: FromBackend, shared: Shared, ready: Arc
     let listener = task::block_on(async { TcpListener::bind(&C.server.bind_addr).await }).unwrap();
     let sessions = Arc::new(DashMap::<u64, ToSession>::new());
     let sx = sessions.clone();
-    std::thread::spawn(move || loop {
-        let msg = receiver.recv().unwrap();
-        if let Some(session) = sx.get_mut(&msg.session) {
-            let mut s = session.clone();
-            // relay the messages from backend to session, need to switch the runtime using async
-            task::spawn(async move {
-                let _ = s.send(msg).await;
-            });
-        }
+    std::thread::spawn(move || {
+        log::error!("session relayer interrupted, {:?}", relay(receiver, sx));
     });
     log::info!("server initialized");
     let future = accept(listener, sender, shared, sessions, ready);
-    task::block_on(future).unwrap();
+    let _ = task::block_on(future);
+    log::info!("bye!");
+}
+
+fn relay(receiver: FromBackend, sessions: Arc<DashMap<u64, ToSession>>) -> Result<()> {
+    loop {
+        let msg = receiver.recv()?;
+        log::debug!("session relayer received msg: {:?}", msg);
+        // relay the messages from backend to session, need to switch the runtime using async
+        if let Some(mut session) = sessions.get_mut(&msg.session) {
+            let _ = task::block_on(session.send(msg));
+        } else {
+            log::error!(
+                "received reply from executor, but session {} not found",
+                msg.session
+            );
+        }
+    }
 }
 
 async fn accept(
@@ -168,7 +178,7 @@ fn register(
     let (tx, rx) = mpsc::unbounded();
     sessions.insert(session, tx);
     let stream = Arc::new(stream);
-    task::spawn(write_loop(rx, stream.clone(), sessions.clone()));
+    task::spawn(write_loop(rx, stream.clone()));
     task::spawn(read_loop(
         to_backend.clone(),
         shared,
@@ -178,23 +188,18 @@ fn register(
     ));
 }
 
-async fn write_loop(
-    mut recv: FromSession,
-    stream: Arc<TcpStream>,
-    sessions: Arc<DashMap<u64, ToSession>>,
-) -> Result<()> {
+async fn write_loop(mut recv: FromSession, stream: Arc<TcpStream>) -> Result<()> {
     let mut stream = &*stream;
     while let Some(output) = recv.next().await {
-        let session = output.session;
         match stream.write_all(&output.encode()).await {
-            Ok(_) => {}
-            Err(_) => {
-                // for some reasons we didn't read errors
-                sessions.remove(&session);
+            Ok(_) => log::debug!("replying to sidecar -> OK"),
+            Err(e) => {
+                log::debug!("replying to sidecar -> {:?}", e);
                 break;
             }
         }
     }
+    log::info!("bye! {:?}", stream);
     Ok(())
 }
 
@@ -207,7 +212,7 @@ async fn read_loop(
 ) -> Result<()> {
     let mut stream = &*stream;
     let mut buf = Vec::<u8>::with_capacity(4096);
-    let mut to_session = sessions.get_mut(&session).unwrap();
+    let mut to_session = sessions.get(&session).unwrap().clone();
     loop {
         let mut header = [0_u8; 8];
         let mut req_id = [0_u8; 8];
@@ -230,12 +235,9 @@ async fn read_loop(
         if !has_next_frame(header) {
             let json = match std::str::from_utf8(&buf[..]) {
                 Ok(json) => json.to_string(),
-                Err(_) => {
-                    buf.clear();
-                    break;
-                }
+                Err(_) => break,
             };
-            if let Err(_) = handle_req(
+            if let Err(e) = handle_req(
                 &mut to_back,
                 &mut to_session,
                 &shared,
@@ -245,7 +247,7 @@ async fn read_loop(
             )
             .await
             {
-                buf.clear();
+                log::error!("{:?}, will close session {}", e, session);
                 break;
             }
             buf.clear();
@@ -264,21 +266,24 @@ async fn handle_req(
     req_id: u64,
     json: String,
 ) -> Result<()> {
-    let cmd: Command = serde_json::from_str(&json).map_err(|_| anyhow::anyhow!(""))?;
+    let cmd: Command = serde_json::from_str(&json)
+        .map_err(|e| anyhow::anyhow!("deser command failed, {:?}", e))?;
     if cmd.is_querying_core_data() {
         let w = Input::NonModifier(Whistle {
             session,
             req_id,
             cmd,
         });
-        to_back.send(w).map_err(|_| anyhow::anyhow!(""))?;
+        to_back
+            .send(w)
+            .map_err(|e| anyhow::anyhow!("read loop -> executor -> {:?}", e))?;
         Ok(())
     } else if cmd.is_querying_share_data() {
         let w = shared.handle_req(&cmd)?;
         to_session
             .send(Message::with_payload(session, req_id, w))
             .await
-            .map_err(|_| anyhow::anyhow!(""))?;
+            .map_err(|e| anyhow::anyhow!("read loop -> write loop -> {:?}", e))?;
         Ok(())
     } else {
         Err(anyhow::anyhow!("unsupported command {} from sidecar", cmd.cmd).into())
