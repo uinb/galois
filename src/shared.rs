@@ -21,17 +21,17 @@ use std::sync::Arc;
 #[derive(Clone, Debug)]
 pub struct Shared {
     pub fuso_state: Arc<FusoState>,
-    pub x25519_pubkey: String,
+    pub x25519_priv: String,
 }
 
 unsafe impl Send for Shared {}
 unsafe impl Sync for Shared {}
 
 impl Shared {
-    pub fn new(fuso_state: Arc<FusoState>, x25519_pubkey: String) -> Self {
+    pub fn new(fuso_state: Arc<FusoState>, x25519_priv: String) -> Self {
         Self {
             fuso_state,
-            x25519_pubkey,
+            x25519_priv,
         }
     }
 
@@ -55,7 +55,7 @@ impl Shared {
 
     /// retrieve the x25519 private key
     fn get_x25519_key(&self) -> Vec<u8> {
-        to_vec(&json!({ "x25519": self.x25519_pubkey })).unwrap()
+        to_vec(&json!({ "x25519": self.x25519_priv })).unwrap()
     }
 
     /// get and incr the broker nonce

@@ -13,23 +13,21 @@
 // limitations under the License.
 
 use clap::Parser;
-use lazy_static::lazy_static;
 use log4rs::config::{Logger, RawConfig as LogConfig};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Parser)]
 #[command(author, version, about = r#"
                  **       **
-   *******     ******     **               **
-  ***               **    **     *****     **    ******
- **              *****    **   ***   ***        **    *
+   *******     ******     **               **    ******
+  ***               **    **     *****     **   **    *
+ **              *****    **   ***   ***       **
  **            *******    **   **     **   **   **
- **    *****  **    **    **   *       *   **    **
-  **     ***  **    **    **   **     **   **     ****
-   *********   **  ****   **    *******    **        **
-      *    *    ****  *   **      ***      **    ** ***
-                                                  ****"#,
-          long_about = None)]
+ **    *****  **    **    **   *       *   **     *****
+  **     ***  **    **    **   **     **   **         **
+   *********   **  ****   **    *******    **    **   **
+      *    *    ****  *   **      ***      **     ****"#,
+long_about = None)]
 pub struct GaloisCli {
     #[arg(short('c'), long("config"), required = true, value_name = "FILE")]
     pub file: std::path::PathBuf,
@@ -125,13 +123,8 @@ pub struct FusotaoConfig {
 }
 
 impl FusotaoConfig {
-    pub fn get_x25519_pubkey(&self) -> anyhow::Result<String> {
-        let hex = self.x25519_priv.trim_start_matches("0x");
-        let mut bytes = [0u8; 32];
-        hex::decode_to_slice(hex, &mut bytes).map_err(|_| anyhow::anyhow!("invalid hex string"))?;
-        let x25519_priv = x25519_dalek::StaticSecret::from(bytes);
-        let pubkey = x25519_dalek::PublicKey::from(&x25519_priv);
-        Ok(format!("0x{}", hex::encode(pubkey.to_bytes())))
+    pub fn get_x25519_prikey(&self) -> anyhow::Result<String> {
+        Ok(self.x25519_priv.clone())
     }
 }
 
@@ -180,7 +173,7 @@ impl EncryptedConfig for RedisConfig {
     }
 }
 
-lazy_static! {
+lazy_static::lazy_static! {
     pub static ref C: Config = init_config_file().unwrap();
 }
 
