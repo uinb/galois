@@ -58,16 +58,14 @@ impl Shared {
         to_vec(&json!({ "x25519": self.x25519_priv })).unwrap()
     }
 
-    /// get and incr the broker nonce
-    fn get_and_incr_broker_nonce(&self, broker: &UserId) -> Vec<u8> {
-        let nonce = self
-            .fuso_state
-            .brokers
-            .get(&broker)
-            .map(|n| json!({ "nonce": *n }))
-            .unwrap_or(json!({"nonce": -1}));
-        self.fuso_state.brokers.alter(&broker, |_, n| n + 1);
-        to_vec(&nonce).unwrap()
+    /// get the broker nonce
+    fn get_nonce_for_broker(&self, broker: &UserId) -> Vec<u8> {
+        let p = if self.fuso_state.brokers.contains_key(broker) {
+            json!({"nonce": self.fuso_state.get_chain_height()})
+        } else {
+            json!({"nonce": -1})
+        };
+        to_vec(&p).unwrap()
     }
 
     pub fn handle_req(&self, cmd: &Command) -> anyhow::Result<Vec<u8>> {
@@ -75,9 +73,9 @@ impl Shared {
             QUERY_OPEN_MARKETS => Ok(self.query_open_markets()),
             GET_X25519_KEY => Ok(self.get_x25519_key()),
             QUERY_FUSOTAO_PROGRESS => Ok(self.query_progress()),
-            GET_AND_INCR_BROKER_NONCE => {
+            GET_NONCE_FOR_BROKER => {
                 let broker = UserId::from_str(cmd.user_id.as_ref().ok_or(anyhow::anyhow!(""))?)?;
-                Ok(self.get_and_incr_broker_nonce(&broker))
+                Ok(self.get_nonce_for_broker(&broker))
             }
             QUERY_PROVING_PERF_INDEX => {
                 to_vec(&json!({"proving_perf_index": 0})).map_err(|e| e.into())

@@ -60,7 +60,7 @@ pub mod cmd {
     pub const QUERY_SCAN_HEIGHT: u32 = 23; /* DEPRECATED */
     pub const QUERY_OPEN_MARKETS: u32 = 24;
     pub const GET_X25519_KEY: u32 = 25;
-    pub const GET_AND_INCR_BROKER_NONCE: u32 = 26;
+    pub const GET_NONCE_FOR_BROKER: u32 = 26;
     pub const QUERY_FUSOTAO_PROGRESS: u32 = 27;
 }
 
@@ -144,7 +144,7 @@ impl Command {
     pub const fn is_querying_share_data(&self) -> bool {
         matches!(
             self.cmd,
-            GET_AND_INCR_BROKER_NONCE
+            GET_NONCE_FOR_BROKER
                 | GET_X25519_KEY
                 | QUERY_OPEN_MARKETS
                 | QUERY_FUSOTAO_PROGRESS
