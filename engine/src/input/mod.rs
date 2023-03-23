@@ -158,3 +158,61 @@ impl Command {
         matches!(self.cmd, UPDATE_DEPTH | CONFIRM_ALL | DUMP)
     }
 }
+
+#[derive(Debug)]
+pub struct Message {
+    pub req_id: u64,
+    pub payload: Vec<u8>,
+}
+
+const _MAGIC_N_MASK: u64 = 0x0316_0000_0000_0000;
+const _PAYLOAD_MASK: u64 = 0x0000_ffff_0000_0000;
+const _CHK_SUM_MASK: u64 = 0x0000_0000_ffff_0000;
+const _ERR_RSP_MASK: u64 = 0x0000_0000_0000_0001;
+const _NXT_FRM_MASK: u64 = 0x0000_0000_0000_0002;
+pub const MAX_FRAME_SIZE: usize = 64 * 1024;
+/// header = 0x0316<2bytes payload len><2bytes cheskcum><2bytes flag>
+
+impl Message {
+    pub fn new(req_id: u64, payload: Vec<u8>) -> Self {
+        Self { req_id, payload }
+    }
+
+    pub fn encode(self) -> Vec<u8> {
+        let frame_count = self.payload.len() / MAX_FRAME_SIZE + 1;
+        let mut payload_len = self.payload.len();
+        let mut all = Vec::<u8>::with_capacity(payload_len + 16 * frame_count);
+        for i in 0..frame_count - 1 {
+            let mut header = _MAGIC_N_MASK;
+            header |= (MAX_FRAME_SIZE as u64) << 32;
+            header |= 1;
+            payload_len -= MAX_FRAME_SIZE;
+            all.extend_from_slice(&header.to_be_bytes());
+            all.extend_from_slice(&self.req_id.to_be_bytes());
+            all.extend_from_slice(&self.payload[i * MAX_FRAME_SIZE..(i + 1) * MAX_FRAME_SIZE]);
+        }
+        let mut header = _MAGIC_N_MASK;
+        header |= (payload_len as u64) << 32;
+        all.extend_from_slice(&header.to_be_bytes());
+        all.extend_from_slice(&self.req_id.to_be_bytes());
+        all.extend_from_slice(&self.payload[(frame_count - 1) * MAX_FRAME_SIZE..]);
+        all
+    }
+
+    pub const fn check_magic(header: u64) -> bool {
+        (header & _MAGIC_N_MASK) == _MAGIC_N_MASK
+    }
+
+    pub const fn get_len(header: u64) -> usize {
+        ((header & _PAYLOAD_MASK) >> 32) as usize
+    }
+
+    #[allow(dead_code)]
+    pub const fn get_checksum(header: u64) -> u16 {
+        ((header & _CHK_SUM_MASK) >> 16) as u16
+    }
+
+    pub const fn has_next_frame(header: u64) -> bool {
+        (header & _NXT_FRM_MASK) == _NXT_FRM_MASK
+    }
+}

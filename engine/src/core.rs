@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::fusotao::GlobalStates;
-use crate::{assets::Balance, orderbook::OrderBook};
 pub use crate::{
+    assets::Balance,
     matcher::{Role, State as OrderState},
     orderbook::AskOrBid,
     sequence::InOrOut,
 };
+use crate::{fusotao::GlobalStates, orderbook::OrderBook};
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use indexmap::IndexSet;
 use rust_decimal::{prelude::Zero, Decimal};

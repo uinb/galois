@@ -20,12 +20,10 @@ pub mod orderbook;
 use crate::{
     core::*,
     fusotao::{Proof, Prover},
-    input::{Event, EventsError, Input, Inspection},
+    input::{Event, EventsError, Input, Inspection, Message},
     orderbook::*,
     output::{self, Output},
-    sequence,
-    server::Message,
-    snapshot,
+    sequence, snapshot,
 };
 use anyhow::anyhow;
 use rust_decimal::{prelude::*, Decimal};
@@ -39,7 +37,7 @@ type EventExecutionResult = Result<(), EventsError>;
 type OutputChannel = Sender<Vec<Output>>;
 type DriverChannel = Receiver<Input>;
 type ProofChannel = Sender<Proof>;
-type BackToServer = Sender<Message>;
+type BackToServer = Sender<(u64, Message)>;
 
 pub fn init(
     recv: DriverChannel,
@@ -60,7 +58,7 @@ pub fn init(
                     if let Ok(inspection) = whistle.try_into() {
                         do_inspect(inspection, &data, &messages).unwrap();
                     } else {
-                        let r = messages.send(Message::with_payload(s, r, vec![]));
+                        let r = messages.send((s, Message::new(r, vec![])));
                         log::error!("{:?}", r);
                     }
                 }
@@ -355,17 +353,17 @@ fn do_inspect(
                 }),
                 None => vec![],
             };
-            let _ = messages.send(Message::with_payload(session, req_id, v));
+            let _ = messages.send((session, Message::new(req_id, v)));
         }
         Inspection::QueryBalance(user_id, currency, session, req_id) => {
             let a = assets::get_balance_to_owned(&data.accounts, &user_id, currency);
             let v = serde_json::to_vec(&a).unwrap_or_default();
-            let _ = messages.send(Message::with_payload(session, req_id, v));
+            let _ = messages.send((session, Message::new(req_id, v)));
         }
         Inspection::QueryAccounts(user_id, session, req_id) => {
             let a = assets::get_account_to_owned(&data.accounts, &user_id);
             let v = serde_json::to_vec(&a).unwrap_or_default();
-            let _ = messages.send(Message::with_payload(session, req_id, v));
+            let _ = messages.send((session, Message::new(req_id, v)));
         }
         Inspection::QueryExchangeFee(symbol, session, req_id) => {
             let mut v: HashMap<String, Fee> = HashMap::new();
@@ -381,7 +379,7 @@ fn do_inspect(
                 }
             }
             let v = serde_json::to_vec(&v).unwrap_or_default();
-            let _ = messages.send(Message::with_payload(session, req_id, v));
+            let _ = messages.send((session, Message::new(req_id, v)));
         }
         Inspection::UpdateDepth => {
             let writing = data

@@ -1,0 +1,224 @@
+// Copyright 2023 UINB Technologies Pte. Ltd.
+
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// 	http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use crate::{
+    backend::BackendConnection, config::Config, endpoint::TradingCommand, AccountId, Pair, Public,
+    Signature,
+};
+use galois_engine::input::cmd;
+use hyper::{Body, Request, Response};
+use parity_scale_codec::{Decode, Encode};
+use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, to_vec};
+use sp_core::crypto::{Pair as Crypto, Ss58Codec};
+use sqlx::{MySql, Pool};
+use std::{
+    error::Error,
+    future::Future,
+    pin::Pin,
+    task::{Context as TaskCtx, Poll},
+};
+use tower::{Layer, Service};
+use x25519_dalek::StaticSecret;
+
+#[derive(Clone)]
+pub struct Context {
+    pub backend: BackendConnection,
+    pub x25519_priv: StaticSecret,
+    pub db: Pool<MySql>,
+}
+
+impl Context {
+    pub fn new(config: Config) -> Self {
+        let backend = BackendConnection::new(config.prover);
+        let conn = backend.clone();
+        let x25519_priv = futures::executor::block_on(async move {
+            let r = conn
+                .request(to_vec(&json!({ "cmd": cmd::GET_X25519_KEY })).unwrap())
+                .await
+                .unwrap();
+            let hex = r.get("x25519").unwrap().as_str().unwrap();
+            log::info!("initializing connection with x25519 key: **************************");
+            let b = hex::decode(hex.trim_start_matches("0x")).unwrap();
+            let key: [u8; 32] = b.try_into().unwrap();
+            StaticSecret::from(key)
+        });
+        let db = futures::executor::block_on(async { Pool::connect(&config.db).await }).unwrap();
+        Self {
+            backend,
+            x25519_priv,
+            db,
+        }
+    }
+
+    pub async fn get_trading_key(&self, user_id: &String) -> anyhow::Result<(String, u64)> {
+        Ok(("".to_string(), 0))
+    }
+
+    pub async fn handle_trading(cmd: TradingCommand) {
+        match cmd {
+            TradingCommand::Ask { .. } => {}
+            TradingCommand::Bid { .. } => {}
+            TradingCommand::Cancel { .. } => {}
+        }
+    }
+
+    pub async fn query_pending_orders(symbol: &(u32, u32), user_id: &String) {}
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, Eq, PartialEq)]
+pub struct DbOrder {
+    pub f_id: u64,
+    pub f_version: u64,
+    pub f_user_id: String,
+    pub f_amount: Decimal,
+    pub f_price: Decimal,
+    pub f_order_type: u16,
+    pub f_timestamp: u64,
+    pub f_status: u8,
+    pub f_base_fee: Decimal,
+    pub f_quote_fee: Decimal,
+    pub f_last_cr: u64,
+    pub f_matched_quote_amount: Decimal,
+    pub f_matched_base_amount: Decimal,
+}
+
+#[derive(Debug)]
+pub struct BrokerSignatureVerifier<S> {
+    pub backend: BackendConnection,
+    pub inner: S,
+}
+
+#[derive(Debug, Clone)]
+pub struct BrokerVerifyLayer {
+    pub backend: BackendConnection,
+}
+
+impl BrokerVerifyLayer {
+    pub fn new(backend: BackendConnection) -> Self {
+        Self { backend }
+    }
+}
+
+impl<S> Layer<S> for BrokerVerifyLayer {
+    type Service = BrokerSignatureVerifier<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        BrokerSignatureVerifier {
+            backend: self.backend.clone(),
+            inner,
+        }
+    }
+}
+
+impl<S> Service<Request<Body>> for BrokerSignatureVerifier<S>
+where
+    S: Service<Request<Body>, Response = Response<Body>> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+    S::Error: Into<Box<dyn Error + Send + Sync>> + 'static + std::fmt::Debug,
+{
+    type Error = Box<dyn Error + Send + Sync + 'static>;
+    type Future =
+        Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
+    type Response = S::Response;
+
+    fn poll_ready(&mut self, _cx: &mut TaskCtx<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: Request<Body>) -> Self::Future {
+        let conn = self.backend.clone();
+        let mut inner = self.inner.clone();
+        Box::pin(async move {
+            let nonce = req
+                .headers()
+                .get("x-broker-nonce")
+                .map(|v| v.to_str().map_err(|_| anyhow::anyhow!("")))
+                .ok_or(anyhow::anyhow!(""))
+                .flatten()?;
+            let signature = req
+                .headers()
+                .get("x-broker-signature")
+                .ok_or(anyhow::anyhow!(""))
+                .map(|v| v.to_str().map_err(|_| anyhow::anyhow!("")))
+                .flatten()?;
+            let ss58 = req
+                .headers()
+                .get("x-broker-account")
+                .ok_or(anyhow::anyhow!(""))
+                .map(|v| v.to_str().map_err(|_| anyhow::anyhow!("")))
+                .flatten()?;
+            log::debug!("address: {}", ss58);
+            log::debug!("nonce: {}", nonce);
+            log::debug!("signature: {}", signature);
+            let from_galois = conn.get_nonce(ss58).await.ok_or(anyhow::anyhow!(""))?;
+            let nonce = nonce
+                .parse::<u32>()
+                .inspect_err(|e| log::debug!("{:?}", e))
+                .map_err(|_| anyhow::anyhow!(""))?;
+            if from_galois < nonce || from_galois - nonce > 100 {
+                return Err(anyhow::anyhow!("Nonce expired").into());
+            }
+            let sig_hex =
+                hex::decode(signature.trim_start_matches("0x")).map_err(|_| anyhow::anyhow!(""))?;
+            let raw_signature =
+                Signature::decode(&mut &sig_hex[..]).map_err(|_| anyhow::anyhow!(""))?;
+            let public = AccountId::from_ss58check(ss58)
+                .map_err(|_| anyhow::anyhow!(""))
+                .map(|a| Public::from_raw(*a.as_ref()))?;
+            let to_be_signed = nonce.encode();
+            log::debug!("sr25519 pubkey: 0x{}", hex::encode(&public));
+            log::debug!("to be signed: 0x{}", hex::encode(&to_be_signed));
+            log::debug!("signature: 0x{}", hex::encode(&raw_signature));
+            let verified = Pair::verify(&raw_signature, to_be_signed, &public);
+            log::debug!("verified: {}", verified);
+            if verified {
+                inner.call(req).await.map_err(|e| e.into())
+            } else {
+                Err(anyhow::anyhow!("Invalid signature").into())
+            }
+        })
+    }
+}
+
+#[test]
+pub fn validate_signature_should_work() {
+    let nonce = 83143.encode();
+    let seed = "e5be9a5092b81bca64be81d212e7f2f9eba183bb7a90954f7b76361f6edb5c0a";
+    let key: [u8; 32] = hex::decode(seed).unwrap().try_into().unwrap();
+    let p = Pair::from_seed(&key);
+    let signature = p.sign(&nonce);
+    println!("pubkey: 0x{}", hex::encode(&p.public()));
+    println!("nonce: 0x{}", hex::encode(&nonce));
+    println!("signature: 0x{}", hex::encode(&signature));
+    assert!(Pair::verify(&signature, nonce, &p.public()));
+}
+
+#[test]
+pub fn validate_deser_signature_should_work() {
+    let nonce = 83143.encode();
+    let signature = "0x8a44a5e17f9bfa67330d9dbf28afee1e81ea86678beb240b4259cfcaa6c2753a3e2df60afd52171360372d3460b041fc3596ab41b6c7fc30142b091139ba5f89";
+    let ss58 = "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY";
+    let public = Public::from_raw(*AccountId::from_ss58check(ss58).unwrap().as_ref());
+    let signature = hex::decode(&signature.trim_start_matches("0x")).unwrap();
+    let signature = Signature::decode(&mut &signature[..]).unwrap();
+    println!("pubkey: 0x{}", hex::encode(&public));
+    println!("nonce: 0x{}", hex::encode(&nonce));
+    println!(
+        "signature: 0x{}",
+        hex::encode::<&[u8; 64]>(signature.as_ref())
+    );
+    assert!(Pair::verify(&signature, nonce, &public));
+}

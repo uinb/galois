@@ -1,4 +1,4 @@
-// Copyright 2021 UINB Technologies Pte. Ltd.
+// Copyright 2021-2023 UINB Technologies Pte. Ltd.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,9 @@
 // limitations under the License.
 
 use clap::Parser;
-use galois::{config, executor, fusotao, output, sequence, server, shared::Shared, snapshot};
+use galois_engine::{
+    config, executor, fusotao, output, sequence, server, shared::Shared, snapshot,
+};
 use std::sync::{atomic, mpsc, Arc};
 
 fn start() {

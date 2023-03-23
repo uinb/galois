@@ -14,7 +14,7 @@
 
 use crate::{
     config::C,
-    input::{Command, Input},
+    input::{Command, Input, Message},
     shared::Shared,
     whistle::Whistle,
 };
@@ -37,78 +37,11 @@ use std::{
     },
 };
 
-pub const MAX_FRAME_SIZE: usize = 64 * 1024;
-
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-
 type ToSession = UnboundedSender<Message>;
 type FromSession = UnboundedReceiver<Message>;
 type ToBackend = Sender<Input>;
-type FromBackend = Receiver<Message>;
-
-#[derive(Debug)]
-pub struct Message {
-    pub session: u64,
-    pub req_id: u64,
-    pub payload: Vec<u8>,
-}
-
-impl Message {
-    #[must_use]
-    pub fn with_payload(session: u64, req_id: u64, payload: Vec<u8>) -> Self {
-        Self {
-            session,
-            req_id,
-            payload,
-        }
-    }
-
-    fn encode(self) -> Vec<u8> {
-        let frame_count = self.payload.len() / MAX_FRAME_SIZE + 1;
-        let mut payload_len = self.payload.len();
-        let mut all = Vec::<u8>::with_capacity(payload_len + 16 * frame_count);
-        for i in 0..frame_count - 1 {
-            let mut header = _MAGIC_N_MASK;
-            header |= (MAX_FRAME_SIZE as u64) << 32;
-            header |= 1;
-            payload_len -= MAX_FRAME_SIZE;
-            all.extend_from_slice(&header.to_be_bytes());
-            all.extend_from_slice(&self.req_id.to_be_bytes());
-            all.extend_from_slice(&self.payload[i * MAX_FRAME_SIZE..(i + 1) * MAX_FRAME_SIZE]);
-        }
-        let mut header = _MAGIC_N_MASK;
-        header |= (payload_len as u64) << 32;
-        all.extend_from_slice(&header.to_be_bytes());
-        all.extend_from_slice(&self.req_id.to_be_bytes());
-        all.extend_from_slice(&self.payload[(frame_count - 1) * MAX_FRAME_SIZE..]);
-        all
-    }
-}
-
-/// header = 0x0316<2bytes payload len><2bytes cheskcum><2bytes flag>
-
-const _MAGIC_N_MASK: u64 = 0x0316_0000_0000_0000;
-const _PAYLOAD_MASK: u64 = 0x0000_ffff_0000_0000;
-const _CHK_SUM_MASK: u64 = 0x0000_0000_ffff_0000;
-const _ERR_RSP_MASK: u64 = 0x0000_0000_0000_0001;
-const _NXT_FRM_MASK: u64 = 0x0000_0000_0000_0002;
-
-const fn check_magic(header: u64) -> bool {
-    (header & _MAGIC_N_MASK) == _MAGIC_N_MASK
-}
-
-fn get_len(header: u64) -> usize {
-    ((header & _PAYLOAD_MASK) >> 32) as usize
-}
-
-#[allow(dead_code)]
-const fn get_checksum(header: u64) -> u16 {
-    ((header & _CHK_SUM_MASK) >> 16) as u16
-}
-
-const fn has_next_frame(header: u64) -> bool {
-    (header & _NXT_FRM_MASK) == _NXT_FRM_MASK
-}
+type FromBackend = Receiver<(u64, Message)>;
 
 pub fn init(sender: ToBackend, receiver: FromBackend, shared: Shared, ready: Arc<AtomicBool>) {
     let listener = task::block_on(async { TcpListener::bind(&C.server.bind_addr).await }).unwrap();
@@ -125,15 +58,15 @@ pub fn init(sender: ToBackend, receiver: FromBackend, shared: Shared, ready: Arc
 
 fn relay(receiver: FromBackend, sessions: Arc<DashMap<u64, ToSession>>) -> Result<()> {
     loop {
-        let msg = receiver.recv()?;
+        let (session_id, msg) = receiver.recv()?;
         log::debug!("session relayer received msg: {:?}", msg);
         // relay the messages from backend to session, need to switch the runtime using async
-        if let Some(mut session) = sessions.get_mut(&msg.session) {
+        if let Some(mut session) = sessions.get_mut(&session_id) {
             let _ = task::block_on(session.send(msg));
         } else {
             log::error!(
                 "received reply from executor, but session {} not found",
-                msg.session
+                session_id
             );
         }
     }
@@ -147,25 +80,25 @@ async fn accept(
     ready: Arc<AtomicBool>,
 ) -> Result<()> {
     let mut incoming = listener.incoming();
-    let mut session = 0_u64;
+    let mut session_id = 0_u64;
     while let Some(stream) = incoming.next().await {
         if ready.load(Ordering::Relaxed) {
             let stream = stream?;
             register(
-                session,
+                session_id,
                 stream,
                 to_backend.clone(),
                 shared.clone(),
                 &sessions,
             );
-            session += 1;
+            session_id += 1;
         }
     }
     Ok(())
 }
 
 fn register(
-    session: u64,
+    session_id: u64,
     stream: TcpStream,
     to_backend: ToBackend,
     shared: Shared,
@@ -176,13 +109,13 @@ fn register(
         Err(_) => return,
     }
     let (tx, rx) = mpsc::unbounded();
-    sessions.insert(session, tx);
+    sessions.insert(session_id, tx);
     let stream = Arc::new(stream);
     task::spawn(write_loop(rx, stream.clone()));
     task::spawn(read_loop(
         to_backend.clone(),
         shared,
-        session,
+        session_id,
         stream,
         sessions.clone(),
     ));
@@ -206,13 +139,16 @@ async fn write_loop(mut recv: FromSession, stream: Arc<TcpStream>) -> Result<()>
 async fn read_loop(
     mut to_back: ToBackend,
     shared: Shared,
-    session: u64,
+    session_id: u64,
     stream: Arc<TcpStream>,
     sessions: Arc<DashMap<u64, ToSession>>,
 ) -> Result<()> {
     let mut stream = &*stream;
     let mut buf = Vec::<u8>::with_capacity(4096);
-    let mut to_session = sessions.get(&session).unwrap().clone();
+    let mut to_session = sessions
+        .get(&session_id)
+        .ok_or(anyhow::anyhow!("session not found;qed?"))?
+        .clone();
     loop {
         let mut header = [0_u8; 8];
         let mut req_id = [0_u8; 8];
@@ -223,16 +159,16 @@ async fn read_loop(
             break;
         }
         let header = u64::from_be_bytes(header);
-        if !check_magic(header) {
+        if !Message::check_magic(header) {
             break;
         }
         let req_id = u64::from_be_bytes(req_id);
-        let mut tmp = vec![0_u8; get_len(header)];
+        let mut tmp = vec![0_u8; Message::get_len(header)];
         if stream.read_exact(&mut tmp).await.is_err() {
             break;
         }
         buf.extend_from_slice(&tmp[..]);
-        if !has_next_frame(header) {
+        if !Message::has_next_frame(header) {
             let json = match std::str::from_utf8(&buf[..]) {
                 Ok(json) => json.to_string(),
                 Err(_) => break,
@@ -241,20 +177,20 @@ async fn read_loop(
                 &mut to_back,
                 &mut to_session,
                 &shared,
-                session,
+                session_id,
                 req_id,
                 json,
             )
             .await
             {
-                log::error!("{:?}, will close session {}", e, session);
+                log::error!("{:?}, will close session {}", e, session_id);
                 break;
             }
             buf.clear();
         }
     }
     let _ = stream.shutdown(Shutdown::Both);
-    sessions.remove(&session);
+    sessions.remove(&session_id);
     Ok(())
 }
 
@@ -262,7 +198,7 @@ async fn handle_req(
     to_back: &mut ToBackend,
     to_session: &mut ToSession,
     shared: &Shared,
-    session: u64,
+    session_id: u64,
     req_id: u64,
     json: String,
 ) -> Result<()> {
@@ -270,7 +206,7 @@ async fn handle_req(
         .map_err(|e| anyhow::anyhow!("deser command failed, {:?}", e))?;
     if cmd.is_querying_core_data() {
         let w = Input::NonModifier(Whistle {
-            session,
+            session: session_id,
             req_id,
             cmd,
         });
@@ -281,7 +217,7 @@ async fn handle_req(
     } else if cmd.is_querying_share_data() {
         let w = shared.handle_req(&cmd)?;
         to_session
-            .send(Message::with_payload(session, req_id, w))
+            .send(Message::new(req_id, w))
             .await
             .map_err(|e| anyhow::anyhow!("read loop -> write loop -> {:?}", e))?;
         Ok(())
