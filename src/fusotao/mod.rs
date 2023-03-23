@@ -103,14 +103,14 @@ pub enum Receipt {
     // RevokeWithCallback(u32, u128, u32, Callback),
 }
 
-#[derive(Clone, Encode, Decode, Eq, PartialEq, Debug)]
+#[derive(Clone, Encode, Decode, Eq, PartialEq, Debug, Serialize)]
 pub enum MarketStatus {
     Registered,
     Open,
     Closed,
 }
 
-#[derive(Clone, Decode, Encode, Debug)]
+#[derive(Clone, Decode, Encode, Debug, Serialize)]
 pub struct OnchainSymbol {
     pub min_base: u128,
     pub base_scale: u8,

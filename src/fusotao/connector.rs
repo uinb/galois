@@ -149,6 +149,7 @@ impl FusoConnector {
                 &mut k.as_slice(),
             )?;
             let market = OnchainSymbol::decode(&mut v.as_slice())?;
+            crate::output::legacy::create_mysql_table(symbol.clone())?;
             state.symbols.insert(symbol, market);
         }
 
@@ -308,18 +309,6 @@ impl FusoConnector {
                     ("Market", "MarketOpened") => {
                         let decoded = MarketOpenedEvent::decode(&mut &raw.data[..])?;
                         if &decoded.dominator == signer {
-                            state.symbols.insert(
-                                (decoded.base, decoded.quote),
-                                OnchainSymbol {
-                                    min_base: decoded.min_base,
-                                    base_scale: decoded.base_scale,
-                                    quote_scale: decoded.quote_scale,
-                                    status: MarketStatus::Open,
-                                    trading_rewards: true,
-                                    liquidity_rewards: true,
-                                    unavailable_after: None,
-                                },
-                            );
                             // TODO impl Into<Command> for SymbolCmd
                             let mut cmd = Command::default();
                             let milli = Decimal::from_str("0.001").unwrap();
@@ -338,7 +327,23 @@ impl FusoConnector {
                             cmd.fee_times = Some(1);
                             cmd.min_vol = Some(Decimal::from_str("10").unwrap());
                             cmd.enable_market_order = Some(false);
+                            crate::output::legacy::create_mysql_table((
+                                decoded.base,
+                                decoded.quote,
+                            ))?;
                             sequence::insert_sequences(&mut vec![cmd])?;
+                            state.symbols.insert(
+                                (decoded.base, decoded.quote),
+                                OnchainSymbol {
+                                    min_base: decoded.min_base,
+                                    base_scale: decoded.base_scale,
+                                    quote_scale: decoded.quote_scale,
+                                    status: MarketStatus::Open,
+                                    trading_rewards: true,
+                                    liquidity_rewards: true,
+                                    unavailable_after: None,
+                                },
+                            );
                         }
                     }
                     ("Market", "MarketClosed") => {

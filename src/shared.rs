@@ -49,7 +49,10 @@ impl Shared {
     /// NOTE: this is a heavy operation because we have to clone the map to avoid potential deadlock
     fn query_open_markets(&self) -> Vec<u8> {
         let symbols = self.fuso_state.symbols.clone();
-        let open = symbols.iter().map(|r| r.key().clone()).collect::<Vec<_>>();
+        let open = symbols
+            .iter()
+            .map(|r| (r.key().clone(), r.value().clone()))
+            .collect::<Vec<_>>();
         to_vec(&open).unwrap()
     }
 
