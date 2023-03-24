@@ -65,7 +65,6 @@ pub struct FusoState {
     pub chain_height: Arc<AtomicU32>,
     pub proved_event_id: Arc<AtomicU64>,
     pub scanning_progress: Arc<AtomicU32>,
-    // TODO transform OnchainSymbol to offchain symbol
     pub symbols: DashMap<Symbol, OnchainSymbol>,
     // TODO transform OnchainCurrency to offchain currency
     pub currencies: DashMap<Currency, OnchainToken>,

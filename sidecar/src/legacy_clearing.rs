@@ -38,7 +38,7 @@ pub async fn update_order_task(
             break;
         }
         let v = sqlx::query_as::<_, ClearingResult>(&fetch_sql)
-            .bind(1)
+            .bind(recent_cr)
             .fetch_all(&pool)
             .await;
         match v {
