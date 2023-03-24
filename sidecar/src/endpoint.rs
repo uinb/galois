@@ -117,3 +117,13 @@ pub enum TradingCommand {
         order_id: u64,
     },
 }
+
+impl TradingCommand {
+    pub fn get_direction_if_trade(&self) -> Option<u8> {
+        match self {
+            TradingCommand::Ask { .. } => Some(AskOrBid::Ask.into()),
+            TradingCommand::Bid { .. } => Some(AskOrBid::Bid.into()),
+            _ => None,
+        }
+    }
+}

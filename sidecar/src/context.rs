@@ -13,55 +13,74 @@
 // limitations under the License.
 
 use crate::{
-    backend::BackendConnection, config::Config, endpoint::TradingCommand, AccountId, Pair, Public,
-    Signature,
+    backend::BackendConnection, config::Config, endpoint::TradingCommand, legacy_clearing,
+    AccountId, Pair, Public, Signature,
 };
-use galois_engine::{core::UserId, input::cmd};
+use dashmap::DashMap;
+use galois_engine::{core::*, fusotao::OffchainSymbol, input::cmd};
 use hyper::{Body, Request, Response};
+use jsonrpsee::SubscriptionSink;
 use parity_scale_codec::{Decode, Encode};
+use rust_decimal::Decimal;
 use serde_json::{json, to_vec};
 use sp_core::crypto::{Pair as Crypto, Ss58Codec};
 use sqlx::{MySql, Pool};
-use std::str::FromStr;
 use std::{
     error::Error,
     future::Future,
     pin::Pin,
+    str::FromStr,
+    sync::atomic::AtomicBool,
+    sync::Arc,
     task::{Context as TaskCtx, Poll},
 };
 use tower::{Layer, Service};
 use x25519_dalek::StaticSecret;
 
-#[derive(Clone)]
 pub struct Context {
     pub backend: BackendConnection,
-    pub x25519_priv: StaticSecret,
+    pub x25519: StaticSecret,
     pub db: Pool<MySql>,
+    pub subscribers: Arc<DashMap<String, SubscriptionSink>>,
+    pub markets: Arc<DashMap<Symbol, (Arc<AtomicBool>, OffchainSymbol)>>,
 }
 
 impl Context {
     pub fn new(config: Config) -> Self {
         let backend = BackendConnection::new(config.prover);
         let conn = backend.clone();
-        let x25519_priv = futures::executor::block_on(async move {
-            let r = conn
-                .request(to_vec(&json!({ "cmd": cmd::GET_X25519_KEY })).unwrap())
-                .await
-                .unwrap();
-            let hex = r.get("x25519").unwrap().as_str().unwrap();
-            log::info!("initializing connection with x25519 key: **************************");
-            let b = hex::decode(hex.trim_start_matches("0x")).unwrap();
-            let key: [u8; 32] = b.try_into().unwrap();
-            StaticSecret::from(key)
-        });
+        let x25519 = futures::executor::block_on(async move { conn.get_x25519().await }).unwrap();
         let db = futures::executor::block_on(async { Pool::connect(&config.db).await }).unwrap();
+        let subscribers = Arc::new(DashMap::default());
+        let conn = backend.clone();
+        let markets = futures::executor::block_on(async move {
+            conn.get_markets().await.map(|markets| {
+                Arc::new(DashMap::from_iter(markets.into_iter().map(|m| {
+                    (m.symbol.clone(), (Arc::new(AtomicBool::new(false)), m))
+                })))
+            })
+        })
+        .unwrap();
+        // TODO spawn a task to listen new market
+        markets.iter().for_each(|e| {
+            let pool = db.clone();
+            let sub = subscribers.clone();
+            let symbol = e.key().clone();
+            let closed = e.value().0.clone();
+            tokio::spawn(
+                async move { legacy_clearing::update_order_task(sub, pool, symbol, closed) },
+            );
+        });
         Self {
             backend,
-            x25519_priv,
+            x25519,
             db,
+            subscribers,
+            markets,
         }
     }
 
+    // TODO
     pub async fn get_trading_key(&self, user_id: &String) -> anyhow::Result<(String, u64)> {
         Ok(("".to_string(), 0))
     }
@@ -94,8 +113,30 @@ impl Context {
                 quote,
                 amount,
                 price,
+            } => {
+                let open = self
+                    .markets
+                    .get(&(*base, *quote))
+                    .ok_or(anyhow::anyhow!("symbol not exists"))?;
+                let market = open.value();
+                let amount = Decimal::from_str(amount)?;
+                let price = Decimal::from_str(price)?;
+                anyhow::ensure!(
+                    amount >= market.1.min_base
+                        && price.is_sign_positive()
+                        && price.scale() <= market.1.quote_scale.into()
+                        && amount.is_sign_positive()
+                        && amount.scale() <= market.1.base_scale.into(),
+                    "invalid numeric"
+                );
+                let mut account = self.backend.get_account(account_id).await?;
+                anyhow::ensure!(
+                    account.remove(base).unwrap_or_default().available >= amount,
+                    "insufficient balance"
+                );
+                Ok(())
             }
-            | TradingCommand::Bid {
+            TradingCommand::Bid {
                 account_id,
                 base,
                 quote,
@@ -103,12 +144,24 @@ impl Context {
                 price,
             } => {
                 let market = self
-                    .backend
-                    .get_market((*base, *quote))
-                    .await?
+                    .markets
+                    .get(&(*base, *quote))
                     .ok_or(anyhow::anyhow!("symbol not exists"))?;
-                // TODO check scale
-                // TODO check balance
+                let amount = Decimal::from_str(amount)?;
+                let price = Decimal::from_str(price)?;
+                anyhow::ensure!(
+                    amount >= market.1.min_base
+                        && price.is_sign_positive()
+                        && price.scale() <= market.1.quote_scale.into()
+                        && amount.is_sign_positive()
+                        && amount.scale() <= market.1.base_scale.into(),
+                    "invalid numeric"
+                );
+                let mut account = self.backend.get_account(account_id).await?;
+                anyhow::ensure!(
+                    account.remove(quote).unwrap_or_default().available >= amount * price,
+                    "insufficient balance"
+                );
                 Ok(())
             }
         }

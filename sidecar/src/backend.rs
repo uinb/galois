@@ -28,6 +28,7 @@ use tokio::net::{
     TcpStream, ToSocketAddrs,
 };
 use tokio::sync::mpsc::{self, Receiver, Sender};
+use x25519_dalek::StaticSecret;
 
 type ToBackend = Sender<Option<Req>>;
 type FromFrontend = Receiver<Option<Req>>;
@@ -196,19 +197,31 @@ impl BackendConnection {
         serde_json::from_value::<Option<CoreOrder>>(r).map_err(|_| anyhow::anyhow!("galois?"))
     }
 
-    pub async fn get_market(&self, symbol: Symbol) -> anyhow::Result<Option<OffchainSymbol>> {
+    pub async fn get_markets(&self) -> anyhow::Result<Vec<OffchainSymbol>> {
         let r = self
-            .request(
-                to_vec(&json!({
-                    "cmd": cmd::QUERY_MARKET,
-                    "base": symbol.0,
-                    "quote": symbol.1,
-                }))
-                .expect("jsonser;qed"),
-            )
+            .request(to_vec(&json!({ "cmd": cmd::QUERY_OPEN_MARKETS })).expect("jsonser;qed"))
             .await
             .inspect_err(|e| log::debug!("{:?}", e))
             .map_err(|_| anyhow::anyhow!("Galois not available"))?;
-        serde_json::from_value::<Option<OffchainSymbol>>(r).map_err(|_| anyhow::anyhow!("galois?"))
+        serde_json::from_value::<Vec<OffchainSymbol>>(r).map_err(|_| anyhow::anyhow!("galois?"))
+    }
+
+    pub async fn get_x25519(&self) -> anyhow::Result<StaticSecret> {
+        let r = self
+            .request(to_vec(&json!({ "cmd": cmd::GET_X25519_KEY })).expect("jsonser;qed"))
+            .await
+            .inspect_err(|e| log::debug!("{:?}", e))
+            .map_err(|_| anyhow::anyhow!("Galois not available"))?;
+        let b = r
+            .get("x25519")
+            .map(|v| v.as_str())
+            .flatten()
+            .map(|hex| crate::hexstr_to_vec(&hex))
+            .ok_or(anyhow::anyhow!("retrieving x25519 private key failed"))
+            .flatten()?;
+        let key: [u8; 32] = b
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("x25519 config error"))?;
+        Ok(StaticSecret::from(key))
     }
 }

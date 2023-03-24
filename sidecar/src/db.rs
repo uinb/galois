@@ -15,8 +15,10 @@
 use crate::endpoint::TradingCommand;
 use galois_engine::{core::*, input::Command};
 use parity_scale_codec::Encode;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::{MySql, Pool, Row};
+use std::str::FromStr;
 
 #[derive(Clone, Serialize, Deserialize, Debug, Eq, PartialEq, sqlx::FromRow)]
 pub struct DbOrder {
@@ -96,11 +98,13 @@ pub async fn query_pending_orders(
         .collect::<Vec<_>>())
 }
 
+// TODO save the relayer
 pub async fn save_trading_command(
     pool: &Pool<MySql>,
     cmd: TradingCommand,
-    relayer: &String,
+    _relayer: &String,
 ) -> anyhow::Result<u64> {
+    let direction = cmd.get_direction_if_trade();
     match cmd {
         TradingCommand::Cancel {
             account_id,
@@ -133,27 +137,31 @@ pub async fn save_trading_command(
             amount,
             price,
         } => {
-            // transaction
             let mut tx = pool.begin().await?;
-            // TODO
-            let result = sqlx::query("insert into t_order() values(?,?)")
-                .bind("")
-                .bind("")
-                .fetch_one(&mut tx)
-                .await?;
+            let result = sqlx::query(
+                "insert into t_order(f_user_id,f_amount,f_price,f_order_type) values(?,?,?,?)",
+            )
+            .bind(account_id.clone())
+            .bind(amount.clone())
+            .bind(price.clone())
+            .bind(direction)
+            .fetch_one(&mut tx)
+            .await?;
             let id: u64 = result.get("f_id");
             let mut place = Command::default();
+            place.cmd = direction.expect("ask_or_bid;qed").into();
             place.order_id = Some(id);
             place.base = Some(base);
             place.quote = Some(quote);
             place.user_id = Some(account_id);
-            // TODO ..
+            place.price = Decimal::from_str(&price).ok();
+            place.amount = Decimal::from_str(&amount).ok();
             sqlx::query("insert into t_sequence(f_cmd) values(?)")
                 .bind(serde_json::to_string(&place).expect("jsonser;qed"))
                 .execute(&mut tx)
                 .await?;
             tx.commit().await?;
-            Ok(0)
+            Ok(id)
         }
     }
 }

@@ -12,4 +12,48 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub async fn update_order() {}
+use dashmap::DashMap;
+use galois_engine::core::Symbol;
+use jsonrpsee::server::SubscriptionSink;
+use sqlx::{MySql, Pool};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+
+pub async fn update_order_task(
+    subscribers: Arc<DashMap<String, SubscriptionSink>>,
+    pool: Pool<MySql>,
+    symbol: Symbol,
+    symbol_closed: Arc<AtomicBool>,
+) {
+    let mut recent_cr = 0u64;
+    let fetch_sql = format!(
+        "select * from t_clearing_result_{}_{} where f_event_id > ? limit 1000",
+        symbol.0, symbol.1
+    );
+    loop {
+        if symbol_closed.load(Ordering::Relaxed) {
+            break;
+        }
+        let v = sqlx::query_as::<_, ClearingResult>(&fetch_sql)
+            .bind(1)
+            .fetch_all(&pool)
+            .await;
+        match v {
+            Ok(v) => {
+                if v.is_empty() {
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                } else {
+                    // TODO save and push
+                }
+            }
+            Err(e) => log::error!("fetch clearing results failed, {:?}", e),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, sqlx::FromRow)]
+pub struct ClearingResult {
+    pub f_event_id: u64,
+}

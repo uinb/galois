@@ -51,20 +51,9 @@ impl Shared {
         let symbols = self.fuso_state.symbols.clone();
         let open = symbols
             .iter()
-            .map(|r| (r.key().clone(), r.value().clone()))
-            .collect::<Vec<_>>();
+            .map(|r| (r.key().clone(), r.value().clone()).into())
+            .collect::<Vec<OffchainSymbol>>();
         to_vec(&open).expect("jsonser;qed")
-    }
-
-    fn query_market(&self, symbol: &Symbol) -> Vec<u8> {
-        to_vec::<Option<OffchainSymbol>>(
-            &self
-                .fuso_state
-                .symbols
-                .get(symbol)
-                .map(|v| (symbol.clone(), v.value().clone()).into()),
-        )
-        .expect("jsonser;qed")
     }
 
     /// retrieve the x25519 private key
@@ -99,7 +88,6 @@ impl Shared {
                 "chain_height": self.fuso_state.get_chain_height(),
             }))
             .map_err(|e| e.into()),
-            QUERY_MARKET => Ok(self.query_market(&cmd.symbol().ok_or(anyhow::anyhow!(""))?)),
             _ => Err(anyhow::anyhow!("")),
         }
     }
@@ -118,12 +106,15 @@ mod test {
         );
         let broker = UserId::from_str("5DaYdJ1fXoFetSCaA44PrK6iQeTwg9AtjzLrxaQXooRrx9RK").unwrap();
         shared.fuso_state.brokers.insert(broker.clone(), 2);
+        shared
+            .fuso_state
+            .chain_height
+            .store(1000, std::sync::atomic::Ordering::Relaxed);
         assert_eq!(
-            serde_json::json!({"nonce": 2}),
+            serde_json::json!({"nonce": 1000}),
             serde_json::from_slice::<serde_json::Value>(&shared.get_nonce_for_broker(&broker))
                 .unwrap()
         );
-        assert_eq!(3, *shared.fuso_state.brokers.get(&broker).unwrap());
         let broker = UserId::from_str("5FhfEqhp2Dt9e1FgL9EmnE6kRT6NJgSUPCTPMCCNqxrm3MQX").unwrap();
         assert_eq!(
             serde_json::json!({"nonce": -1}),
