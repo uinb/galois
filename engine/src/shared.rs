@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{cmd::*, core::UserId, fusotao::FusoState, Command};
+use crate::{cmd::*, core::*, fusotao::*, Command};
 use serde_json::{json, to_vec};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -53,12 +53,23 @@ impl Shared {
             .iter()
             .map(|r| (r.key().clone(), r.value().clone()))
             .collect::<Vec<_>>();
-        to_vec(&open).unwrap()
+        to_vec(&open).expect("jsonser;qed")
+    }
+
+    fn query_market(&self, symbol: &Symbol) -> Vec<u8> {
+        to_vec::<Option<OffchainSymbol>>(
+            &self
+                .fuso_state
+                .symbols
+                .get(symbol)
+                .map(|v| (symbol.clone(), v.value().clone()).into()),
+        )
+        .expect("jsonser;qed")
     }
 
     /// retrieve the x25519 private key
     fn get_x25519_key(&self) -> Vec<u8> {
-        to_vec(&json!({ "x25519": self.x25519_priv })).unwrap()
+        to_vec(&json!({ "x25519": self.x25519_priv })).expect("jsonser;qed")
     }
 
     /// get the broker nonce
@@ -68,7 +79,7 @@ impl Shared {
         } else {
             json!({"nonce": -1})
         };
-        to_vec(&p).unwrap()
+        to_vec(&p).expect("jsonser;qed")
     }
 
     pub fn handle_req(&self, cmd: &Command) -> anyhow::Result<Vec<u8>> {
@@ -88,6 +99,7 @@ impl Shared {
                 "chain_height": self.fuso_state.get_chain_height(),
             }))
             .map_err(|e| e.into()),
+            QUERY_MARKET => Ok(self.query_market(&cmd.symbol().ok_or(anyhow::anyhow!(""))?)),
             _ => Err(anyhow::anyhow!("")),
         }
     }
@@ -108,14 +120,14 @@ mod test {
         shared.fuso_state.brokers.insert(broker.clone(), 2);
         assert_eq!(
             serde_json::json!({"nonce": 2}),
-            serde_json::from_slice::<serde_json::Value>(&shared.get_and_incr_broker_nonce(&broker))
+            serde_json::from_slice::<serde_json::Value>(&shared.get_nonce_for_broker(&broker))
                 .unwrap()
         );
         assert_eq!(3, *shared.fuso_state.brokers.get(&broker).unwrap());
         let broker = UserId::from_str("5FhfEqhp2Dt9e1FgL9EmnE6kRT6NJgSUPCTPMCCNqxrm3MQX").unwrap();
         assert_eq!(
             serde_json::json!({"nonce": -1}),
-            serde_json::from_slice::<serde_json::Value>(&shared.get_and_incr_broker_nonce(&broker))
+            serde_json::from_slice::<serde_json::Value>(&shared.get_nonce_for_broker(&broker))
                 .unwrap()
         );
     }

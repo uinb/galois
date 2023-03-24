@@ -1,4 +1,4 @@
-// Copyright 2023 UINB Technologies Pte. Ltd.
+// Copyright 2021-2023 UINB Technologies Pte. Ltd.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,11 +13,13 @@
 // limitations under the License.
 
 use dashmap::DashMap;
-use galois_engine::core::*;
-use galois_engine::input::{cmd, Message};
-use serde::{Deserialize, Serialize};
-use serde_json::{json, to_vec};
-use serde_json::{Error, Value as JsonValue};
+use galois_engine::{
+    core::*,
+    fusotao::OffchainSymbol,
+    input::{cmd, Message},
+    orderbook::Order as CoreOrder,
+};
+use serde_json::{json, to_vec, Value as JsonValue};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -161,12 +163,52 @@ impl BackendConnection {
             .flatten()
     }
 
-    pub async fn get_account(&self, user_id: String) -> Option<HashMap<u32, Balance>> {
+    pub async fn get_account(&self, user_id: &String) -> anyhow::Result<HashMap<u32, Balance>> {
         let r = self
-            .request(to_vec(&json!({"cmd": cmd::QUERY_ACCOUNTS, "user_id": user_id})).ok()?)
+            .request(
+                to_vec(&json!({"cmd": cmd::QUERY_ACCOUNTS, "user_id": user_id}))
+                    .expect("jsonser;qed"),
+            )
             .await
             .inspect_err(|e| log::debug!("{:?}", e))
-            .ok()?;
-        serde_json::from_value::<HashMap<u32, Balance>>(r).ok()
+            .map_err(|_| anyhow::anyhow!("Galois not available"))?;
+        serde_json::from_value::<HashMap<u32, Balance>>(r).map_err(|_| anyhow::anyhow!("galois?"))
+    }
+
+    pub async fn get_order(
+        &self,
+        symbol: Symbol,
+        order_id: u64,
+    ) -> anyhow::Result<Option<CoreOrder>> {
+        let r = self
+            .request(
+                to_vec(&json!({
+                    "cmd": cmd::QUERY_ORDER,
+                    "base": symbol.0,
+                    "quote": symbol.1,
+                    "order_id": order_id,
+                }))
+                .expect("jsonser;qed"),
+            )
+            .await
+            .inspect_err(|e| log::debug!("{:?}", e))
+            .map_err(|_| anyhow::anyhow!("Galois not available"))?;
+        serde_json::from_value::<Option<CoreOrder>>(r).map_err(|_| anyhow::anyhow!("galois?"))
+    }
+
+    pub async fn get_market(&self, symbol: Symbol) -> anyhow::Result<Option<OffchainSymbol>> {
+        let r = self
+            .request(
+                to_vec(&json!({
+                    "cmd": cmd::QUERY_MARKET,
+                    "base": symbol.0,
+                    "quote": symbol.1,
+                }))
+                .expect("jsonser;qed"),
+            )
+            .await
+            .inspect_err(|e| log::debug!("{:?}", e))
+            .map_err(|_| anyhow::anyhow!("Galois not available"))?;
+        serde_json::from_value::<Option<OffchainSymbol>>(r).map_err(|_| anyhow::anyhow!("galois?"))
     }
 }

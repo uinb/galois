@@ -1,4 +1,4 @@
-// Copyright 2023 UINB Technologies Pte. Ltd.
+// Copyright 2021-2023 UINB Technologies Pte. Ltd.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,14 +16,13 @@ use crate::{
     backend::BackendConnection, config::Config, endpoint::TradingCommand, AccountId, Pair, Public,
     Signature,
 };
-use galois_engine::input::cmd;
+use galois_engine::{core::UserId, input::cmd};
 use hyper::{Body, Request, Response};
 use parity_scale_codec::{Decode, Encode};
-use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
 use serde_json::{json, to_vec};
 use sp_core::crypto::{Pair as Crypto, Ss58Codec};
 use sqlx::{MySql, Pool};
+use std::str::FromStr;
 use std::{
     error::Error,
     future::Future,
@@ -67,32 +66,53 @@ impl Context {
         Ok(("".to_string(), 0))
     }
 
-    pub async fn handle_trading(cmd: TradingCommand) {
+    pub async fn validate_cmd(&self, cmd: &TradingCommand) -> anyhow::Result<()> {
         match cmd {
-            TradingCommand::Ask { .. } => {}
-            TradingCommand::Bid { .. } => {}
-            TradingCommand::Cancel { .. } => {}
+            TradingCommand::Cancel {
+                account_id,
+                base,
+                quote,
+                order_id,
+            } => {
+                let order = self
+                    .backend
+                    .get_order((*base, *quote), *order_id)
+                    .await?
+                    .ok_or(anyhow::anyhow!("order not exists"))?;
+                if order.user
+                    != UserId::from_str(&account_id)
+                        .map_err(|_| anyhow::anyhow!("invalid user id"))?
+                {
+                    Err(anyhow::anyhow!("invalid order id"))
+                } else {
+                    Ok(())
+                }
+            }
+            TradingCommand::Ask {
+                account_id,
+                base,
+                quote,
+                amount,
+                price,
+            }
+            | TradingCommand::Bid {
+                account_id,
+                base,
+                quote,
+                amount,
+                price,
+            } => {
+                let market = self
+                    .backend
+                    .get_market((*base, *quote))
+                    .await?
+                    .ok_or(anyhow::anyhow!("symbol not exists"))?;
+                // TODO check scale
+                // TODO check balance
+                Ok(())
+            }
         }
     }
-
-    pub async fn query_pending_orders(symbol: &(u32, u32), user_id: &String) {}
-}
-
-#[derive(Clone, Serialize, Deserialize, Debug, Eq, PartialEq)]
-pub struct DbOrder {
-    pub f_id: u64,
-    pub f_version: u64,
-    pub f_user_id: String,
-    pub f_amount: Decimal,
-    pub f_price: Decimal,
-    pub f_order_type: u16,
-    pub f_timestamp: u64,
-    pub f_status: u8,
-    pub f_base_fee: Decimal,
-    pub f_quote_fee: Decimal,
-    pub f_last_cr: u64,
-    pub f_matched_quote_amount: Decimal,
-    pub f_matched_base_amount: Decimal,
 }
 
 #[derive(Debug)]

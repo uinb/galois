@@ -62,6 +62,7 @@ pub mod cmd {
     pub const GET_X25519_KEY: u32 = 25;
     pub const GET_NONCE_FOR_BROKER: u32 = 26;
     pub const QUERY_FUSOTAO_PROGRESS: u32 = 27;
+    pub const QUERY_MARKET: u32 = 28;
 }
 
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone, Default)]

@@ -1,10 +1,11 @@
-# v0.4.2-dev.3
+# v0.5.0-dev
 
 - extend fusotao events scanning to support markets/x25519_key
 - remove mmap
 - seperate some shared data reading from core data
 - add broker signature support
 - encrypt config file
+- merge sidecar
 
 # v0.4.1
 

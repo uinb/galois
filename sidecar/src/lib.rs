@@ -1,4 +1,4 @@
-// Copyright 2023 UINB Technologies Pte. Ltd.
+// Copyright 2021-2023 UINB Technologies Pte. Ltd.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,9 @@
 pub mod backend;
 pub mod config;
 pub mod context;
+mod db;
 pub mod endpoint;
+mod legacy_clearing;
 
 use parity_scale_codec::Decode;
 pub use sp_core::crypto::AccountId32 as AccountId;
@@ -29,8 +31,9 @@ pub use sp_core::sr25519::Signature;
 
 pub type HexEncoded = String;
 
+// TODO
 pub fn verify_trading_sig_and_update_nonce(
-    t: &HexEncoded,
+    t: impl AsRef<str>,
     trading_key: &HexEncoded,
     nonce: &HexEncoded,
     sig: &HexEncoded,
@@ -51,7 +54,7 @@ pub fn verify_trading_sig_and_update_nonce(
         Ok(v) => v,
         Err(_) => return (false, nonce_on_server),
     };
-    let payload = match hex::decode(t.trim_start_matches("0x")) {
+    let payload = match hex::decode(t.as_ref().trim_start_matches("0x")) {
         Ok(v) => v,
         Err(_) => return (false, nonce_on_server),
     };
@@ -67,4 +70,8 @@ pub fn verify_trading_sig_and_update_nonce(
     } else {
         (false, nonce_on_server)
     }
+}
+
+pub fn hexstr_to_vec(h: impl AsRef<str>) -> anyhow::Result<Vec<u8>> {
+    hex::decode(h.as_ref().trim_start_matches("0x")).map_err(|_| anyhow::anyhow!("invalid hex str"))
 }

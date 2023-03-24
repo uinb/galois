@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::{config::C, core::*, sequence::*};
+use connector::FusoConnector;
 use dashmap::DashMap;
 use parity_scale_codec::{Compact, Decode, Encode, WrapperTypeDecode, WrapperTypeEncode};
+pub use prover::Prover;
 use rust_decimal::{prelude::*, Decimal};
 use serde::{Deserialize, Serialize};
 use smt::{blake2b::Blake2bHasher, default_store::DefaultStore, SparseMerkleTree, H256};
@@ -25,10 +28,6 @@ use std::{
         Arc,
     },
 };
-
-use crate::{config::C, core::*, sequence::*};
-use connector::FusoConnector;
-pub use prover::Prover;
 
 mod connector;
 mod persistence;
@@ -119,6 +118,25 @@ pub struct OnchainSymbol {
     pub trading_rewards: bool,
     pub liquidity_rewards: bool,
     pub unavailable_after: Option<BlockNumber>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OffchainSymbol {
+    pub symbol: Symbol,
+    pub min_base: Decimal,
+    pub base_scale: u8,
+    pub quote_scale: u8,
+}
+
+impl From<(Symbol, OnchainSymbol)> for OffchainSymbol {
+    fn from((symbol, data): (Symbol, OnchainSymbol)) -> Self {
+        Self {
+            symbol,
+            min_base: to_decimal_represent(data.min_base).expect("far away from overflow;qed"),
+            base_scale: data.base_scale,
+            quote_scale: data.quote_scale,
+        }
+    }
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, Debug)]

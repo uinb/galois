@@ -1,4 +1,4 @@
-// Copyright 2023 UINB Technologies Pte. Ltd.
+// Copyright 2021-2023 UINB Technologies Pte. Ltd.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,96 +12,80 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::context::Context;
-use jsonrpsee::core::Error;
+use crate::{context::Context, db};
+use galois_engine::core::*;
 use jsonrpsee::RpcModule;
-use parity_scale_codec::Compact;
 use parity_scale_codec::{Decode, Encode};
 use serde::{Deserialize, Serialize};
-use sp_core::crypto::AccountId32;
-use sp_core::H256;
-
-// pub type Signature = H256;
-// pub type AccountId = AccountId32;
-
-// const VERIFY_FAILED: &str = "signature check error";
 
 pub fn export_rpc(context: Context) -> RpcModule<Context> {
     let mut module = RpcModule::new(context);
     module
-        .register_async_method("queryPendingOrders", |p, ctx| async move {
+        .register_async_method("query_pending_orders", |p, ctx| async move {
             let (symbol, user_id, signature, nonce) =
                 p.parse::<(String, String, String, String)>()?;
-            let (key, nonce_on_server) = ctx.get_trading_key(&user_id).await?;
-            let (verified, update) = crate::verify_trading_sig_and_update_nonce(
-                &symbol,
-                &key,
-                &nonce,
-                &signature,
-                nonce_on_server,
-            );
             // TODO
-            Ok(())
+            // let (key, nonce_on_server) = ctx.get_trading_key(&user_id).await?;
+            let symbol = crate::hexstr_to_vec(&symbol)?;
+            let signature = crate::hexstr_to_vec(&signature)?;
+            let nonce = crate::hexstr_to_vec(&nonce)?;
+            let symbol = Symbol::decode(&mut symbol.as_slice())
+                .map_err(|_| anyhow::anyhow!("invalid symbol"))?;
+            db::query_pending_orders(&ctx.db, symbol, &user_id)
+                .await
+                .map_err(|e| e.into())
         })
         .unwrap();
     module
-        .register_async_method("queryAccounts", |p, ctx| async move {
+        .register_async_method("query_account", |p, ctx| async move {
             let (user_id, signature, nonce) = p.parse::<(String, String, String)>()?;
-            let (key, nonce_on_server) = ctx.get_trading_key(&user_id).await?;
-            let (verified, update) = crate::verify_trading_sig_and_update_nonce(
-                &"".to_string(),
-                &key,
-                &nonce,
-                &signature,
-                nonce_on_server,
-            );
             // TODO
-            // let r = ctx
-            //     .backend
-            //     .get_account(user_id)
-            //     .await
-            //     .ok_or(Error::Custom("Reading accounts failed.".to_string()))?;
-            Ok(())
+            // let (key, nonce_on_server) = ctx.get_trading_key(&user_id).await?;
+            let signature = crate::hexstr_to_vec(&signature)?;
+            let nonce = crate::hexstr_to_vec(&nonce)?;
+            ctx.backend
+                .get_account(&user_id)
+                .await
+                .map_err(|e| e.into())
         })
         .unwrap();
     module
         .register_async_method("trade", |p, ctx| async move {
-            let (cmd, user_id, signature, nonce) = p.parse::<(String, String, String, String)>()?;
-            let (key, nonce_on_server) = ctx.get_trading_key(&user_id).await?;
-            let (verified, update) = crate::verify_trading_sig_and_update_nonce(
-                &cmd,
-                &key,
-                &nonce,
-                &signature,
-                nonce_on_server,
-            );
-            // if !verified {
-            //     return Err(Error::Custom("Invalid signature".to_string()));
-            // }
-            let mut h = hex::decode(cmd.trim_start_matches("0x"))
-                .map_err(|_| Error::Custom("Invalid hex format".to_string()))?;
+            let (cmd, user_id, signature, nonce, relayer) =
+                p.parse::<(String, String, String, String, String)>()?;
+            // TODO
+            // let (key, nonce_on_server) = ctx.get_trading_key(&user_id).await?;
+            let signature = crate::hexstr_to_vec(&signature)?;
+            let nonce = crate::hexstr_to_vec(&nonce)?;
+            let h = crate::hexstr_to_vec(&cmd)?;
             let cmd = TradingCommand::decode(&mut h.as_slice())
-                .map_err(|_| Error::Custom("SCALE decoding error".to_string()))?;
-
-            Ok(())
+                .map_err(|_| anyhow::anyhow!("Invalid command"))?;
+            ctx.validate_cmd(&cmd).await?;
+            db::save_trading_command(&ctx.db, cmd, &relayer)
+                .await
+                .map_err(|e| e.into())
         })
         .unwrap();
     module
-        .register_async_method("saveTradingKey", |p, ctx| async move {
+        .register_async_method("save_trading_key", |p, ctx| async move {
             let (user_id, encrypted_key, sr25519_sig) = p.parse::<(String, String, String)>()?;
             Ok(())
         })
         .unwrap();
     module
         .register_subscription("sub_trading", "", "unsub_trading", |p, mut sink, ctx| {
-            let (user_id, signature, nonce) = p.parse::<(String, String, u32)>()?;
+            let (user_id, signature, nonce) = p.parse::<(String, String, String)>()?;
+            let signature = crate::hexstr_to_vec(&signature)?;
+            let nonce = crate::hexstr_to_vec(&nonce)?;
             tokio::spawn(async move {});
             Ok(())
         })
         .unwrap();
     module
         .register_subscription("sub_balance", "", "unsub_balance", |p, mut sink, ctx| {
-            let (user_id, currency, signature, nonce) = p.parse::<(String, u32, String, u32)>()?;
+            let (user_id, signature, nonce) = p.parse::<(String, String, String)>()?;
+            let signature = crate::hexstr_to_vec(&signature)?;
+            let nonce = crate::hexstr_to_vec(&nonce)?;
             tokio::spawn(async move {});
             Ok(())
         })
@@ -127,7 +111,9 @@ pub enum TradingCommand {
         price: String,
     },
     Cancel {
-        order_id: String,
         account_id: String,
+        base: u32,
+        quote: u32,
+        order_id: u64,
     },
 }
