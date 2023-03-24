@@ -17,12 +17,11 @@ use crate::{
     AccountId, Pair, Public, Signature,
 };
 use dashmap::DashMap;
-use galois_engine::{core::*, fusotao::OffchainSymbol, input::cmd};
+use galois_engine::{core::*, fusotao::OffchainSymbol};
 use hyper::{Body, Request, Response};
 use jsonrpsee::SubscriptionSink;
 use parity_scale_codec::{Decode, Encode};
 use rust_decimal::Decimal;
-use serde_json::{json, to_vec};
 use sp_core::crypto::{Pair as Crypto, Ss58Codec};
 use sqlx::{MySql, Pool};
 use std::{
@@ -61,7 +60,6 @@ impl Context {
             })
         })
         .unwrap();
-        // TODO spawn a task to listen new market
         markets.iter().for_each(|e| {
             let pool = db.clone();
             let sub = subscribers.clone();
@@ -70,6 +68,33 @@ impl Context {
             tokio::spawn(
                 async move { legacy_clearing::update_order_task(sub, pool, symbol, closed) },
             );
+        });
+        let conn = backend.clone();
+        let started = markets.clone();
+        let pool = db.clone();
+        let sub = subscribers.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(15000)).await;
+                match conn.get_markets().await {
+                    Ok(v) if started.len() != v.len() => {
+                        for m in v.into_iter() {
+                            if !started.contains_key(&m.symbol) {
+                                let closed = Arc::new(AtomicBool::new(false));
+                                let symbol = m.symbol.clone();
+                                started.insert(symbol.clone(), (closed.clone(), m));
+                                let sub = sub.clone();
+                                let pool = pool.clone();
+                                tokio::spawn(async move {
+                                    legacy_clearing::update_order_task(sub, pool, symbol, closed)
+                                });
+                            }
+                        }
+                    }
+                    Err(e) => log::error!("fetching markets failed(background task), {:?}", e),
+                    _ => {}
+                }
+            }
         });
         Self {
             backend,

@@ -69,24 +69,17 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
     module
         .register_async_method("save_trading_key", |p, ctx| async move {
             let (user_id, encrypted_key, sr25519_sig) = p.parse::<(String, String, String)>()?;
+            // TODO
             Ok(())
         })
         .unwrap();
     module
-        .register_subscription("sub_trading", "", "unsub_trading", |p, mut sink, ctx| {
+        .register_subscription("sub_trading", "", "unsub_trading", |p, sink, ctx| {
             let (user_id, signature, nonce) = p.parse::<(String, String, String)>()?;
             let signature = crate::hexstr_to_vec(&signature)?;
             let nonce = crate::hexstr_to_vec(&nonce)?;
-            tokio::spawn(async move {});
-            Ok(())
-        })
-        .unwrap();
-    module
-        .register_subscription("sub_balance", "", "unsub_balance", |p, mut sink, ctx| {
-            let (user_id, signature, nonce) = p.parse::<(String, String, String)>()?;
-            let signature = crate::hexstr_to_vec(&signature)?;
-            let nonce = crate::hexstr_to_vec(&nonce)?;
-            tokio::spawn(async move {});
+            // TODO
+            ctx.subscribers.insert(user_id, sink);
             Ok(())
         })
         .unwrap();
