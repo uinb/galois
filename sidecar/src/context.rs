@@ -13,13 +13,12 @@
 // limitations under the License.
 
 use crate::{
-    backend::BackendConnection, config::Config, endpoint::TradingCommand, legacy_clearing,
-    AccountId, Pair, Public, Signature,
+    backend::BackendConnection, config::Config, db::Order, endpoint::TradingCommand,
+    legacy_clearing, AccountId, Pair, Public, Signature,
 };
 use dashmap::DashMap;
 use galois_engine::{core::*, fusotao::OffchainSymbol};
 use hyper::{Body, Request, Response};
-use jsonrpsee::SubscriptionSink;
 use parity_scale_codec::{Decode, Encode};
 use rust_decimal::Decimal;
 use sp_core::crypto::{Pair as Crypto, Ss58Codec};
@@ -33,6 +32,7 @@ use std::{
     sync::Arc,
     task::{Context as TaskCtx, Poll},
 };
+use tokio::sync::mpsc::UnboundedSender;
 use tower::{Layer, Service};
 use x25519_dalek::StaticSecret;
 
@@ -40,7 +40,7 @@ pub struct Context {
     pub backend: BackendConnection,
     pub x25519: StaticSecret,
     pub db: Pool<MySql>,
-    pub subscribers: Arc<DashMap<String, SubscriptionSink>>,
+    pub subscribers: Arc<DashMap<String, UnboundedSender<Order>>>,
     pub markets: Arc<DashMap<Symbol, (Arc<AtomicBool>, OffchainSymbol)>>,
 }
 

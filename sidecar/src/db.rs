@@ -37,6 +37,23 @@ pub struct DbOrder {
     pub f_matched_base_amount: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct ClearingResult {
+    pub f_id: u64,
+    pub f_event_id: u64,
+    pub f_order_id: u64,
+    pub f_user_id: String,
+    pub f_status: u8,
+    pub f_role: u8,
+    pub f_ask_or_bid: u8,
+    pub f_price: String,
+    pub f_quote_delta: String,
+    pub f_base_delta: String,
+    pub f_quote_charge: String,
+    pub f_base_charge: String,
+    pub f_timestamp: u64,
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug, Eq, PartialEq, Encode)]
 pub struct Order {
     order_id: u64,
@@ -48,7 +65,6 @@ pub struct Order {
     status: u8,
     matched_quote_amount: String,
     matched_base_amount: String,
-    // avg_price: String,
     base_fee: String,
     quote_fee: String,
 }
@@ -65,7 +81,6 @@ impl From<(Symbol, DbOrder)> for Order {
             status: order.f_status,
             matched_quote_amount: order.f_matched_quote_amount,
             matched_base_amount: order.f_matched_base_amount,
-            // avg_price: (order.f_matched_quote_amount / order.f_matched_base_amount).to_string(),
             base_fee: order.f_base_fee,
             quote_fee: order.f_quote_fee,
         }

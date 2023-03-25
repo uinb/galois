@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{context::Context, db};
+use crate::{
+    context::Context,
+    db::{self, Order},
+};
 use galois_engine::core::*;
 use jsonrpsee::RpcModule;
 use parity_scale_codec::{Decode, Encode};
@@ -74,12 +77,29 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
         })
         .unwrap();
     module
-        .register_subscription("sub_trading", "", "unsub_trading", |p, sink, ctx| {
+        .register_subscription("sub_trading", "", "unsub_trading", |p, mut sink, ctx| {
             let (user_id, signature, nonce) = p.parse::<(String, String, String)>()?;
             let signature = crate::hexstr_to_vec(&signature)?;
             let nonce = crate::hexstr_to_vec(&nonce)?;
             // TODO
-            ctx.subscribers.insert(user_id, sink);
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            tokio::spawn(async move {
+                loop {
+                    if let Some(msg) = rx.recv().await {
+                        let v = hex::encode(&Order::encode(&msg));
+                        match sink.send(&v) {
+                            Ok(true) => {}
+                            Ok(false) => break,
+                            Err(e) => {
+                                log::error!("Unable to serialize the msg into jsonrpc, {:?}", e)
+                            }
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            });
+            ctx.subscribers.insert(user_id, tx);
             Ok(())
         })
         .unwrap();
