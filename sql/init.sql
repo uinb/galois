@@ -14,6 +14,11 @@ CREATE TABLE IF NOT EXISTS `t_proof` (
 
 -- DEPRECATED --
 
+CREATE TABLE `t_trading_key`(
+  `f_user_id` varchar(66) NOT NULL primary key,
+  `f_trading_key` varchar(66) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 CREATE TABLE `t_clearing_result` (
   `f_id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `f_event_id` bigint unsigned NOT NULL,

@@ -282,19 +282,19 @@ where
         Box::pin(async move {
             let nonce = req
                 .headers()
-                .get("x-broker-nonce")
+                .get("X-Broker-Nonce")
                 .map(|v| v.to_str().map_err(|_| anyhow::anyhow!("")))
                 .ok_or(anyhow::anyhow!(""))
                 .flatten()?;
             let signature = req
                 .headers()
-                .get("x-broker-signature")
+                .get("X-Broker-Signature")
                 .ok_or(anyhow::anyhow!(""))
                 .map(|v| v.to_str().map_err(|_| anyhow::anyhow!("")))
                 .flatten()?;
             let ss58 = req
                 .headers()
-                .get("x-broker-account")
+                .get("X-Broker-Account")
                 .ok_or(anyhow::anyhow!(""))
                 .map(|v| v.to_str().map_err(|_| anyhow::anyhow!("")))
                 .flatten()?;

@@ -55,15 +55,15 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
         .unwrap();
     module
         .register_async_method("trade", |p, ctx| async move {
-            let (cmd, user_id, signature, nonce, relayer) =
-                p.parse::<(String, String, String, String, String)>()?;
+            let (cmd, signature, nonce, relayer) = p.parse::<(String, String, String, String)>()?;
             let signature = crate::hexstr_to_vec(&signature)?;
             let nonce = crate::hexstr_to_vec(&nonce)?;
-            let h = crate::hexstr_to_vec(&cmd)?;
-            ctx.verify_trading_signature(&h, &user_id, &signature, &nonce)
-                .await?;
-            let cmd = TradingCommand::decode(&mut h.as_slice())
+            let hex = crate::hexstr_to_vec(&cmd)?;
+            let cmd = TradingCommand::decode(&mut hex.clone().as_slice())
                 .map_err(|_| anyhow::anyhow!("Invalid command"))?;
+            let account = cmd.get_from_owned();
+            ctx.verify_trading_signature(&hex, &account, &signature, &nonce)
+                .await?;
             ctx.validate_cmd(&cmd).await?;
             db::save_trading_command(&ctx.db, cmd, &relayer)
                 .await
@@ -158,6 +158,14 @@ impl TradingCommand {
             TradingCommand::Ask { .. } => Some(AskOrBid::Ask.into()),
             TradingCommand::Bid { .. } => Some(AskOrBid::Bid.into()),
             _ => None,
+        }
+    }
+
+    pub fn get_from_owned(&self) -> String {
+        match self {
+            TradingCommand::Ask { account_id, .. } => account_id.clone(),
+            TradingCommand::Bid { account_id, .. } => account_id.clone(),
+            TradingCommand::Cancel { account_id, .. } => account_id.clone(),
         }
     }
 }
