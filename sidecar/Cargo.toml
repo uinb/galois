@@ -23,6 +23,7 @@ env_logger = "0.10"
 x25519-dalek = "1.1.1"
 sqlx = { version = "0.6.2", features = [ "runtime-tokio-rustls", "mysql" ] }
 hex = "0.4"
+rand = "0.8.5"
 hyper = "0.14"
 hyper-tungstenite = "0.9.0"
 http = "0.2.7"

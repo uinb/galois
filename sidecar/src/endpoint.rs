@@ -13,12 +13,13 @@
 // limitations under the License.
 
 use crate::{
-    context::Context,
+    context::{Context, Session},
     db::{self, Order},
 };
 use galois_engine::core::*;
 use jsonrpsee::RpcModule;
 use parity_scale_codec::{Decode, Encode};
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 pub fn export_rpc(context: Context) -> RpcModule<Context> {
@@ -27,11 +28,11 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
         .register_async_method("query_pending_orders", |p, ctx| async move {
             let (symbol, user_id, signature, nonce) =
                 p.parse::<(String, String, String, String)>()?;
-            // TODO
-            // let (key, nonce_on_server) = ctx.get_trading_key(&user_id).await?;
             let symbol = crate::hexstr_to_vec(&symbol)?;
             let signature = crate::hexstr_to_vec(&signature)?;
             let nonce = crate::hexstr_to_vec(&nonce)?;
+            ctx.verify_trading_signature(&symbol, &user_id, &signature, &nonce)
+                .await?;
             let symbol = Symbol::decode(&mut symbol.as_slice())
                 .map_err(|_| anyhow::anyhow!("invalid symbol"))?;
             db::query_pending_orders(&ctx.db, symbol, &user_id)
@@ -42,10 +43,10 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
     module
         .register_async_method("query_account", |p, ctx| async move {
             let (user_id, signature, nonce) = p.parse::<(String, String, String)>()?;
-            // TODO
-            // let (key, nonce_on_server) = ctx.get_trading_key(&user_id).await?;
             let signature = crate::hexstr_to_vec(&signature)?;
             let nonce = crate::hexstr_to_vec(&nonce)?;
+            ctx.verify_trading_signature(&[], &user_id, &signature, &nonce)
+                .await?;
             ctx.backend
                 .get_account(&user_id)
                 .await
@@ -56,11 +57,11 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
         .register_async_method("trade", |p, ctx| async move {
             let (cmd, user_id, signature, nonce, relayer) =
                 p.parse::<(String, String, String, String, String)>()?;
-            // TODO
-            // let (key, nonce_on_server) = ctx.get_trading_key(&user_id).await?;
             let signature = crate::hexstr_to_vec(&signature)?;
             let nonce = crate::hexstr_to_vec(&nonce)?;
             let h = crate::hexstr_to_vec(&cmd)?;
+            ctx.verify_trading_signature(&h, &user_id, &signature, &nonce)
+                .await?;
             let cmd = TradingCommand::decode(&mut h.as_slice())
                 .map_err(|_| anyhow::anyhow!("Invalid command"))?;
             ctx.validate_cmd(&cmd).await?;
@@ -70,10 +71,27 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
         })
         .unwrap();
     module
-        .register_async_method("save_trading_key", |p, ctx| async move {
-            let (user_id, encrypted_key, sr25519_sig) = p.parse::<(String, String, String)>()?;
-            // TODO
+        .register_async_method("register_trading_key", |p, ctx| async move {
+            let (user_id, user_x25519_pub, sr25519_sig) = p.parse::<(String, String, String)>()?;
+            let user_x25519_pub = crate::hexstr_to_vec(&user_x25519_pub)?;
+            let raw_sig = crate::hexstr_to_vec(&sr25519_sig)?;
+            crate::verify_sr25519(raw_sig, &user_x25519_pub, &user_id)?;
+            let user_x25519_pub: [u8; 32] = user_x25519_pub
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("Invalid public key"))?;
+            let user_x25519_pub = x25519_dalek::PublicKey::from(user_x25519_pub);
+            let key = ctx.x25519.diffie_hellman(&user_x25519_pub).to_bytes();
+            let key = format!("0x{}", hex::encode(&key));
+            db::save_trading_key(&ctx.db, &user_id, &key).await?;
+            let init_nonce = rand::thread_rng().gen_range(1..10000);
+            ctx.session_nonce.insert(user_id, Session::new(init_nonce));
             Ok(())
+        })
+        .unwrap();
+    module
+        .register_async_method("get_nonce", |p, ctx| async move {
+            let user_id = p.parse::<String>()?;
+            ctx.get_user_nonce(&user_id).await.map_err(|e| e.into())
         })
         .unwrap();
     module
@@ -81,7 +99,10 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
             let (user_id, signature, nonce) = p.parse::<(String, String, String)>()?;
             let signature = crate::hexstr_to_vec(&signature)?;
             let nonce = crate::hexstr_to_vec(&nonce)?;
-            // TODO
+            futures::executor::block_on(async {
+                ctx.verify_trading_signature(&[], &user_id, &signature, &nonce)
+                    .await
+            })?;
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
             tokio::spawn(async move {
                 loop {

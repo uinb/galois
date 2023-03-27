@@ -13,7 +13,10 @@
 // limitations under the License.
 
 use crate::{
-    backend::BackendConnection, config::Config, db::Order, endpoint::TradingCommand,
+    backend::BackendConnection,
+    config::Config,
+    db::{self, Order},
+    endpoint::TradingCommand,
     legacy_clearing, AccountId, Pair, Public, Signature,
 };
 use dashmap::DashMap;
@@ -24,6 +27,7 @@ use rust_decimal::Decimal;
 use sp_core::crypto::{Pair as Crypto, Ss58Codec};
 use sqlx::{MySql, Pool};
 use std::{
+    collections::BTreeSet,
     error::Error,
     future::Future,
     pin::Pin,
@@ -32,7 +36,7 @@ use std::{
     sync::Arc,
     task::{Context as TaskCtx, Poll},
 };
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::{mpsc::UnboundedSender, Mutex};
 use tower::{Layer, Service};
 use x25519_dalek::StaticSecret;
 
@@ -41,6 +45,7 @@ pub struct Context {
     pub x25519: StaticSecret,
     pub db: Pool<MySql>,
     pub subscribers: Arc<DashMap<String, UnboundedSender<Order>>>,
+    pub session_nonce: Arc<DashMap<String, Session>>,
     pub markets: Arc<DashMap<Symbol, (Arc<AtomicBool>, OffchainSymbol)>>,
 }
 
@@ -100,14 +105,48 @@ impl Context {
             backend,
             x25519,
             db,
+            session_nonce: Arc::new(DashMap::default()),
             subscribers,
             markets,
         }
     }
 
-    // TODO
-    pub async fn get_trading_key(&self, user_id: &String) -> anyhow::Result<(String, u64)> {
-        Ok(("".to_string(), 0))
+    pub async fn get_trading_key(&self, user_id: &String) -> anyhow::Result<Vec<u8>> {
+        db::query_trading_key(&self.db, user_id)
+            .await
+            .map(|k| k.as_bytes().to_vec())
+    }
+
+    pub async fn get_user_nonce(&self, user_id: &String) -> anyhow::Result<u32> {
+        let session = self
+            .session_nonce
+            .get(user_id)
+            .ok_or_else(|| anyhow::anyhow!("user not found"))?;
+        Ok(session.value().get_nonce().await)
+    }
+
+    pub async fn verify_trading_signature(
+        &self,
+        data: &[u8],
+        user_id: &String,
+        sig: &[u8],
+        nonce: &[u8],
+    ) -> anyhow::Result<()> {
+        let mut decode = nonce.clone();
+        let n = u32::decode(&mut decode)?;
+        let session = self
+            .session_nonce
+            .get(user_id)
+            .ok_or(anyhow::anyhow!("user not found"))?;
+        session.value().try_occupy_nonce(n).await?;
+        let key = self.get_trading_key(user_id).await?;
+        let mut to_be_signed = vec![];
+        to_be_signed.extend_from_slice(data);
+        to_be_signed.extend_from_slice(key.as_slice());
+        to_be_signed.extend_from_slice(nonce);
+        let hash = sp_core::blake2_256(&to_be_signed);
+        anyhow::ensure!(hash.as_slice() == sig, "invalid signature");
+        Ok(())
     }
 
     pub async fn validate_cmd(&self, cmd: &TradingCommand) -> anyhow::Result<()> {
@@ -288,6 +327,40 @@ where
                 Err(anyhow::anyhow!("Invalid signature").into())
             }
         })
+    }
+}
+
+#[derive(Clone)]
+pub struct Session {
+    occupied_nonce: Arc<Mutex<BTreeSet<u32>>>,
+}
+
+impl Session {
+    pub fn new(init_nonce: u32) -> Self {
+        Self {
+            occupied_nonce: Arc::new(Mutex::new(BTreeSet::from([init_nonce]))),
+        }
+    }
+
+    pub async fn try_occupy_nonce(&self, nonce: u32) -> anyhow::Result<()> {
+        let mut occupied_nonce = self.occupied_nonce.lock().await;
+        if occupied_nonce.contains(&nonce) {
+            Err(anyhow::anyhow!("Nonce {} is occupied", nonce))
+        } else if *occupied_nonce.first().expect("at least min;qed") > nonce {
+            Err(anyhow::anyhow!("Nonce {} is expired", nonce))
+        } else {
+            if occupied_nonce.len() > 100 {
+                let evict = *occupied_nonce.first().expect("at least min;qed");
+                occupied_nonce.remove(&evict);
+            }
+            occupied_nonce.insert(nonce);
+            Ok(())
+        }
+    }
+
+    pub async fn get_nonce(&self) -> u32 {
+        let occupied_nonce = self.occupied_nonce.lock().await;
+        *occupied_nonce.last().expect("at least max;qed") + 1
     }
 }
 

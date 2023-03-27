@@ -37,6 +37,12 @@ pub struct DbOrder {
     pub f_matched_base_amount: String,
 }
 
+#[derive(Clone, Serialize, Deserialize, Debug, Eq, PartialEq, sqlx::FromRow)]
+pub struct TradingKey {
+    pub f_user_id: String,
+    pub f_trading_key: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct ClearingResult {
     pub f_id: u64,
@@ -91,6 +97,28 @@ impl Order {
     pub fn to_hex(self) -> String {
         format!("0x{}", hex::encode(self.encode()))
     }
+}
+
+pub async fn query_trading_key(pool: &Pool<MySql>, user_id: &String) -> anyhow::Result<String> {
+    let r =
+        sqlx::query_as::<_, TradingKey>("select * from t_trading_key where f_user_id=? limit 1")
+            .bind(user_id)
+            .fetch_one(pool)
+            .await?;
+    Ok(r.f_trading_key)
+}
+
+pub async fn save_trading_key(
+    pool: &Pool<MySql>,
+    user_id: &String,
+    key: &String,
+) -> anyhow::Result<()> {
+    sqlx::query("insert into t_trading_key(f_user_id,f_trading_key) values(?,?)")
+        .bind(user_id)
+        .bind(key)
+        .execute(pool)
+        .await?;
+    Ok(())
 }
 
 pub async fn query_pending_orders(
