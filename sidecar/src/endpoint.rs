@@ -85,7 +85,7 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
             db::save_trading_key(&ctx.db, &user_id, &key).await?;
             let init_nonce = rand::thread_rng().gen_range(1..10000);
             ctx.session_nonce.insert(user_id, Session::new(init_nonce));
-            Ok(())
+            Ok(init_nonce + 1)
         })
         .unwrap();
     module
