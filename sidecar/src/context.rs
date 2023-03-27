@@ -114,7 +114,8 @@ impl Context {
     pub async fn get_trading_key(&self, user_id: &String) -> anyhow::Result<Vec<u8>> {
         db::query_trading_key(&self.db, user_id)
             .await
-            .map(|k| k.as_bytes().to_vec())
+            .map(|k| crate::hexstr_to_vec(&k))
+            .flatten()
     }
 
     pub async fn get_user_nonce(&self, user_id: &String) -> anyhow::Result<u32> {
