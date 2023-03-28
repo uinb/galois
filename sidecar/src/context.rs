@@ -306,7 +306,7 @@ where
                 .parse::<u32>()
                 .inspect_err(|e| log::debug!("{:?}", e))
                 .map_err(|_| anyhow::anyhow!(""))?;
-            if from_galois < nonce || from_galois - nonce > 100 {
+            if (from_galois as i64 - nonce as i64).abs() > 100 {
                 return Err(anyhow::anyhow!("Nonce expired").into());
             }
             let sig_hex =
