@@ -22,16 +22,17 @@ mod db;
 pub mod endpoint;
 mod legacy_clearing;
 
-use parity_scale_codec::Decode;
+use parity_scale_codec::{Decode, Encode};
 pub use sp_core::crypto::AccountId32 as AccountId;
-use sp_core::crypto::Ss58Codec;
-pub use sp_core::sr25519::Pair;
-pub use sp_core::sr25519::Public;
-pub use sp_core::sr25519::Signature;
-use sp_core::Pair as PairT;
+pub use sp_core::sr25519::{Pair, Public, Signature};
+use sp_core::{crypto::Ss58Codec, Pair as PairT};
 
 pub fn hexstr_to_vec(h: impl AsRef<str>) -> anyhow::Result<Vec<u8>> {
     hex::decode(h.as_ref().trim_start_matches("0x")).map_err(|_| anyhow::anyhow!("invalid hex str"))
+}
+
+pub fn to_hexstr<T: Encode>(t: T) -> String {
+    format!("0x{}", hex::encode(t.encode()))
 }
 
 pub fn verify_sr25519(sig: Vec<u8>, data: &[u8], ss58: impl AsRef<str>) -> anyhow::Result<()> {

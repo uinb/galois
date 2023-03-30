@@ -93,12 +93,6 @@ impl From<(Symbol, DbOrder)> for Order {
     }
 }
 
-impl Order {
-    pub fn to_hex(self) -> String {
-        format!("0x{}", hex::encode(self.encode()))
-    }
-}
-
 pub async fn query_trading_key(pool: &Pool<MySql>, user_id: &String) -> anyhow::Result<String> {
     let r =
         sqlx::query_as::<_, TradingKey>("select * from t_trading_key where f_user_id=? limit 1")
@@ -125,7 +119,7 @@ pub async fn query_pending_orders(
     pool: &Pool<MySql>,
     symbol: Symbol,
     user_id: &String,
-) -> anyhow::Result<Vec<String>> {
+) -> anyhow::Result<Vec<Order>> {
     // TODO limit max orders from a single address
     let sql = format!(
         "select * from t_order_{}_{} where f_user_id=? and f_status in (0,3) limit 1000",
@@ -137,7 +131,6 @@ pub async fn query_pending_orders(
         .await?;
     Ok(r.into_iter()
         .map(|o| (symbol.clone(), o).into())
-        .map(|o: Order| o.to_hex())
         .collect::<Vec<_>>())
 }
 

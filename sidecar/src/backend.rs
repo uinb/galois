@@ -20,7 +20,7 @@ use galois_engine::{
     orderbook::Order as CoreOrder,
 };
 use serde_json::{json, to_vec, Value as JsonValue};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{
@@ -164,7 +164,7 @@ impl BackendConnection {
             .flatten()
     }
 
-    pub async fn get_account(&self, user_id: &String) -> anyhow::Result<HashMap<u32, Balance>> {
+    pub async fn get_account(&self, user_id: &String) -> anyhow::Result<BTreeMap<u32, Balance>> {
         let r = self
             .request(
                 to_vec(&json!({"cmd": cmd::QUERY_ACCOUNTS, "user_id": user_id}))
@@ -173,7 +173,7 @@ impl BackendConnection {
             .await
             .inspect_err(|e| log::debug!("{:?}", e))
             .map_err(|_| anyhow::anyhow!("Galois not available"))?;
-        serde_json::from_value::<HashMap<u32, Balance>>(r).map_err(|_| anyhow::anyhow!("galois?"))
+        serde_json::from_value::<BTreeMap<u32, Balance>>(r).map_err(|_| anyhow::anyhow!("galois?"))
     }
 
     pub async fn get_order(

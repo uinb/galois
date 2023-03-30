@@ -37,6 +37,11 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
                 .map_err(|_| anyhow::anyhow!("invalid symbol"))?;
             db::query_pending_orders(&ctx.db, symbol, &user_id)
                 .await
+                .map(|r| {
+                    r.into_iter()
+                        .map(|o| crate::to_hexstr(o))
+                        .collect::<Vec<_>>()
+                })
                 .map_err(|e| e.into())
         })
         .unwrap();
@@ -50,6 +55,11 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
             ctx.backend
                 .get_account(&user_id)
                 .await
+                .map(|r| {
+                    r.into_iter()
+                        .map(|(k, v)| crate::to_hexstr((k, v)))
+                        .collect::<Vec<_>>()
+                })
                 .map_err(|e| e.into())
         })
         .unwrap();
@@ -67,6 +77,7 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
             ctx.validate_cmd(&cmd).await?;
             db::save_trading_command(&ctx.db, cmd, &relayer)
                 .await
+                .map(|id| crate::to_hexstr(id))
                 .map_err(|e| e.into())
         })
         .unwrap();
@@ -85,13 +96,16 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
             db::save_trading_key(&ctx.db, &user_id, &key).await?;
             let init_nonce = rand::thread_rng().gen_range(1..10000);
             ctx.session_nonce.insert(user_id, Session::new(init_nonce));
-            Ok(init_nonce + 1)
+            Ok(crate::to_hexstr(init_nonce + 1))
         })
         .unwrap();
     module
         .register_async_method("get_nonce", |p, ctx| async move {
-            let user_id = p.parse::<String>()?;
-            ctx.get_user_nonce(&user_id).await.map_err(|e| e.into())
+            let user_id = p.parse::<(String,)>()?;
+            ctx.get_user_nonce(&user_id.0)
+                .await
+                .map(|n| crate::to_hexstr(n))
+                .map_err(|e| e.into())
         })
         .unwrap();
     module

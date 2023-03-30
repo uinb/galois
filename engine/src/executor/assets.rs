@@ -24,6 +24,13 @@ pub struct Balance {
     pub frozen: Amount,
 }
 
+impl parity_scale_codec::Encode for Balance {
+    fn encode_to<T: parity_scale_codec::Output + ?Sized>(&self, dest: &mut T) {
+        self.available.to_string().encode_to(dest);
+        self.frozen.to_string().encode_to(dest);
+    }
+}
+
 pub fn get_account_to_owned(accounts: &Accounts, user: &UserId) -> Account {
     accounts.get(user).map_or(Account::default(), |b| b.clone())
 }
