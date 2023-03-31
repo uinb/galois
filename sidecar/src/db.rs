@@ -107,7 +107,7 @@ pub async fn save_trading_key(
     user_id: &String,
     key: &String,
 ) -> anyhow::Result<()> {
-    sqlx::query("insert into t_trading_key(f_user_id,f_trading_key) values(?,?)")
+    sqlx::query("replace into t_trading_key(f_user_id,f_trading_key) values(?,?)")
         .bind(user_id)
         .bind(key)
         .execute(pool)
