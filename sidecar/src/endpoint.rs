@@ -15,12 +15,14 @@
 use crate::{
     context::{Context, Session},
     db::{self, Order},
+    AccountId,
 };
 use galois_engine::core::*;
 use jsonrpsee::RpcModule;
 use parity_scale_codec::{Decode, Encode};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use sp_core::crypto::Ss58Codec;
 
 pub fn export_rpc(context: Context) -> RpcModule<Context> {
     let mut module = RpcModule::new(context);
@@ -72,7 +74,7 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
             let cmd = TradingCommand::decode(&mut hex.clone().as_slice())
                 .map_err(|_| anyhow::anyhow!("Invalid command"))?;
             let account = cmd.get_from_owned();
-            ctx.verify_trading_signature(&hex, &account, &signature, &nonce)
+            ctx.verify_trading_signature(&hex, &account.to_ss58check(), &signature, &nonce)
                 .await?;
             ctx.validate_cmd(&cmd).await?;
             db::save_trading_command(&ctx.db, cmd, &relayer)
@@ -145,21 +147,21 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
 #[serde(rename_all = "camelCase")]
 pub enum TradingCommand {
     Ask {
-        account_id: String,
+        account_id: AccountId,
         base: u32,
         quote: u32,
         amount: String,
         price: String,
     },
     Bid {
-        account_id: String,
+        account_id: AccountId,
         base: u32,
         quote: u32,
         amount: String,
         price: String,
     },
     Cancel {
-        account_id: String,
+        account_id: AccountId,
         base: u32,
         quote: u32,
         order_id: u64,
@@ -175,7 +177,7 @@ impl TradingCommand {
         }
     }
 
-    pub fn get_from_owned(&self) -> String {
+    pub fn get_from_owned(&self) -> AccountId {
         match self {
             TradingCommand::Ask { account_id, .. } => account_id.clone(),
             TradingCommand::Bid { account_id, .. } => account_id.clone(),

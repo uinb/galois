@@ -17,6 +17,7 @@ use galois_engine::{core::*, input::Command};
 use parity_scale_codec::Encode;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use sp_core::crypto::Ss58Codec;
 use sqlx::{MySql, Pool, Row};
 use std::str::FromStr;
 
@@ -152,7 +153,7 @@ pub async fn save_trading_command(
             cancel.order_id = Some(order_id);
             cancel.base = Some(base);
             cancel.quote = Some(quote);
-            cancel.user_id = Some(account_id);
+            cancel.user_id = Some(account_id.to_ss58check());
             sqlx::query("insert into t_sequence(f_cmd) values(?)")
                 .bind(serde_json::to_string(&cancel).expect("jsonser;qed"))
                 .execute(pool)
@@ -174,22 +175,25 @@ pub async fn save_trading_command(
             price,
         } => {
             let mut tx = pool.begin().await?;
-            let result = sqlx::query(
+            sqlx::query(
                 "insert into t_order(f_user_id,f_amount,f_price,f_order_type) values(?,?,?,?)",
             )
-            .bind(account_id.clone())
+            .bind(account_id.to_ss58check())
             .bind(amount.clone())
             .bind(price.clone())
             .bind(direction)
-            .fetch_one(&mut tx)
+            .execute(&mut tx)
             .await?;
-            let id: u64 = result.get("f_id");
+            let result = sqlx::query("select LAST_INSERT_ID() as id")
+                .fetch_one(&mut tx)
+                .await?;
+            let id: u64 = result.get("id");
             let mut place = Command::default();
             place.cmd = direction.expect("ask_or_bid;qed").into();
             place.order_id = Some(id);
             place.base = Some(base);
             place.quote = Some(quote);
-            place.user_id = Some(account_id);
+            place.user_id = Some(account_id.to_ss58check());
             place.price = Decimal::from_str(&price).ok();
             place.amount = Decimal::from_str(&amount).ok();
             sqlx::query("insert into t_sequence(f_cmd) values(?)")

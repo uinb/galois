@@ -163,9 +163,8 @@ impl Context {
                     .get_order((*base, *quote), *order_id)
                     .await?
                     .ok_or(anyhow::anyhow!("order not exists"))?;
-                if order.user
-                    != UserId::from_str(&account_id)
-                        .map_err(|_| anyhow::anyhow!("invalid user id"))?
+                if <B256 as AsRef<[u8; 32]>>::as_ref(&order.user)
+                    != <AccountId as AsRef<[u8; 32]>>::as_ref(&account_id)
                 {
                     Err(anyhow::anyhow!("invalid order id"))
                 } else {
@@ -194,7 +193,7 @@ impl Context {
                         && amount.scale() <= market.1.base_scale.into(),
                     "invalid numeric"
                 );
-                let mut account = self.backend.get_account(account_id).await?;
+                let mut account = self.backend.get_account(&account_id.to_ss58check()).await?;
                 anyhow::ensure!(
                     account.remove(base).unwrap_or_default().available >= amount,
                     "insufficient balance"
@@ -222,7 +221,7 @@ impl Context {
                         && amount.scale() <= market.1.base_scale.into(),
                     "invalid numeric"
                 );
-                let mut account = self.backend.get_account(account_id).await?;
+                let mut account = self.backend.get_account(&account_id.to_ss58check()).await?;
                 anyhow::ensure!(
                     account.remove(quote).unwrap_or_default().available >= amount * price,
                     "insufficient balance"

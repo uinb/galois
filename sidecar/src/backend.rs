@@ -97,13 +97,14 @@ impl BackendConnection {
             }
             buf.extend_from_slice(&tmp[..]);
             if !Message::has_next_frame(header) {
-                log::debug!(
-                    "receiving data from galois: {:?}",
-                    std::str::from_utf8(&buf)
-                );
-                let json = match serde_json::from_slice(&buf[..]) {
-                    Ok(json) => json,
-                    Err(_) => break,
+                log::debug!("receiving data from galois: {:?}", buf);
+                let json = if buf.is_empty() {
+                    serde_json::Value::Null
+                } else {
+                    match serde_json::from_slice(&buf[..]) {
+                        Ok(json) => json,
+                        Err(_) => break,
+                    }
                 };
                 if let Some((_, noti)) = sink.remove(&req_id) {
                     let _ = noti.send(json).await;
@@ -192,7 +193,7 @@ impl BackendConnection {
                 .expect("jsonser;qed"),
             )
             .await
-            .inspect_err(|e| log::debug!("{:?}", e))
+            .inspect_err(|e| log::debug!("fetching order failed: {:?}", e))
             .map_err(|_| anyhow::anyhow!("Galois not available"))?;
         serde_json::from_value::<Option<CoreOrder>>(r).map_err(|_| anyhow::anyhow!("galois?"))
     }
