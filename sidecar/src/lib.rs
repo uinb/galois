@@ -23,9 +23,12 @@ pub mod endpoint;
 mod legacy_clearing;
 
 use parity_scale_codec::{Decode, Encode};
-pub use sp_core::crypto::AccountId32 as AccountId;
-pub use sp_core::sr25519::{Pair, Public, Signature};
-use sp_core::{crypto::Ss58Codec, Pair as PairT};
+pub use sp_core::crypto::AccountId32;
+pub use sp_core::ecdsa::{Pair as EcdsaPair, Public as EcdsaPublic, Signature as EcdsaSignature};
+pub use sp_core::sr25519::{
+    Pair as Sr25519Pair, Public as Sr25519Public, Signature as Sr25519Signature,
+};
+use sp_core::{crypto::Ss58Codec, Pair};
 
 pub fn hexstr_to_vec(h: impl AsRef<str>) -> anyhow::Result<Vec<u8>> {
     hex::decode(h.as_ref().trim_start_matches("0x")).map_err(|_| anyhow::anyhow!("invalid hex str"))
@@ -36,14 +39,76 @@ pub fn to_hexstr<T: Encode>(t: T) -> String {
 }
 
 pub fn verify_sr25519(sig: Vec<u8>, data: &[u8], ss58: impl AsRef<str>) -> anyhow::Result<()> {
-    let public = AccountId::from_ss58check(ss58.as_ref())
+    let public = AccountId32::from_ss58check(ss58.as_ref())
         .map_err(|_| anyhow::anyhow!(""))
-        .map(|a| Public::from_raw(*a.as_ref()))?;
-    let sig = Signature::decode(&mut &sig[..]).map_err(|_| anyhow::anyhow!(""))?;
-    let verified = Pair::verify(&sig, data, &public);
+        .map(|a| Sr25519Public::from_raw(*a.as_ref()))?;
+    let sig = Sr25519Signature::decode(&mut &sig[..])
+        .map_err(|_| anyhow::anyhow!("Invalid signature"))?;
+    let verified = Sr25519Pair::verify(&sig, data, &public);
     if verified {
         Ok(())
     } else {
         Err(anyhow::anyhow!("Invalid signature"))
     }
+}
+
+#[cfg(feature = "testenv")]
+const LEGACY_MAPPING_CODE: u32 = 5;
+#[cfg(not(feature = "testenv"))]
+const LEGACY_MAPPING_CODE: u32 = 1;
+
+pub fn verify_ecdsa(
+    sig: Vec<u8>,
+    data: &[u8],
+    mapping_addr: impl AsRef<str>,
+) -> anyhow::Result<()> {
+    let sig = EcdsaSignature::decode(&mut &sig[..])
+        .map_err(|_| anyhow::anyhow!("Invalid ECDSA signature"))?;
+    let wrapped_msg = [
+        &[0x19u8][..],
+        &format!(
+            "Ethereum Signed Message:\n{}{}",
+            data.len() * 2,
+            hex::encode(data)
+        )
+        .as_bytes()[..],
+    ]
+    .concat();
+    let digest = sp_core::hashing::keccak_256(&wrapped_msg);
+    let pubkey = sig
+        .recover_prehashed(&digest)
+        .ok_or(anyhow::anyhow!("Invalid ECDSA signature"))?;
+    let addr = sp_core::hashing::keccak_256(pubkey.as_ref())[12..].to_vec();
+    let addr = to_mapping_address(addr);
+    if addr.to_ss58check() == mapping_addr.as_ref() {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("Invalid ECDSA signature"))
+    }
+}
+
+pub fn try_into_ss58(addr: String) -> anyhow::Result<String> {
+    if addr.starts_with("0x") {
+        let addr = hexstr_to_vec(&addr)?;
+        match addr.len() {
+            32 => {
+                let addr = AccountId32::decode(&mut &addr[..])
+                    .map_err(|_| anyhow::anyhow!("Invalid address"))?;
+                Ok(addr.to_ss58check())
+            }
+            20 => {
+                let addr = to_mapping_address(addr);
+                Ok(addr.to_ss58check())
+            }
+            _ => Err(anyhow::anyhow!("Invalid address")),
+        }
+    } else {
+        Ok(addr)
+    }
+}
+
+pub fn to_mapping_address(address: Vec<u8>) -> AccountId32 {
+    let h = (b"-*-#fusotao#-*-", LEGACY_MAPPING_CODE, address)
+        .using_encoded(sp_core::hashing::blake2_256);
+    Decode::decode(&mut h.as_ref()).expect("32 bytes; qed")
 }

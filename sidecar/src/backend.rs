@@ -165,10 +165,13 @@ impl BackendConnection {
             .flatten()
     }
 
-    pub async fn get_account(&self, user_id: &String) -> anyhow::Result<BTreeMap<u32, Balance>> {
+    pub async fn get_account(
+        &self,
+        user_id: impl AsRef<str>,
+    ) -> anyhow::Result<BTreeMap<u32, Balance>> {
         let r = self
             .request(
-                to_vec(&json!({"cmd": cmd::QUERY_ACCOUNTS, "user_id": user_id}))
+                to_vec(&json!({"cmd": cmd::QUERY_ACCOUNTS, "user_id": user_id.as_ref()}))
                     .expect("jsonser;qed"),
             )
             .await

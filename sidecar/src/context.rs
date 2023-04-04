@@ -17,7 +17,7 @@ use crate::{
     config::Config,
     db::{self, Order},
     endpoint::TradingCommand,
-    legacy_clearing, AccountId, Pair, Public, Signature,
+    legacy_clearing, AccountId32, Sr25519Pair, Sr25519Public, Sr25519Signature,
 };
 use dashmap::DashMap;
 use galois_engine::{core::*, fusotao::OffchainSymbol};
@@ -150,10 +150,9 @@ impl Context {
         Ok(())
     }
 
-    pub async fn validate_cmd(&self, cmd: &TradingCommand) -> anyhow::Result<()> {
+    pub async fn validate_cmd(&self, user_id: &str, cmd: &TradingCommand) -> anyhow::Result<()> {
         match cmd {
             TradingCommand::Cancel {
-                account_id,
                 base,
                 quote,
                 order_id,
@@ -163,16 +162,13 @@ impl Context {
                     .get_order((*base, *quote), *order_id)
                     .await?
                     .ok_or(anyhow::anyhow!("order not exists"))?;
-                if <B256 as AsRef<[u8; 32]>>::as_ref(&order.user)
-                    != <AccountId as AsRef<[u8; 32]>>::as_ref(&account_id)
-                {
+                if format!("{:?}", order.user) != user_id {
                     Err(anyhow::anyhow!("invalid order id"))
                 } else {
                     Ok(())
                 }
             }
             TradingCommand::Ask {
-                account_id,
                 base,
                 quote,
                 amount,
@@ -193,7 +189,7 @@ impl Context {
                         && amount.scale() <= market.1.base_scale.into(),
                     "invalid numeric"
                 );
-                let mut account = self.backend.get_account(&account_id.to_ss58check()).await?;
+                let mut account = self.backend.get_account(user_id).await?;
                 anyhow::ensure!(
                     account.remove(base).unwrap_or_default().available >= amount,
                     "insufficient balance"
@@ -201,7 +197,6 @@ impl Context {
                 Ok(())
             }
             TradingCommand::Bid {
-                account_id,
                 base,
                 quote,
                 amount,
@@ -221,7 +216,7 @@ impl Context {
                         && amount.scale() <= market.1.base_scale.into(),
                     "invalid numeric"
                 );
-                let mut account = self.backend.get_account(&account_id.to_ss58check()).await?;
+                let mut account = self.backend.get_account(user_id).await?;
                 anyhow::ensure!(
                     account.remove(quote).unwrap_or_default().available >= amount * price,
                     "insufficient balance"
@@ -311,15 +306,15 @@ where
             let sig_hex =
                 hex::decode(signature.trim_start_matches("0x")).map_err(|_| anyhow::anyhow!(""))?;
             let raw_signature =
-                Signature::decode(&mut &sig_hex[..]).map_err(|_| anyhow::anyhow!(""))?;
-            let public = AccountId::from_ss58check(ss58)
+                Sr25519Signature::decode(&mut &sig_hex[..]).map_err(|_| anyhow::anyhow!(""))?;
+            let public = AccountId32::from_ss58check(ss58)
                 .map_err(|_| anyhow::anyhow!(""))
-                .map(|a| Public::from_raw(*a.as_ref()))?;
+                .map(|a| Sr25519Public::from_raw(*a.as_ref()))?;
             let to_be_signed = nonce.encode();
             log::debug!("sr25519 pubkey: 0x{}", hex::encode(&public));
             log::debug!("to be signed: 0x{}", hex::encode(&to_be_signed));
             log::debug!("signature: 0x{}", hex::encode(&raw_signature));
-            let verified = Pair::verify(&raw_signature, to_be_signed, &public);
+            let verified = Sr25519Pair::verify(&raw_signature, to_be_signed, &public);
             log::debug!("verified: {}", verified);
             if verified {
                 inner.call(req).await.map_err(|e| e.into())
@@ -369,12 +364,12 @@ pub fn validate_signature_should_work() {
     let nonce = 83143.encode();
     let seed = "e5be9a5092b81bca64be81d212e7f2f9eba183bb7a90954f7b76361f6edb5c0a";
     let key: [u8; 32] = hex::decode(seed).unwrap().try_into().unwrap();
-    let p = Pair::from_seed(&key);
+    let p = Sr25519Pair::from_seed(&key);
     let signature = p.sign(&nonce);
     println!("pubkey: 0x{}", hex::encode(&p.public()));
     println!("nonce: 0x{}", hex::encode(&nonce));
     println!("signature: 0x{}", hex::encode(&signature));
-    assert!(Pair::verify(&signature, nonce, &p.public()));
+    assert!(Sr25519Pair::verify(&signature, nonce, &p.public()));
 }
 
 #[test]
@@ -382,14 +377,14 @@ pub fn validate_deser_signature_should_work() {
     let nonce = 83143.encode();
     let signature = "0x8a44a5e17f9bfa67330d9dbf28afee1e81ea86678beb240b4259cfcaa6c2753a3e2df60afd52171360372d3460b041fc3596ab41b6c7fc30142b091139ba5f89";
     let ss58 = "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY";
-    let public = Public::from_raw(*AccountId::from_ss58check(ss58).unwrap().as_ref());
+    let public = Sr25519Public::from_raw(*AccountId32::from_ss58check(ss58).unwrap().as_ref());
     let signature = hex::decode(&signature.trim_start_matches("0x")).unwrap();
-    let signature = Signature::decode(&mut &signature[..]).unwrap();
+    let signature = Sr25519Signature::decode(&mut &signature[..]).unwrap();
     println!("pubkey: 0x{}", hex::encode(&public));
     println!("nonce: 0x{}", hex::encode(&nonce));
     println!(
         "signature: 0x{}",
         hex::encode::<&[u8; 64]>(signature.as_ref())
     );
-    assert!(Pair::verify(&signature, nonce, &public));
+    assert!(Sr25519Pair::verify(&signature, nonce, &public));
 }

@@ -17,7 +17,6 @@ use galois_engine::{core::*, input::Command};
 use parity_scale_codec::Encode;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use sp_core::crypto::Ss58Codec;
 use sqlx::{MySql, Pool, Row};
 use std::str::FromStr;
 
@@ -138,13 +137,13 @@ pub async fn query_pending_orders(
 // TODO save the relayer
 pub async fn save_trading_command(
     pool: &Pool<MySql>,
+    user_id: impl ToString,
     cmd: TradingCommand,
     _relayer: &String,
 ) -> anyhow::Result<u64> {
     let direction = cmd.get_direction_if_trade();
     match cmd {
         TradingCommand::Cancel {
-            account_id,
             base,
             quote,
             order_id,
@@ -153,7 +152,7 @@ pub async fn save_trading_command(
             cancel.order_id = Some(order_id);
             cancel.base = Some(base);
             cancel.quote = Some(quote);
-            cancel.user_id = Some(account_id.to_ss58check());
+            cancel.user_id = Some(user_id.to_string());
             sqlx::query("insert into t_sequence(f_cmd) values(?)")
                 .bind(serde_json::to_string(&cancel).expect("jsonser;qed"))
                 .execute(pool)
@@ -161,14 +160,12 @@ pub async fn save_trading_command(
             Ok(order_id)
         }
         TradingCommand::Ask {
-            account_id,
             base,
             quote,
             amount,
             price,
         }
         | TradingCommand::Bid {
-            account_id,
             base,
             quote,
             amount,
@@ -178,7 +175,7 @@ pub async fn save_trading_command(
             sqlx::query(
                 "insert into t_order(f_user_id,f_amount,f_price,f_order_type) values(?,?,?,?)",
             )
-            .bind(account_id.to_ss58check())
+            .bind(user_id.to_string())
             .bind(amount.clone())
             .bind(price.clone())
             .bind(direction)
@@ -193,7 +190,7 @@ pub async fn save_trading_command(
             place.order_id = Some(id);
             place.base = Some(base);
             place.quote = Some(quote);
-            place.user_id = Some(account_id.to_ss58check());
+            place.user_id = Some(user_id.to_string());
             place.price = Decimal::from_str(&price).ok();
             place.amount = Decimal::from_str(&amount).ok();
             sqlx::query("insert into t_sequence(f_cmd) values(?)")
