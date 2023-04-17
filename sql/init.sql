@@ -74,3 +74,33 @@ CREATE TABLE IF NOT EXISTS `t_order` (
 
 -- initializing a new trading pair should create a table like t_clearing_result
 -- CREATE TABLE `t_clearing_result_{base_currency_code}_{quote_currency_code}` like `t_clearing_result`;
+
+alter table t_order modify f_status int(11) unsigned not null default 0;
+alter table t_order modify f_last_cr bigint(20) unsigned not null default 0;
+
+alter table t_order_0_1 modify f_status int(11) unsigned not null default 0;
+alter table t_order_0_1 modify f_last_cr bigint(20) unsigned not null default 0;
+
+alter table t_order_0_11 modify f_status int(11) unsigned not null default 0;
+alter table t_order_0_11 modify f_last_cr bigint(20) unsigned not null default 0;
+
+alter table t_order_0_8 modify f_status int(11) unsigned not null default 0;
+alter table t_order_0_8 modify f_last_cr bigint(20) unsigned not null default 0;
+
+alter table t_order_12_11 modify f_status int(11) unsigned not null default 0;
+alter table t_order_12_11 modify f_last_cr bigint(20) unsigned not null default 0;
+
+alter table t_order_2_1 modify f_status int(11) unsigned not null default 0;
+alter table t_order_2_1 modify f_last_cr bigint(20) unsigned not null default 0;
+
+alter table t_order_3_1 modify f_status int(11) unsigned not null default 0;
+alter table t_order_3_1 modify f_last_cr bigint(20) unsigned not null default 0;
+
+alter table t_order_4_1 modify f_status int(11) unsigned not null default 0;
+alter table t_order_4_1 modify f_last_cr bigint(20) unsigned not null default 0;
+
+alter table t_order_6_1 modify f_status int(11) unsigned not null default 0;
+alter table t_order_6_1 modify f_last_cr bigint(20) unsigned not null default 0;
+
+alter table t_order_7_8 modify f_status int(11) unsigned not null default 0;
+alter table t_order_7_8 modify f_last_cr bigint(20) unsigned not null default 0;

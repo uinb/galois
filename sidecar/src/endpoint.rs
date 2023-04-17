@@ -87,15 +87,22 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
     module
         .register_async_method("register_trading_key", |p, ctx| async move {
             let (user_id, user_x25519_pub, sig) = p.parse::<(String, String, String)>()?;
+            log::debug!(
+                "userID== {}, x225519 = {}, sign = {} ",
+                &user_id,
+                &user_x25519_pub,
+                &sig
+            );
             let user_id = crate::try_into_ss58(user_id)?;
-            let user_x25519_pub = crate::hexstr_to_vec(&user_x25519_pub)?;
+            let user_x25519_pub_vec = crate::hexstr_to_vec(&user_x25519_pub)?;
             let raw_sig = crate::hexstr_to_vec(&sig)?;
             if raw_sig.len() == 64 {
-                crate::verify_sr25519(raw_sig, &user_x25519_pub, &user_id)?;
+                let message = format!("<Bytes>{}</Bytes>", user_x25519_pub);
+                crate::verify_sr25519(raw_sig, message.into_bytes().as_ref(), &user_id)?;
             } else {
-                crate::verify_ecdsa(raw_sig, &user_x25519_pub, &user_id)?;
+                crate::verify_ecdsa(raw_sig, &hex::encode(&user_x25519_pub_vec), &user_id)?;
             }
-            let user_x25519_pub: [u8; 32] = user_x25519_pub
+            let user_x25519_pub: [u8; 32] = user_x25519_pub_vec
                 .try_into()
                 .map_err(|_| anyhow::anyhow!("Invalid public key"))?;
             let user_x25519_pub = x25519_dalek::PublicKey::from(user_x25519_pub);

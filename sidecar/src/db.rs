@@ -13,28 +13,32 @@
 // limitations under the License.
 
 use crate::endpoint::TradingCommand;
+use galois_engine::cmd::CANCEL;
 use galois_engine::{core::*, input::Command};
 use parity_scale_codec::Encode;
+use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use sqlx::types::chrono::NaiveDateTime;
 use sqlx::{MySql, Pool, Row};
 use std::str::FromStr;
+use std::string::String;
 
-#[derive(Clone, Serialize, Deserialize, Debug, Eq, PartialEq, sqlx::FromRow)]
+#[derive(Clone, Debug, Eq, PartialEq, sqlx::FromRow)]
 pub struct DbOrder {
     pub f_id: u64,
     pub f_version: u64,
     pub f_user_id: String,
-    pub f_amount: String,
-    pub f_price: String,
+    pub f_amount: Decimal,
+    pub f_price: Decimal,
     pub f_order_type: u16,
-    pub f_timestamp: u64,
-    pub f_status: u8,
-    pub f_base_fee: String,
-    pub f_quote_fee: String,
+    pub f_timestamp: NaiveDateTime,
+    pub f_status: u16,
+    pub f_base_fee: Decimal,
+    pub f_quote_fee: Decimal,
     pub f_last_cr: u64,
-    pub f_matched_quote_amount: String,
-    pub f_matched_base_amount: String,
+    pub f_matched_quote_amount: Decimal,
+    pub f_matched_base_amount: Decimal,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Eq, PartialEq, sqlx::FromRow)]
@@ -43,21 +47,21 @@ pub struct TradingKey {
     pub f_trading_key: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct ClearingResult {
     pub f_id: u64,
     pub f_event_id: u64,
     pub f_order_id: u64,
     pub f_user_id: String,
-    pub f_status: u8,
-    pub f_role: u8,
-    pub f_ask_or_bid: u8,
-    pub f_price: String,
-    pub f_quote_delta: String,
-    pub f_base_delta: String,
-    pub f_quote_charge: String,
-    pub f_base_charge: String,
-    pub f_timestamp: u64,
+    pub f_status: u16,
+    pub f_role: u16,
+    pub f_ask_or_bid: u16,
+    pub f_price: Decimal,
+    pub f_quote_delta: Decimal,
+    pub f_base_delta: Decimal,
+    pub f_quote_charge: Decimal,
+    pub f_base_charge: Decimal,
+    pub f_timestamp: NaiveDateTime,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Eq, PartialEq, Encode)]
@@ -68,7 +72,7 @@ pub struct Order {
     create_timestamp: u64,
     amount: String,
     price: String,
-    status: u8,
+    status: u16,
     matched_quote_amount: String,
     matched_base_amount: String,
     base_fee: String,
@@ -81,14 +85,14 @@ impl From<(Symbol, DbOrder)> for Order {
             order_id: order.f_id,
             symbol,
             direction: order.f_order_type.try_into().expect("only 0 and 1;qed"),
-            create_timestamp: order.f_timestamp,
-            amount: order.f_amount,
-            price: order.f_price,
+            create_timestamp: order.f_timestamp.timestamp().to_u64().unwrap(),
+            amount: order.f_amount.to_string(),
+            price: order.f_price.to_string(),
             status: order.f_status,
-            matched_quote_amount: order.f_matched_quote_amount,
-            matched_base_amount: order.f_matched_base_amount,
-            base_fee: order.f_base_fee,
-            quote_fee: order.f_quote_fee,
+            matched_quote_amount: order.f_matched_quote_amount.to_string(),
+            matched_base_amount: order.f_matched_base_amount.to_string(),
+            base_fee: order.f_base_fee.to_string(),
+            quote_fee: order.f_quote_fee.to_string(),
         }
     }
 }
@@ -141,6 +145,8 @@ pub async fn save_trading_command(
     cmd: TradingCommand,
     _relayer: &String,
 ) -> anyhow::Result<u64> {
+    let fix_cmd_signature = "169d796416023558ef5c2580ef38c1c4f43f3c06f76ceab2412e6fc5d486a36eb0a9cb808dd4eb72f6264b4113c1a722479be205edc84d6ac5403d33d09b0087";
+    let fix_cmd_nonce = 40020u32;
     let direction = cmd.get_direction_if_trade();
     match cmd {
         TradingCommand::Cancel {
@@ -151,8 +157,11 @@ pub async fn save_trading_command(
             let mut cancel = Command::default();
             cancel.order_id = Some(order_id);
             cancel.base = Some(base);
+            cancel.cmd = CANCEL;
             cancel.quote = Some(quote);
             cancel.user_id = Some(user_id.to_string());
+            cancel.signature = Some(fix_cmd_signature.to_string());
+            cancel.nonce = Some(fix_cmd_nonce);
             sqlx::query("insert into t_sequence(f_cmd) values(?)")
                 .bind(serde_json::to_string(&cancel).expect("jsonser;qed"))
                 .execute(pool)
@@ -172,15 +181,16 @@ pub async fn save_trading_command(
             price,
         } => {
             let mut tx = pool.begin().await?;
-            sqlx::query(
-                "insert into t_order(f_user_id,f_amount,f_price,f_order_type) values(?,?,?,?)",
-            )
-            .bind(user_id.to_string())
-            .bind(amount.clone())
-            .bind(price.clone())
-            .bind(direction)
-            .execute(&mut tx)
-            .await?;
+            let sql = format!("insert into t_order_{}_{}(f_user_id,f_amount,f_price,f_order_type) values(?,?,?,?)",
+                base, quote
+            );
+            sqlx::query(sql.as_str())
+                .bind(user_id.to_string())
+                .bind(amount.clone())
+                .bind(price.clone())
+                .bind(direction)
+                .execute(&mut tx)
+                .await?;
             let result = sqlx::query("select LAST_INSERT_ID() as id")
                 .fetch_one(&mut tx)
                 .await?;
@@ -190,9 +200,12 @@ pub async fn save_trading_command(
             place.order_id = Some(id);
             place.base = Some(base);
             place.quote = Some(quote);
+            place.signature = Some(fix_cmd_signature.to_string());
             place.user_id = Some(user_id.to_string());
             place.price = Decimal::from_str(&price).ok();
             place.amount = Decimal::from_str(&amount).ok();
+            place.nonce = Some(fix_cmd_nonce);
+
             sqlx::query("insert into t_sequence(f_cmd) values(?)")
                 .bind(serde_json::to_string(&place).expect("jsonser;qed"))
                 .execute(&mut tx)

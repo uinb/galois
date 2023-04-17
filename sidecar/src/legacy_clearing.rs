@@ -80,26 +80,11 @@ where f_id=? and f_version=?",
                             Ok(order) => order,
                             Err(_) => break,
                         };
-                        let base_fee = Decimal::from_str(&order.f_base_fee)
-                            .expect("galois saved illegal decimal")
-                            + Decimal::from_str(&clear.f_base_charge)
-                                .expect("galois saved illegal decimal")
-                                .abs();
-                        let quote_fee = Decimal::from_str(&order.f_quote_fee)
-                            .expect("galois saved illegal decimal")
-                            + Decimal::from_str(&clear.f_quote_charge)
-                                .expect("galois saved illegal decimal")
-                                .abs();
-                        let matched_base = Decimal::from_str(&order.f_matched_base_amount)
-                            .expect("galois saved illegal decimal")
-                            + Decimal::from_str(&clear.f_base_delta)
-                                .expect("galois saved illegal decimal")
-                                .abs();
-                        let matched_quote = Decimal::from_str(&order.f_matched_quote_amount)
-                            .expect("galois saved illegal decimal")
-                            + Decimal::from_str(&clear.f_quote_delta)
-                                .expect("galois saved illegal decimal")
-                                .abs();
+                        let base_fee = order.f_base_fee + clear.f_base_charge.abs();
+                        let quote_fee = order.f_quote_fee + clear.f_quote_charge.abs();
+                        let matched_base = order.f_matched_base_amount + clear.f_base_delta.abs();
+                        let matched_quote =
+                            order.f_matched_quote_amount + clear.f_quote_delta.abs();
                         match sqlx::query(&update_sql)
                             .bind(clear.f_status)
                             .bind(base_fee.to_string())
