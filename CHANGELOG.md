@@ -1,4 +1,4 @@
-# v0.5.0
+# v0.5.0-rc1
 - road to decentralize
 # v0.5.0-dev
 
