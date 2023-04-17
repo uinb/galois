@@ -23,7 +23,6 @@ pub mod endpoint;
 mod legacy_clearing;
 
 use anyhow::anyhow;
-use log::log;
 use parity_scale_codec::{Decode, Encode};
 pub use sp_core::crypto::AccountId32;
 pub use sp_core::ecdsa::{Pair as EcdsaPair, Public as EcdsaPublic, Signature as EcdsaSignature};

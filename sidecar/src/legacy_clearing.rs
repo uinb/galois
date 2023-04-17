@@ -15,9 +15,7 @@
 use crate::db::*;
 use dashmap::DashMap;
 use galois_engine::core::Symbol;
-use rust_decimal::Decimal;
 use sqlx::{MySql, Pool};
-use std::str::FromStr;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,

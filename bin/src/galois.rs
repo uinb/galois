@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use clap::Parser;
+use galois_engine::core::Data;
 use galois_engine::{
     config, executor, fusotao, output, sequence, server, shared::Shared, snapshot,
 };
 use std::sync::{atomic, mpsc, Arc};
-use galois_engine::core::Data;
 
 fn start() {
     let (id, coredump) = snapshot::load().unwrap();
@@ -36,9 +36,16 @@ fn start() {
 }
 
 fn print_symbols(data: &Data) {
-    let book = &data.orderbooks;
-    book.iter().map( |k| {
-        log::info!( "base:{}, quote:{}, base_scale:{},quote_scale: {}", k.0.0, k.0.1, k.1.base_scale, k.1.quote_scale);
+    let _ = &data.orderbooks.iter().map(|k| {
+        log::info!(
+            "base:{}, quote:{}, base_scale:{},quote_scale: {}, minbase:{}, minquote: {}",
+            k.0 .0,
+            k.0 .1,
+            k.1.base_scale,
+            k.1.quote_scale,
+            k.1.min_amount,
+            k.1.min_vol
+        );
     });
 }
 
