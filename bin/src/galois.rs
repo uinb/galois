@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use clap::Parser;
-use galois_engine::core::Data;
 use galois_engine::{
     config, executor, fusotao, output, sequence, server, shared::Shared, snapshot,
 };
@@ -21,7 +20,6 @@ use std::sync::{atomic, mpsc, Arc};
 
 fn start() {
     let (id, coredump) = snapshot::load().unwrap();
-    print_symbols(&coredump);
     let (output_tx, output_rx) = mpsc::channel();
     let (event_tx, event_rx) = mpsc::channel();
     let (proof_tx, proof_rx) = mpsc::channel();
@@ -33,20 +31,6 @@ fn start() {
     let ready = Arc::new(atomic::AtomicBool::new(false));
     sequence::init(event_tx.clone(), id, ready.clone());
     server::init(event_tx, msg_rx, shared, ready);
-}
-
-fn print_symbols(data: &Data) {
-    for k in &data.orderbooks {
-        log::info!(
-            "base:{}, quote:{}, base_scale:{},quote_scale: {}, minbase:{}, minquote: {}",
-            k.0 .0,
-            k.0 .1,
-            k.1.base_scale,
-            k.1.quote_scale,
-            k.1.min_amount,
-            k.1.min_vol
-        );
-    }
 }
 
 fn main() {
