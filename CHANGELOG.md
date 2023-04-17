@@ -1,3 +1,5 @@
+# v0.5.0
+- road to decentralize
 # v0.5.0-dev
 
 - extend fusotao events scanning to support markets/x25519_key

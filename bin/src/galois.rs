@@ -17,9 +17,11 @@ use galois_engine::{
     config, executor, fusotao, output, sequence, server, shared::Shared, snapshot,
 };
 use std::sync::{atomic, mpsc, Arc};
+use galois_engine::core::Data;
 
 fn start() {
     let (id, coredump) = snapshot::load().unwrap();
+    print_symbols(&coredump);
     let (output_tx, output_rx) = mpsc::channel();
     let (event_tx, event_rx) = mpsc::channel();
     let (proof_tx, proof_rx) = mpsc::channel();
@@ -31,6 +33,13 @@ fn start() {
     let ready = Arc::new(atomic::AtomicBool::new(false));
     sequence::init(event_tx.clone(), id, ready.clone());
     server::init(event_tx, msg_rx, shared, ready);
+}
+
+fn print_symbols(data: &Data) {
+    let book = &data.orderbooks;
+    book.iter().map( |k| {
+        log::info!( "base:{}, quote:{}, base_scale:{},quote_scale: {}", k.0.0, k.0.1, k.1.base_scale, k.1.quote_scale);
+    });
 }
 
 fn main() {
