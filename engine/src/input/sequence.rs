@@ -233,14 +233,6 @@ pub fn init(sender: Sender<Input>, id: u64, startup: Arc<AtomicBool>) {
                         .send(Input::NonModifier(Whistle::new_dump_whistle(id, t)))
                         .unwrap();
                 }
-                //check system busy
-                if counter != 0 && counter % 200 == 0 {
-                    event_sender
-                        .send(Input::NonModifier(Whistle::new_proving_perf_check_whistle(
-                            id,
-                        )))
-                        .unwrap();
-                }
                 id += 1;
             }
             event_sender

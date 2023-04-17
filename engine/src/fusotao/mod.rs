@@ -12,18 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use parity_scale_codec::{Compact, Decode, Encode, WrapperTypeEncode};
+use crate::{config::C, core::*, sequence::*};
+use connector::FusoConnector;
+use dashmap::DashMap;
+use parity_scale_codec::{Compact, Decode, Encode, WrapperTypeDecode, WrapperTypeEncode};
+pub use prover::Prover;
 use rust_decimal::{prelude::*, Decimal};
 use serde::{Deserialize, Serialize};
 use smt::{blake2b::Blake2bHasher, default_store::DefaultStore, SparseMerkleTree, H256};
 use std::{
     convert::TryInto,
-    sync::mpsc::{Receiver, RecvTimeoutError},
+    sync::{
+        atomic::{AtomicU32, AtomicU64, Ordering},
+        mpsc::{Receiver, RecvTimeoutError},
+        Arc,
+    },
 };
-
-use crate::fusotao::connector::FusoConnector;
-use crate::{config::C, core::*, sequence::*};
-pub use prover::Prover;
 
 mod connector;
 mod persistence;
@@ -44,8 +48,42 @@ const ONE_ONCHAIN: u128 = 1_000_000_000_000_000_000;
 const MILL: u32 = 1_000_000;
 const QUINTILL: u64 = 1_000_000_000_000_000_000;
 const MAX_EXTRINSIC_SIZE: usize = 3 * 1024 * 1024;
-#[allow(dead_code)]
-const MAX_EXTRINSIC_WEIGHT: u128 = 1_000_000_000_000_000_000;
+
+/// AccountId of chain = MultiAddress<sp_runtime::AccountId32, ()>::Id = GenericAddress::Id
+/// 1. from_ss58check() or from_ss58check_with_version()
+/// 2. new or from public
+pub fn init(rx: Receiver<Proof>) -> FusoConnector {
+    persistence::init(rx);
+    let connector = FusoConnector::new(C.dry_run.is_some()).unwrap();
+    log::info!("prover initialized");
+    connector
+}
+
+/// tracking essential onchain states
+#[derive(Clone, Debug, Default)]
+pub struct FusoState {
+    pub chain_height: Arc<AtomicU32>,
+    pub proved_event_id: Arc<AtomicU64>,
+    pub scanning_progress: Arc<AtomicU32>,
+    pub symbols: DashMap<Symbol, OnchainSymbol>,
+    // TODO transform OnchainCurrency to offchain currency
+    pub currencies: DashMap<Currency, OnchainToken>,
+    pub brokers: DashMap<UserId, u32>,
+}
+
+impl FusoState {
+    pub fn get_proving_progress(&self) -> u64 {
+        self.proved_event_id.load(Ordering::Relaxed)
+    }
+
+    pub fn get_scanning_progress(&self) -> u32 {
+        self.scanning_progress.load(Ordering::Relaxed)
+    }
+
+    pub fn get_chain_height(&self) -> u32 {
+        self.chain_height.load(Ordering::Relaxed)
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct RawParameter(pub Vec<u8>);
@@ -54,6 +92,69 @@ impl Encode for RawParameter {
     fn encode(&self) -> Vec<u8> {
         self.0.to_owned()
     }
+}
+
+#[derive(Clone, Encode, Decode, Eq, PartialEq, Debug)]
+pub enum Receipt {
+    Authorize(u32, u128, u32),
+    Revoke(u32, u128, u32),
+    // RevokeWithCallback(u32, u128, u32, Callback),
+}
+
+#[derive(Clone, Encode, Decode, Eq, PartialEq, Debug, Serialize)]
+pub enum MarketStatus {
+    Registered,
+    Open,
+    Closed,
+}
+
+#[derive(Clone, Decode, Encode, Debug, Serialize)]
+pub struct OnchainSymbol {
+    pub min_base: u128,
+    pub base_scale: u8,
+    pub quote_scale: u8,
+    pub status: MarketStatus,
+    pub trading_rewards: bool,
+    pub liquidity_rewards: bool,
+    pub unavailable_after: Option<BlockNumber>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OffchainSymbol {
+    pub symbol: Symbol,
+    pub min_base: Decimal,
+    pub base_scale: u8,
+    pub quote_scale: u8,
+}
+
+impl From<(Symbol, OnchainSymbol)> for OffchainSymbol {
+    fn from((symbol, data): (Symbol, OnchainSymbol)) -> Self {
+        Self {
+            symbol,
+            min_base: to_decimal_represent(data.min_base).expect("far away from overflow;qed"),
+            base_scale: data.base_scale,
+            quote_scale: data.quote_scale,
+        }
+    }
+}
+
+#[derive(Encode, Decode, Clone, PartialEq, Eq, Debug)]
+pub enum OnchainToken {
+    // symbol, contract_address, total, stable, decimals
+    NEP141(Vec<u8>, Vec<u8>, u128, bool, u8),
+    ERC20(Vec<u8>, Vec<u8>, u128, bool, u8),
+    BEP20(Vec<u8>, Vec<u8>, u128, bool, u8),
+    FND10(Vec<u8>, u128),
+}
+
+#[derive(Clone, Decode, Debug, Default)]
+pub struct Dominator {
+    pub name: Vec<u8>,
+    pub staked: u128,
+    pub merkle_root: [u8; 32],
+    pub start_from: u32,
+    pub sequence: (u64, u32),
+    pub status: u8,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Encode)]
@@ -76,26 +177,6 @@ pub struct Proof {
 }
 
 #[derive(Encode, Decode, Clone, Debug)]
-pub struct DominatorClaimedEvent {
-    dominator: FusoAccountId,
-    pledge: u128,
-}
-
-#[derive(Encode, Decode, Clone, Debug)]
-pub struct CoinHostedEvent {
-    fund_owner: FusoAccountId,
-    dominator: FusoAccountId,
-    amount: u128,
-}
-
-#[derive(Encode, Decode, Clone, Debug)]
-pub struct CoinRevokedEvent {
-    fund_owner: FusoAccountId,
-    dominator: FusoAccountId,
-    amount: u128,
-}
-
-#[derive(Encode, Decode, Clone, Debug)]
 pub struct TokenHostedEvent {
     fund_owner: FusoAccountId,
     dominator: FusoAccountId,
@@ -111,20 +192,40 @@ pub struct TokenRevokedEvent {
     amount: u128,
 }
 
+#[derive(Encode, Decode, Clone, Debug)]
+pub struct TokenIssuedEvent {
+    token_id: u32,
+    symbol_name: Vec<u8>,
+}
+
+#[derive(Encode, Decode, Clone, Debug)]
+pub struct BrokerRegisteredEvent {
+    // decode into UserId
+    broker_account: UserId,
+    beneficiary_account: FusoAccountId,
+}
+
+#[derive(Encode, Decode, Clone, Debug)]
+pub struct MarketOpenedEvent {
+    dominator: FusoAccountId,
+    base: u32,
+    quote: u32,
+    base_scale: u8,
+    quote_scale: u8,
+    min_base: u128,
+}
+
+#[derive(Encode, Decode, Clone, Debug)]
+pub struct MarketClosedEvent {
+    dominator: FusoAccountId,
+    base: u32,
+    quote: u32,
+}
+
 impl WrapperTypeEncode for UserId {}
 
-/// AccountId of chain = MultiAddress<sp_runtime::AccountId32, ()>::Id = GenericAddress::Id
-/// 1. from_ss58check() or from_ss58check_with_version()
-/// 2. new or from public
-pub fn init(rx: Receiver<Proof>) -> anyhow::Result<()> {
-    persistence::init(rx);
-    if C.dry_run.is_none() {
-        let connector = FusoConnector::new()?;
-        connector.start_submitting()?;
-        connector.start_scanning()?;
-    }
-    log::info!("prover initialized");
-    Ok(())
+impl WrapperTypeDecode for UserId {
+    type Wrapped = [u8; 32];
 }
 
 #[derive(Clone, Encode, Decode, Eq, PartialEq, Debug)]

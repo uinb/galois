@@ -56,16 +56,9 @@ impl TryInto<Inspection> for Whistle {
                 self.session,
                 self.req_id,
             )),
-            QUERY_PROVING_PERF_INDEX => {
-                Ok(Inspection::QueryProvingPerfIndex(self.session, self.req_id))
-            }
-            QUERY_SCAN_HEIGHT => Ok(Inspection::QueryScanHeight(self.session, self.req_id)),
             DUMP => Ok(Inspection::Dump(
                 self.cmd.event_id.ok_or(anyhow!(""))?,
                 self.cmd.timestamp.ok_or(anyhow!(""))?,
-            )),
-            PROVING_PERF_INDEX_CHECK => Ok(Inspection::ProvingPerfIndexCheck(
-                self.cmd.event_id.ok_or(anyhow!(""))?,
             )),
             _ => Err(anyhow!("Invalid Inspection")),
         }
@@ -95,17 +88,6 @@ impl Whistle {
         }
     }
 
-    pub fn new_proving_perf_check_whistle(at: u64) -> Self {
-        let mut cmd = Command::default();
-        cmd.cmd = PROVING_PERF_INDEX_CHECK;
-        cmd.event_id = Some(at);
-        Self {
-            session: 0,
-            req_id: 0,
-            cmd,
-        }
-    }
-
     pub fn new_confirm_whistle(from: u64, exclude: u64) -> Self {
         let mut cmd = Command::default();
         cmd.cmd = CONFIRM_ALL;
@@ -126,12 +108,9 @@ pub enum Inspection {
     QueryOrder(Symbol, OrderId, u64, u64),
     QueryBalance(UserId, Currency, u64, u64),
     QueryAccounts(UserId, u64, u64),
-    QueryProvingPerfIndex(u64, u64),
     QueryExchangeFee(Symbol, u64, u64),
-    QueryScanHeight(u64, u64),
     // special: `EventId` means dump at `EventId`
     Dump(EventId, Timestamp),
-    ProvingPerfIndexCheck(EventId),
 }
 
 impl Default for Inspection {

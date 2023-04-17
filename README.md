@@ -1,7 +1,5 @@
 # Galois
 
-<p align="center">Granted by<br><img src="https://cryptologos.cc/logos/near-protocol-near-logo.png?v=014" alt="NEAR Grants Program" width="80" height="80"></p>
-
 [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg)](#LICENSE)
 [![GitHub Workflow Status (branch)](https://github.com/uinb/galois/actions/workflows/build.yml/badge.svg)](https://github.com/uinb/galois/actions?query=branch%3Amaster)
 
@@ -25,7 +23,8 @@ events(mysql)  >>  |  galois  |  >> match results(mysql)/best n price(redis)
                        
 ```
 
-Galois works as the prover(a.k.a Proof of Matches) component of [Fusotao](https://github.com/uinb/fusotao). From v0.4.0, we don't support running Galois in standalone mode anymore. Our goal is to make the singleton prover of Fusotao mainnet recoverable from anywhere by pulling the core data and sequences from [Arweave](https://arweave.org/).
+Galois works as the prover(a.k.a Proof of Matches) component of [Fusotao](https://github.com/uinb/fusotao). From v0.4.0, we don't support running Galois in standalone mode anymore.
+According to the Roadmap 2023, the UINB team is workding on implementing the Proof of Order Relay which enables users to run #[Fusotao Node](https://github.com/uinb/fusotao) as an order relayer(a.k.a broker) rather than supporting multiple prover instance in the network. In the near future, galois will be recoverable from anywhere by pulling the core data and sequences from [Arweave](https://arweave.org/) and under management of the FusoDAO.
 
 ## Getting Started
 
@@ -38,11 +37,11 @@ Galois works as the prover(a.k.a Proof of Matches) component of [Fusotao](https:
 
 ### Quick Start
 
-TODO
+TODO, or refer to the old version.
 
 ### Instructions
 
-TODO
+TODO, or refer to the old version.
 
 ## License
-Galois is licensed under [Apache 2.0](LICENSE)
+Galois is licensed under [Apache 2.0](LICENSE).

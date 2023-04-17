@@ -13,23 +13,21 @@
 // limitations under the License.
 
 use clap::Parser;
-use lazy_static::lazy_static;
 use log4rs::config::{Logger, RawConfig as LogConfig};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Parser)]
 #[command(author, version, about = r#"
                  **       **
-   *******     ******     **               **
-  ***               **    **     *****     **    ******
- **              *****    **   ***   ***        **    *
+   *******     ******     **               **    ******
+  ***               **    **     *****     **   **    *
+ **              *****    **   ***   ***       **
  **            *******    **   **     **   **   **
- **    *****  **    **    **   *       *   **    **
-  **     ***  **    **    **   **     **   **     ****
-   *********   **  ****   **    *******    **        **
-      *    *    ****  *   **      ***      **    ** ***
-                                                  ****
-"#, long_about = None)]
+ **    *****  **    **    **   *       *   **     *****
+  **     ***  **    **    **   **     **   **         **
+   *********   **  ****   **    *******    **    **   **
+      *    *    ****  *   **      ***      **     ****"#,
+long_about = None)]
 pub struct GaloisCli {
     #[arg(short('c'), long("config"), required = true, value_name = "FILE")]
     pub file: std::path::PathBuf,
@@ -52,7 +50,7 @@ pub enum SubCmd {
 pub struct RunCmd {
     #[arg(
         long,
-        value_name = "EVENTID",
+        value_name = "EVENT-ID",
         help = "Run galois in `dry-run` mode, skipping all output."
     )]
     dry_run: Option<u64>,
@@ -121,20 +119,12 @@ pub struct FusotaoConfig {
     pub claim_block: u32,
     pub proof_batch_limit: usize,
     pub compress_proofs: bool,
-    // deprecated
-    pub fee_adjust_threshold: u64,
+    pub x25519_priv: String,
 }
 
-impl Default for FusotaoConfig {
-    fn default() -> Self {
-        Self {
-            node_url: String::from(""),
-            key_seed: String::from(""),
-            claim_block: 1,
-            proof_batch_limit: 20,
-            compress_proofs: true,
-            fee_adjust_threshold: 10,
-        }
+impl FusotaoConfig {
+    pub fn get_x25519_prikey(&self) -> anyhow::Result<String> {
+        Ok(self.x25519_priv.clone())
     }
 }
 
@@ -144,6 +134,8 @@ impl EncryptedConfig for FusotaoConfig {
         let mc = magic_crypt::new_magic_crypt!(key, 64);
         let dec = mc.decrypt_base64_to_string(&self.key_seed)?;
         self.key_seed.replace_range(.., &dec);
+        let dec = mc.decrypt_base64_to_string(&self.x25519_priv)?;
+        self.x25519_priv.replace_range(.., &dec);
         Ok(())
     }
 
@@ -152,6 +144,8 @@ impl EncryptedConfig for FusotaoConfig {
         let mc = magic_crypt::new_magic_crypt!(key, 64);
         let enc = mc.encrypt_str_to_base64(&self.key_seed);
         self.key_seed.replace_range(.., &enc);
+        let enc = mc.encrypt_str_to_base64(&self.x25519_priv);
+        self.x25519_priv.replace_range(.., &enc);
         Ok(())
     }
 }
@@ -179,7 +173,7 @@ impl EncryptedConfig for RedisConfig {
     }
 }
 
-lazy_static! {
+lazy_static::lazy_static! {
     pub static ref C: Config = init_config_file().unwrap();
 }
 
@@ -200,12 +194,14 @@ fn init_config_file() -> anyhow::Result<Config> {
     })
 }
 
-pub fn print_enc_config_file(mut cfg: Config) -> anyhow::Result<()> {
+pub fn print_config(f: &std::path::PathBuf) -> anyhow::Result<()> {
     let key = std::env::var_os("MAGIC_KEY").ok_or(anyhow::anyhow!("env MAGIC_KEY not set"))?;
     let key = key
         .to_str()
         .map(|s| s.to_string())
         .ok_or(anyhow::anyhow!("env MAGIC_KEY not set"))?;
+    let toml = std::fs::read_to_string(f)?;
+    let mut cfg: Config = toml::from_str(&toml)?;
     cfg.mysql.encrypt(&key)?;
     cfg.redis.encrypt(&key)?;
     cfg.fusotao.encrypt(&key)?;
@@ -271,6 +267,7 @@ pub fn test_default() {
         [fusotao]
         node_url = "ws://localhost:9944"
         key_seed = "//Alice"
+        x25519_priv = "0xedcff0c69e4c0fa7e9a36e2e6d07f2cc355c8d25907a0ad2ab7e03b24f8e90f3"
         proof_batch_limit = 20
         claim_block = 1
         compress_proofs = true

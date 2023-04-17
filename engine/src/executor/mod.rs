@@ -19,34 +19,36 @@ pub mod orderbook;
 
 use crate::{
     core::*,
-    fusotao::{self, Prover},
-    input::{Event, EventsError, Input, Inspection},
+    fusotao::{Proof, Prover},
+    input::{Event, EventsError, Input, Inspection, Message},
     orderbook::*,
     output::{self, Output},
-    sequence, server, snapshot,
+    sequence, snapshot,
 };
 use anyhow::anyhow;
 use rust_decimal::{prelude::*, Decimal};
 use std::{
     collections::HashMap,
     convert::TryInto,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        mpsc::{Receiver, Sender},
-        Arc,
-    },
+    sync::mpsc::{Receiver, Sender},
 };
 
 type EventExecutionResult = Result<(), EventsError>;
 type OutputChannel = Sender<Vec<Output>>;
 type DriverChannel = Receiver<Input>;
+type ProofChannel = Sender<Proof>;
+type BackToServer = Sender<(u64, Message)>;
 
-pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data, ready: Arc<AtomicBool>) {
+pub fn init(
+    recv: DriverChannel,
+    sender: OutputChannel,
+    proofs: ProofChannel,
+    messages: BackToServer,
+    mut data: Data,
+) {
     std::thread::spawn(move || {
-        let (tx, rx) = std::sync::mpsc::channel();
-        fusotao::init(rx).unwrap();
-        let prover = Prover::new(tx);
-        ready.store(true, Ordering::Relaxed);
+        let prover = Prover::new(proofs);
+        let mut ephemeral = Ephemeral::new();
         log::info!("executor initialized");
         loop {
             let fusion = recv.recv().unwrap();
@@ -54,18 +56,18 @@ pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data, ready: A
                 Input::NonModifier(whistle) => {
                     let (s, r) = (whistle.session, whistle.req_id);
                     if let Ok(inspection) = whistle.try_into() {
-                        // only EventsError::Interrupted might return, so we have no choices
-                        do_inspect(inspection, &data).unwrap();
+                        do_inspect(inspection, &data, &messages).unwrap();
                     } else {
-                        server::publish(server::Message::with_payload(s, r, vec![]));
+                        let r = messages.send((s, Message::new(r, vec![])));
+                        log::error!("{:?}", r);
                     }
                 }
                 Input::Modifier(seq) => {
                     let id = seq.id;
                     match seq.try_into() {
                         Ok(event) => {
-                            let result = handle_event(event, &mut data, &sender, &prover);
-                            match result {
+                            let r = do_event(event, &mut data, &mut ephemeral, &sender, &prover);
+                            match r {
                                 Err(EventsError::EventRejected(id, msg)) => {
                                     log::info!("Error occur in sequence {}: {:?}", id, msg);
                                     sequence::update_sequence_status(id, sequence::ERROR).unwrap();
@@ -87,9 +89,10 @@ pub fn init(recv: DriverChannel, sender: OutputChannel, mut data: Data, ready: A
     });
 }
 
-fn handle_event(
+fn do_event(
     event: Event,
     data: &mut Data,
+    ephemeral: &mut Ephemeral,
     sender: &OutputChannel,
     prover: &Prover,
 ) -> EventExecutionResult {
@@ -105,7 +108,7 @@ fn handle_event(
                     id,
                     anyhow!("order can't be accepted"),
                 ))?;
-            log::info!(
+            log::debug!(
                 "predicate root=0x{} before applying {}",
                 hex::encode(data.merkle_tree.root()),
                 id
@@ -237,7 +240,13 @@ fn handle_event(
             Ok(())
         }
         Event::TransferOut(id, cmd, _) => {
-            log::info!(
+            if !ephemeral.save_receipt((cmd.block_number, cmd.user_id)) {
+                return Err(EventsError::EventRejected(
+                    id,
+                    anyhow!("Duplicated transfer_out extrinsic"),
+                ));
+            }
+            log::debug!(
                 "predicate root=0x{} before applying {}",
                 hex::encode(data.merkle_tree.root()),
                 id
@@ -246,10 +255,7 @@ fn handle_event(
             if data.tvl < cmd.amount {
                 prover.prove_cmd_rejected(&mut data.merkle_tree, id, cmd, &before);
                 log::error!("TVL less than transfer_out amount, event={}", id);
-                return Err(EventsError::EventRejected(
-                    id,
-                    anyhow::anyhow!("LessThanTVL"),
-                ));
+                return Err(EventsError::EventRejected(id, anyhow!("LessThanTVL")));
             }
             match assets::deduct_available(
                 &mut data.accounts,
@@ -269,17 +275,20 @@ fn handle_event(
             }
         }
         Event::TransferIn(id, cmd, _) => {
+            if !ephemeral.save_receipt((cmd.block_number, cmd.user_id)) {
+                return Err(EventsError::EventRejected(
+                    id,
+                    anyhow!("Duplicated transfer_in extrinsic"),
+                ));
+            }
             if data.tvl + cmd.amount >= crate::core::max_number() {
                 let before =
                     assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.currency);
                 prover.prove_rejecting_no_reason(&mut data.merkle_tree, id, cmd, &before);
                 log::error!("TVL out of limit, event={}", id);
-                return Err(EventsError::EventRejected(
-                    id,
-                    anyhow::anyhow!("TVLOutOfLimit"),
-                ));
+                return Err(EventsError::EventRejected(id, anyhow!("TVLOutOfLimit")));
             }
-            log::info!(
+            log::debug!(
                 "predicate root=0x{} before applying {}",
                 hex::encode(data.merkle_tree.root()),
                 id
@@ -331,7 +340,11 @@ fn handle_event(
     }
 }
 
-fn do_inspect(inspection: Inspection, data: &Data) -> EventExecutionResult {
+fn do_inspect(
+    inspection: Inspection,
+    data: &Data,
+    messages: &BackToServer,
+) -> EventExecutionResult {
     match inspection {
         Inspection::QueryOrder(symbol, order_id, session, req_id) => {
             let v = match data.orderbooks.get(&symbol) {
@@ -340,44 +353,17 @@ fn do_inspect(inspection: Inspection, data: &Data) -> EventExecutionResult {
                 }),
                 None => vec![],
             };
-            server::publish(server::Message::with_payload(session, req_id, v));
+            let _ = messages.send((session, Message::new(req_id, v)));
         }
         Inspection::QueryBalance(user_id, currency, session, req_id) => {
             let a = assets::get_balance_to_owned(&data.accounts, &user_id, currency);
             let v = serde_json::to_vec(&a).unwrap_or_default();
-            server::publish(server::Message::with_payload(session, req_id, v));
+            let _ = messages.send((session, Message::new(req_id, v)));
         }
         Inspection::QueryAccounts(user_id, session, req_id) => {
             let a = assets::get_account_to_owned(&data.accounts, &user_id);
             let v = serde_json::to_vec(&a).unwrap_or_default();
-            server::publish(server::Message::with_payload(session, req_id, v));
-        }
-        Inspection::UpdateDepth => {
-            let writing = data
-                .orderbooks
-                .iter()
-                .map(|(k, v)| v.as_depth(32, *k))
-                .collect::<Vec<_>>();
-            output::write_depth(writing);
-        }
-        Inspection::ConfirmAll(from, exclude) => {
-            sequence::confirm(from, exclude).map_err(|_| EventsError::Interrupted)?;
-        }
-        // TODO remove this
-        Inspection::QueryProvingPerfIndex(session, req_id) => {
-            let mut v: HashMap<String, u64> = HashMap::new();
-            v.insert(String::from("proving_perf_index"), 0);
-            let v = serde_json::to_vec(&v).unwrap_or_default();
-            server::publish(server::Message::with_payload(session, req_id, v));
-        }
-        Inspection::QueryScanHeight(session, req_id) => {
-            let scaned_height = scaned_height();
-            let chain_height = chain_height();
-            let mut v: HashMap<String, u32> = HashMap::new();
-            v.insert(String::from("scaned_height"), scaned_height);
-            v.insert(String::from("chain_height"), chain_height);
-            let v = serde_json::to_vec(&v).unwrap_or_default();
-            server::publish(server::Message::with_payload(session, req_id, v));
+            let _ = messages.send((session, Message::new(req_id, v)));
         }
         Inspection::QueryExchangeFee(symbol, session, req_id) => {
             let mut v: HashMap<String, Fee> = HashMap::new();
@@ -393,48 +379,22 @@ fn do_inspect(inspection: Inspection, data: &Data) -> EventExecutionResult {
                 }
             }
             let v = serde_json::to_vec(&v).unwrap_or_default();
-            server::publish(server::Message::with_payload(session, req_id, v));
+            let _ = messages.send((session, Message::new(req_id, v)));
+        }
+        Inspection::UpdateDepth => {
+            let writing = data
+                .orderbooks
+                .iter()
+                .map(|(k, v)| v.as_depth(32, *k))
+                .collect::<Vec<_>>();
+            output::write_depth(writing);
+        }
+        Inspection::ConfirmAll(from, exclude) => {
+            sequence::confirm(from, exclude).map_err(|_| EventsError::Interrupted)?;
         }
         Inspection::Dump(id, time) => {
             snapshot::dump(id, time, data);
         }
-        Inspection::ProvingPerfIndexCheck(_id) => {}
     }
     Ok(())
-}
-
-fn scaned_height() -> u32 {
-    let mut scaned_height = 0u32;
-    let path: std::path::PathBuf = [&crate::config::C.sequence.coredump_dir, "fusotao.blk"]
-        .iter()
-        .collect();
-    let finalized_file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(false)
-        .create(false)
-        .open(&path);
-    if let Ok(f) = finalized_file {
-        let blk = unsafe { memmap::Mmap::map(&f) };
-        scaned_height = match blk {
-            Ok(b) => u32::from_le_bytes(b.as_ref().try_into().unwrap_or_default()),
-            Err(_) => 0u32,
-        };
-    }
-    scaned_height
-}
-
-fn chain_height() -> u32 {
-    use crate::fusotao::{FusoApi, FusoBlock};
-    std::panic::catch_unwind(|| {
-        let client = sub_api::rpc::WsRpcClient::new(&crate::config::C.fusotao.node_url);
-        let api = FusoApi::new(client)
-            .map_err(|e| {
-                log::error!("{:?}", e);
-                anyhow!("Fusotao node not available or runtime metadata check failed")
-            })
-            .unwrap();
-        let r: Option<FusoBlock> = api.get_block(None).unwrap_or(None);
-        r.map_or(0u32, |b| b.header.number)
-    })
-    .unwrap_or(0u32)
 }

@@ -12,6 +12,13 @@ CREATE TABLE IF NOT EXISTS `t_proof` (
   PRIMARY KEY (`f_event_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+-- DEPRECATED --
+
+CREATE TABLE `t_trading_key`(
+  `f_user_id` varchar(66) NOT NULL primary key,
+  `f_trading_key` varchar(66) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 CREATE TABLE `t_clearing_result` (
   `f_id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `f_event_id` bigint unsigned NOT NULL,
@@ -34,5 +41,66 @@ CREATE TABLE `t_clearing_result` (
   UNIQUE KEY `f_event_id` (`f_event_id`,`f_order_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+CREATE TABLE IF NOT EXISTS `t_stick` (
+  `f_id` bigint NOT NULL,
+  `f_open` varchar(20) NOT NULL,
+  `f_close` varchar(20) NOT NULL,
+  `f_high` varchar(20) NOT NULL,
+  `f_low` varchar(20) NOT NULL,
+  `f_amount` varchar(32) NOT NULL,
+  `f_vol` varchar(36) NOT NULL,
+  `f_last_cr` bigint NOT NULL,
+  PRIMARY KEY (`f_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `t_order` (
+  `f_id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `f_version` bigint unsigned NOT NULL default 0,
+  `f_user_id` varchar(66) NOT NULL,
+  `f_amount` decimal(20,8) NOT NULL,
+  `f_price` decimal(20,8) NOT NULL,
+  `f_order_type` int unsigned NOT NULL,
+  `f_timestamp` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `f_status` int NOT NULL DEFAULT '0',
+  `f_base_fee` decimal(5,4) NOT NULL DEFAULT '0.0000',
+  `f_quote_fee` decimal(5,4) NOT NULL DEFAULT '0.0000',
+  `f_last_cr` bigint NOT NULL DEFAULT 0,
+  `f_matched_quote_amount` decimal(20,8) NOT NULL DEFAULT '0.00000000',
+  `f_matched_base_amount` decimal(20,8) NOT NULL DEFAULT '0.00000000',
+  PRIMARY KEY (`f_id`),
+  KEY `idx_user_id` (`f_user_id`),
+  KEY `idx_user_id_and_status` (`f_user_id`, `f_status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 -- initializing a new trading pair should create a table like t_clearing_result
 -- CREATE TABLE `t_clearing_result_{base_currency_code}_{quote_currency_code}` like `t_clearing_result`;
+
+alter table t_order modify f_status int(11) unsigned not null default 0;
+alter table t_order modify f_last_cr bigint(20) unsigned not null default 0;
+
+alter table t_order_0_1 modify f_status int(11) unsigned not null default 0;
+alter table t_order_0_1 modify f_last_cr bigint(20) unsigned not null default 0;
+
+alter table t_order_0_11 modify f_status int(11) unsigned not null default 0;
+alter table t_order_0_11 modify f_last_cr bigint(20) unsigned not null default 0;
+
+alter table t_order_0_8 modify f_status int(11) unsigned not null default 0;
+alter table t_order_0_8 modify f_last_cr bigint(20) unsigned not null default 0;
+
+alter table t_order_12_11 modify f_status int(11) unsigned not null default 0;
+alter table t_order_12_11 modify f_last_cr bigint(20) unsigned not null default 0;
+
+alter table t_order_2_1 modify f_status int(11) unsigned not null default 0;
+alter table t_order_2_1 modify f_last_cr bigint(20) unsigned not null default 0;
+
+alter table t_order_3_1 modify f_status int(11) unsigned not null default 0;
+alter table t_order_3_1 modify f_last_cr bigint(20) unsigned not null default 0;
+
+alter table t_order_4_1 modify f_status int(11) unsigned not null default 0;
+alter table t_order_4_1 modify f_last_cr bigint(20) unsigned not null default 0;
+
+alter table t_order_6_1 modify f_status int(11) unsigned not null default 0;
+alter table t_order_6_1 modify f_last_cr bigint(20) unsigned not null default 0;
+
+alter table t_order_7_8 modify f_status int(11) unsigned not null default 0;
+alter table t_order_7_8 modify f_last_cr bigint(20) unsigned not null default 0;

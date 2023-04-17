@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod legacy;
+
 use crate::{
     core::*,
     db::{DB, REDIS},
@@ -74,7 +76,7 @@ pub fn write_depth(depth: Vec<Depth>) {
 pub fn init(rx: Receiver<Vec<Output>>) {
     let mut buf = HashMap::<Symbol, (u64, Vec<Output>)>::new();
     std::thread::spawn(move || loop {
-        let cr = match rx.recv_timeout(Duration::from_millis(500)) {
+        let cr = match rx.recv_timeout(Duration::from_millis(50)) {
             Ok(p) => p,
             Err(RecvTimeoutError::Timeout) => vec![],
             Err(RecvTimeoutError::Disconnected) => {

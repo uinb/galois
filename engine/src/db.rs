@@ -12,23 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(type_ascription)]
-#![feature(drain_filter)]
-#![feature(result_option_inspect)]
-#![allow(clippy::from_over_into)]
-#![allow(clippy::too_many_arguments)]
-#![allow(clippy::wrong_self_convention)]
-#![allow(clippy::map_entry)]
+use crate::config::C;
 
-pub mod config;
-pub mod core;
-pub mod db;
-pub mod executor;
-pub mod fusotao;
-pub mod input;
-pub mod output;
-pub mod snapshot;
-
-pub use executor::*;
-pub use input::*;
-pub use output::*;
+lazy_static::lazy_static! {
+    pub static ref DB: mysql::Pool =
+        mysql::Pool::new(mysql::Opts::from_url(&C.mysql.url).unwrap()).unwrap();
+    pub static ref REDIS: redis::Client = redis::Client::open((&C.redis.url).to_string()).unwrap();
+}

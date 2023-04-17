@@ -12,23 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::core::{Currency, Symbol};
-use async_std::sync::RwLock;
-use parity_scale_codec::{Decode, Encode};
-use std::{collections::HashMap, sync::Arc};
+#![feature(type_ascription)]
+#![feature(drain_filter)]
+#![feature(result_option_inspect)]
+#![allow(clippy::from_over_into)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::wrong_self_convention)]
+#![allow(clippy::map_entry)]
 
-pub type FusoTradingMetadata = Arc<RwLock<TradingMetadata>>;
+pub mod config;
+pub mod core;
+pub mod db;
+pub mod executor;
+pub mod fusotao;
+pub mod input;
+pub mod output;
+pub mod shared;
+pub mod snapshot;
 
-#[derive(Clone, Decode, Encode)]
-pub struct OnchainCurrency {}
-
-#[derive(Clone, Decode, Encode)]
-pub struct OnchainSymbol {}
-
-#[derive(Clone)]
-pub struct TradingMetadata {
-    symbols: HashMap<Symbol, OnchainSymbol>,
-    currencies: HashMap<Currency, OnchainCurrency>,
-}
-
-impl TradingMetadata {}
+pub use executor::*;
+pub use input::*;
+pub use output::*;
