@@ -36,7 +36,7 @@ fn start() {
 }
 
 fn print_symbols(data: &Data) {
-    let _ = &data.orderbooks.iter().map(|k| {
+    for k in &data.orderbooks {
         log::info!(
             "base:{}, quote:{}, base_scale:{},quote_scale: {}, minbase:{}, minquote: {}",
             k.0 .0,
@@ -46,7 +46,7 @@ fn print_symbols(data: &Data) {
             k.1.min_amount,
             k.1.min_vol
         );
-    });
+    }
 }
 
 fn main() {
