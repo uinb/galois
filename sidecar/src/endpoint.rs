@@ -125,15 +125,26 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
         })
         .unwrap();
     module
-        .register_subscription("sub_trading", "", "unsub_trading", |p, mut sink, ctx| {
-            let (user_id, signature, nonce) = p.parse::<(String, String, String)>()?;
+        .register_async_method("append_user", |p, ctx| async move {
+            let (user_id, signature, nonce, relayer) =
+                p.parse::<(String, String, String, String)>()?;
             let user_id = crate::try_into_ss58(user_id)?;
             let signature = crate::hexstr_to_vec(&signature)?;
             let nonce = crate::hexstr_to_vec(&nonce)?;
-            futures::executor::block_on(async {
-                ctx.verify_trading_signature(&[], &user_id, &signature, &nonce)
-                    .await
-            })?;
+            ctx.verify_trading_signature(&[], &user_id, &signature, &nonce)
+                .await?;
+            let tx = ctx
+                .subscribers
+                .get(&format!("broker:{}", relayer))
+                .map(|b| b.value().clone())
+                .ok_or_else(|| anyhow::anyhow!("Broker not initialized."))?;
+            ctx.subscribers.insert(user_id, tx);
+            Ok(())
+        })
+        .unwrap();
+    module
+        .register_subscription("sub_trading", "", "unsub_trading", |p, mut sink, ctx| {
+            let (broker,) = p.parse::<(String,)>()?;
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
             tokio::spawn(async move {
                 loop {
@@ -142,16 +153,14 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
                         match sink.send(&v) {
                             Ok(true) => {}
                             Ok(false) => break,
-                            Err(e) => {
-                                log::error!("Unable to serialize the msg into jsonrpc, {:?}", e)
-                            }
+                            Err(e) => log::error!("Unable to serialize msg, {:?}", e),
                         }
                     } else {
                         break;
                     }
                 }
             });
-            ctx.subscribers.insert(user_id, tx);
+            ctx.subscribers.insert(format!("broker:{}", broker), tx);
             Ok(())
         })
         .unwrap();

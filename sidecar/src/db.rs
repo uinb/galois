@@ -67,6 +67,7 @@ pub struct ClearingResult {
 #[derive(Clone, Serialize, Deserialize, Debug, Eq, PartialEq, Encode)]
 pub struct Order {
     order_id: u64,
+    user_id: String,
     symbol: Symbol,
     direction: u8,
     create_timestamp: u64,
@@ -83,6 +84,7 @@ impl From<(Symbol, DbOrder)> for Order {
     fn from((symbol, order): (Symbol, DbOrder)) -> Self {
         Self {
             order_id: order.f_id,
+            user_id: order.f_user_id,
             symbol,
             direction: order.f_order_type.try_into().expect("only 0 and 1;qed"),
             create_timestamp: order.f_timestamp.timestamp().to_u64().unwrap(),
@@ -145,6 +147,7 @@ pub async fn save_trading_command(
     cmd: TradingCommand,
     _relayer: &String,
 ) -> anyhow::Result<u64> {
+    // TODO
     let fix_cmd_signature = "169d796416023558ef5c2580ef38c1c4f43f3c06f76ceab2412e6fc5d486a36eb0a9cb808dd4eb72f6264b4113c1a722479be205edc84d6ac5403d33d09b0087";
     let fix_cmd_nonce = 40020u32;
     let direction = cmd.get_direction_if_trade();
