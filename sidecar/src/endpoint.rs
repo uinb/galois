@@ -146,6 +146,7 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
         .register_subscription("sub_trading", "", "unsub_trading", |p, mut sink, ctx| {
             let (broker,) = p.parse::<(String,)>()?;
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            sink.accept()?;
             tokio::spawn(async move {
                 loop {
                     if let Some(msg) = rx.recv().await {
