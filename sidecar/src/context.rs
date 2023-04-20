@@ -65,14 +65,15 @@ impl Context {
             })
         })
         .unwrap();
+        log::debug!("Loading marketings from backend: {:?}", markets);
         markets.iter().for_each(|e| {
             let pool = db.clone();
             let sub = subscribers.clone();
             let symbol = e.key().clone();
             let closed = e.value().0.clone();
-            tokio::spawn(
-                async move { legacy_clearing::update_order_task(sub, pool, symbol, closed) },
-            );
+            tokio::spawn(async move {
+                legacy_clearing::update_order_task(sub, pool, symbol, closed).await;
+            });
         });
         let conn = backend.clone();
         let started = markets.clone();
@@ -92,6 +93,7 @@ impl Context {
                                 let pool = pool.clone();
                                 tokio::spawn(async move {
                                     legacy_clearing::update_order_task(sub, pool, symbol, closed)
+                                        .await;
                                 });
                             }
                         }
