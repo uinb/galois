@@ -68,10 +68,10 @@ pub fn verify_ecdsa(sig: Vec<u8>, data: &str, mapping_addr: impl AsRef<str>) -> 
     .concat();
     let digest = sp_core::hashing::keccak_256(&wrapped_msg[..]);
     let pubkey = sp_io::crypto::secp256k1_ecdsa_recover(&sig.0, &digest)
-        .map_err(|_| anyhow!("Invalid ECDSA signature 1"))?;
+        .map_err(|_| anyhow!("Invalid ECDSA signature"))?;
     log::debug!(" metamask public === {}", hex::encode(pubkey));
     let addr = sp_io::hashing::keccak_256(pubkey.as_ref())[12..].to_vec();
-    log::debug!("res eth address{}", hex::encode(addr.clone()));
+    log::debug!("recovered eth address{}", hex::encode(addr.clone()));
     let addr = to_mapping_address(addr);
     if addr.to_ss58check() == mapping_addr.as_ref() {
         Ok(())
@@ -86,7 +86,7 @@ pub fn try_into_ss58(addr: String) -> anyhow::Result<String> {
         match addr.len() {
             32 => {
                 let addr = AccountId32::decode(&mut &addr[..])
-                    .map_err(|_| anyhow::anyhow!("Invalid address"))?;
+                    .map_err(|_| anyhow::anyhow!("Invalid substrate address"))?;
                 Ok(addr.to_ss58check())
             }
             20 => {
