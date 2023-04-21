@@ -19,7 +19,8 @@ use parity_scale_codec::Encode;
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use sqlx::types::chrono::NaiveDateTime;
+use sqlx::types::chrono;
+use sqlx::types::chrono::{NaiveDateTime, Utc};
 use sqlx::{MySql, Pool, Row};
 use std::str::FromStr;
 use std::string::String;
@@ -61,7 +62,7 @@ pub struct ClearingResult {
     pub f_base_delta: Decimal,
     pub f_quote_charge: Decimal,
     pub f_base_charge: Decimal,
-    pub f_timestamp: NaiveDateTime,
+    pub f_timestamp: chrono::DateTime<Utc>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Eq, PartialEq, Encode)]

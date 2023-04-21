@@ -25,7 +25,8 @@ use hyper::{Body, Request, Response};
 use parity_scale_codec::{Decode, Encode};
 use rust_decimal::Decimal;
 use sp_core::crypto::{Pair as Crypto, Ss58Codec};
-use sqlx::{MySql, Pool};
+use sqlx::mysql::MySqlConnectOptions;
+use sqlx::{ConnectOptions, MySql, Pool};
 use std::{
     collections::BTreeSet,
     error::Error,
@@ -54,7 +55,12 @@ impl Context {
         let backend = BackendConnection::new(config.prover);
         let conn = backend.clone();
         let x25519 = futures::executor::block_on(async move { conn.get_x25519().await }).unwrap();
-        let db = futures::executor::block_on(async { Pool::connect(&config.db).await }).unwrap();
+        let db = futures::executor::block_on(async {
+            let mut option: MySqlConnectOptions = config.db.parse()?;
+            option.disable_statement_logging();
+            Pool::connect_with(option).await
+        })
+        .unwrap();
         let subscribers = Arc::new(DashMap::default());
         let conn = backend.clone();
         let markets = futures::executor::block_on(async move {

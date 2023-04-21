@@ -30,7 +30,7 @@ pub async fn update_order_task(
     symbol_closed: Arc<AtomicBool>,
 ) {
     let max_cr_sql = format!(
-        "select max(f_id) from t_clearing_result_{}_{}",
+        "select CAST(COALESCE(max(f_last_cr),0) as UNSIGNED) from t_order_{}_{}",
         symbol.0, symbol.1
     );
     let mut recent_cr: u64 = sqlx::query_scalar(&max_cr_sql)
@@ -38,7 +38,7 @@ pub async fn update_order_task(
         .await
         .expect("init sql failed");
     let fetch_sql = format!(
-        "select * from t_clearing_result_{}_{} where f_event_id > ? limit 1000",
+        "select * from t_clearing_result_{}_{} where f_id > ? limit 1000",
         symbol.0, symbol.1
     );
     let select_sql = format!(
@@ -51,9 +51,9 @@ f_status=?,
 f_base_fee=?,
 f_quote_fee=?,
 f_last_cr=?,
-f_matched_base_amount=?
-f_matched_quote_amount=?,
-where f_id=? and f_version=?",
+f_matched_base_amount=?,
+f_matched_quote_amount=?
+where f_id=? and f_version=? and f_last_cr<?",
         symbol.0, symbol.1
     );
     loop {
@@ -69,8 +69,9 @@ where f_id=? and f_version=?",
                 if v.is_empty() {
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 } else {
+                    log::debug!("found clearing_result:{}", v.len());
                     for clear in v {
-                        let order = match sqlx::query_as::<_, DbOrder>(&select_sql)
+                        let mut order = match sqlx::query_as::<_, DbOrder>(&select_sql)
                             .bind(clear.f_order_id)
                             .fetch_one(&pool)
                             .await
@@ -78,20 +79,24 @@ where f_id=? and f_version=?",
                             Ok(order) => order,
                             Err(_) => break,
                         };
-                        let base_fee = order.f_base_fee + clear.f_base_charge.abs();
-                        let quote_fee = order.f_quote_fee + clear.f_quote_charge.abs();
-                        let matched_base = order.f_matched_base_amount + clear.f_base_delta.abs();
-                        let matched_quote =
+                        order.f_base_fee = order.f_base_fee + clear.f_base_charge.abs();
+                        order.f_quote_fee = order.f_quote_fee + clear.f_quote_charge.abs();
+                        order.f_matched_base_amount =
+                            order.f_matched_base_amount + clear.f_base_delta.abs();
+                        order.f_matched_quote_amount =
                             order.f_matched_quote_amount + clear.f_quote_delta.abs();
+                        order.f_status = clear.f_status;
+                        order.f_last_cr = clear.f_id;
                         match sqlx::query(&update_sql)
-                            .bind(clear.f_status)
-                            .bind(base_fee.to_string())
-                            .bind(quote_fee.to_string())
-                            .bind(clear.f_id)
-                            .bind(matched_base.to_string())
-                            .bind(matched_quote.to_string())
+                            .bind(order.f_status)
+                            .bind(order.f_base_fee)
+                            .bind(order.f_quote_fee)
+                            .bind(order.f_last_cr)
+                            .bind(order.f_matched_base_amount)
+                            .bind(order.f_matched_quote_amount)
                             .bind(order.f_id)
                             .bind(order.f_version)
+                            .bind(order.f_last_cr)
                             .execute(&pool)
                             .await
                         {
@@ -104,13 +109,17 @@ where f_id=? and f_version=?",
                                     Ok(())
                                 };
                                 match r {
-                                    Err(_) => {
+                                    Err(e) => {
+                                        log::debug!("send order to channel error: {}", e);
                                         subscribers.remove(&user_id);
                                     }
                                     Ok(_) => {}
                                 }
                             }
-                            Err(_) => break,
+                            Err(e) => {
+                                log::debug!("update order error:{:?}", e);
+                                break;
+                            }
                         }
                     }
                 }
