@@ -14,7 +14,7 @@
 
 use crate::{
     context::{Context, Session},
-    db::{self, Order},
+    db,
 };
 use galois_engine::core::*;
 use jsonrpsee::RpcModule;
@@ -152,7 +152,7 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
                     if let Some((user_id, order)) = rx.recv().await {
                         let v = serde_json::json!({
                             "user_id": user_id,
-                            "order": crate::to_hexstr(&Order::encode(&order)),
+                            "order": crate::to_hexstr(order),
                         });
                         match sink.send(&v) {
                             Ok(true) => {}
