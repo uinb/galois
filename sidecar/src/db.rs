@@ -65,7 +65,6 @@ pub struct ClearingResult {
 #[derive(Clone, Serialize, Deserialize, Debug, Eq, PartialEq, Encode)]
 pub struct Order {
     order_id: u64,
-    user_id: String,
     symbol: Symbol,
     direction: u8,
     create_timestamp: u64,
@@ -82,7 +81,6 @@ impl From<(Symbol, DbOrder)> for Order {
     fn from((symbol, order): (Symbol, DbOrder)) -> Self {
         Self {
             order_id: order.f_id,
-            user_id: order.f_user_id,
             symbol,
             direction: order.f_order_type.try_into().expect("only 0 and 1;qed"),
             create_timestamp: order.f_timestamp.timestamp().to_u64().unwrap(),

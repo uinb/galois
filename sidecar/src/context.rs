@@ -45,7 +45,7 @@ pub struct Context {
     pub backend: BackendConnection,
     pub x25519: StaticSecret,
     pub db: Pool<MySql>,
-    pub subscribers: Arc<DashMap<String, UnboundedSender<Order>>>,
+    pub subscribers: Arc<DashMap<String, UnboundedSender<(String, Order)>>>,
     pub session_nonce: Arc<DashMap<String, Session>>,
     pub markets: Arc<DashMap<Symbol, (Arc<AtomicBool>, OffchainSymbol)>>,
 }

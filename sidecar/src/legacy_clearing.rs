@@ -24,7 +24,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 /// let's kill this stupid code asap
 pub async fn update_order_task(
-    subscribers: Arc<DashMap<String, UnboundedSender<Order>>>,
+    subscribers: Arc<DashMap<String, UnboundedSender<(String, Order)>>>,
     pool: Pool<MySql>,
     symbol: Symbol,
     symbol_closed: Arc<AtomicBool>,
@@ -46,14 +46,15 @@ pub async fn update_order_task(
         symbol.0, symbol.1
     );
     let update_sql = format!(
-        "update t_order_{}_{} set f_version=f_version+1,
-f_status=?,
-f_base_fee=?,
-f_quote_fee=?,
-f_last_cr=?,
-f_matched_base_amount=?,
-f_matched_quote_amount=?
-where f_id=? and f_version=? and f_last_cr<?",
+        "update t_order_{}_{} set
+            f_version=f_version+1,
+            f_status=?,
+            f_base_fee=?,
+            f_quote_fee=?,
+            f_last_cr=?,
+            f_matched_base_amount=?,
+            f_matched_quote_amount=?
+        where f_id=? and f_version=? and f_last_cr<?",
         symbol.0, symbol.1
     );
     loop {
@@ -104,7 +105,7 @@ where f_id=? and f_version=? and f_last_cr<?",
                                 recent_cr = clear.f_id;
                                 let user_id = order.f_user_id.clone();
                                 let r = if let Some(u) = subscribers.get(&user_id) {
-                                    u.value().send((symbol, order).into())
+                                    u.value().send((user_id.clone(), (symbol, order).into()))
                                 } else {
                                     Ok(())
                                 };

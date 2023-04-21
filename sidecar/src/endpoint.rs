@@ -149,8 +149,11 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
             sink.accept()?;
             tokio::spawn(async move {
                 loop {
-                    if let Some(msg) = rx.recv().await {
-                        let v = crate::to_hexstr(&Order::encode(&msg));
+                    if let Some((user_id, order)) = rx.recv().await {
+                        let v = serde_json::json!({
+                            "user_id": user_id,
+                            "order": crate::to_hexstr(&Order::encode(&order)),
+                        });
                         match sink.send(&v) {
                             Ok(true) => {}
                             Ok(false) => break,
