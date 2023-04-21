@@ -150,7 +150,7 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
             tokio::spawn(async move {
                 loop {
                     if let Some(msg) = rx.recv().await {
-                        let v = hex::encode(&Order::encode(&msg));
+                        let v = crate::to_hexstr(&Order::encode(&msg));
                         match sink.send(&v) {
                             Ok(true) => {}
                             Ok(false) => break,

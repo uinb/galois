@@ -13,17 +13,13 @@
 // limitations under the License.
 
 use crate::endpoint::TradingCommand;
-use galois_engine::cmd::CANCEL;
-use galois_engine::{core::*, input::Command};
+use galois_engine::{cmd::CANCEL, core::*, input::Command};
 use parity_scale_codec::Encode;
-use rust_decimal::prelude::ToPrimitive;
-use rust_decimal::Decimal;
+use rust_decimal::{prelude::ToPrimitive, Decimal};
 use serde::{Deserialize, Serialize};
-use sqlx::types::chrono;
-use sqlx::types::chrono::{NaiveDateTime, Utc};
+use sqlx::types::chrono::{DateTime, Local, NaiveDateTime};
 use sqlx::{MySql, Pool, Row};
 use std::str::FromStr;
-use std::string::String;
 
 #[derive(Clone, Debug, Eq, PartialEq, sqlx::FromRow)]
 pub struct DbOrder {
@@ -62,7 +58,8 @@ pub struct ClearingResult {
     pub f_base_delta: Decimal,
     pub f_quote_charge: Decimal,
     pub f_base_charge: Decimal,
-    pub f_timestamp: chrono::DateTime<Utc>,
+    // FIXME it is hard to fix - -
+    pub f_timestamp: DateTime<Local>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Eq, PartialEq, Encode)]
