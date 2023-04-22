@@ -32,22 +32,22 @@ pub struct CustomRpcError;
 
 impl CustomRpcError {
     pub fn user_not_found() -> Error {
-        rpc_error!(-32001, "user not found")
+        rpc_error!(-321011, "user not found")
     }
 
     pub fn order_not_exist() -> Error {
-        rpc_error!(-32002, "order not exist")
+        rpc_error!(-32012, "order not exist")
     }
 
     pub fn nonce_is_expired( nonce: u32) -> Error {
-        rpc_error!(-32003, format!("nonce {} is expired", nonce))
+        rpc_error!(-32013, format!("nonce {} is expired", nonce))
     }
 
     pub fn nonce_is_occupied(nonce: u32) -> Error {
-        rpc_error!(-32004, format!("nonce {} is occupied", nonce))
+        rpc_error!(-32014, format!("nonce {} is occupied", nonce))
     }
 
     pub fn invalid_signature() -> Error {
-        rpc_error!(-32005, "invalid signature")
+        rpc_error!(-32015, "invalid signature")
     }
 }

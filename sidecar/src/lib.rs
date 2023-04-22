@@ -31,6 +31,7 @@ pub use sp_core::sr25519::{
     Pair as Sr25519Pair, Public as Sr25519Public, Signature as Sr25519Signature,
 };
 use sp_core::{crypto::Ss58Codec, Pair};
+use crate::errors::CustomRpcError;
 
 pub fn hexstr_to_vec(h: impl AsRef<str>) -> anyhow::Result<Vec<u8>> {
     hex::decode(h.as_ref().trim_start_matches("0x")).map_err(|_| anyhow::anyhow!("invalid hex str"))
@@ -50,7 +51,7 @@ pub fn verify_sr25519(sig: Vec<u8>, data: &[u8], ss58: impl AsRef<str>) -> anyho
     if verified {
         Ok(())
     } else {
-        Err(anyhow::anyhow!("Invalid signature"))
+        Err(anyhow!(CustomRpcError::invalid_signature()))
     }
 }
 
@@ -77,7 +78,7 @@ pub fn verify_ecdsa(sig: Vec<u8>, data: &str, mapping_addr: impl AsRef<str>) -> 
     if addr.to_ss58check() == mapping_addr.as_ref() {
         Ok(())
     } else {
-        Err(anyhow::anyhow!("Invalid ECDSA signature"))
+        Err(anyhow::anyhow!(CustomRpcError::invalid_signature()))
     }
 }
 
@@ -108,13 +109,24 @@ pub fn to_mapping_address(address: Vec<u8>) -> AccountId32 {
 }
 
 
+pub fn th() -> anyhow::Result<()> {
+    Err(anyhow!(CustomRpcError::invalid_signature()))
+}
 #[test]
 pub fn test_verify_ecdsa() {
-    /* let sig = hex::decode("baf92cd949d5de01f13fc6b7dfed13fe8dccf5fc73d4a52e38707f3616f3247f5ca737bd10a7452898f11cfdbc33714795a15087208321d66a9b9a06d0a861fb1b").unwrap();
+  /*  /* let sig = hex::decode("baf92cd949d5de01f13fc6b7dfed13fe8dccf5fc73d4a52e38707f3616f3247f5ca737bd10a7452898f11cfdbc33714795a15087208321d66a9b9a06d0a861fb1b").unwrap();
     let msg = "2b1197e72210c676be4ab80c71b74e74dea7e63599c564889794bf0e05651877";
     let map_addr = "xxx";
     verify_ecdsa(sig, msg, map_addr);*/
     let v = hex::decode("847Dc5Ea89c407f1416f23D87B40CE317798E133").unwrap();
     let addr = to_mapping_address(v);
-    println!("{}", addr.to_ss58check());
+    println!("{}", addr.to_ss58check());*/
+    let r = th().map_err(|e|{
+        let x = e.downcast::<String>();
+        if let Ok(e ) = x {
+            println!("---- {:?}", e);
+        }
+
+
+    });
 }
