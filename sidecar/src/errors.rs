@@ -32,7 +32,7 @@ pub struct CustomRpcError;
 
 impl CustomRpcError {
     pub fn user_not_found() -> Error {
-        rpc_error!(-321011, "user not found")
+        rpc_error!(-32011, "user not found")
     }
 
     pub fn order_not_exist() -> Error {
