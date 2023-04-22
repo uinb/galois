@@ -12,13 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{
-    backend::BackendConnection,
-    config::Config,
-    db::{self, Order},
-    endpoint::TradingCommand,
-    legacy_clearing, AccountId32, Sr25519Pair, Sr25519Public, Sr25519Signature,
-};
+use crate::{backend::BackendConnection, config::Config, db::{self, Order}, endpoint::TradingCommand, legacy_clearing, AccountId32, Sr25519Pair, Sr25519Public, Sr25519Signature};
 use dashmap::DashMap;
 use galois_engine::{core::*, fusotao::OffchainSymbol};
 use hyper::{Body, Request, Response};
@@ -40,6 +34,7 @@ use std::{
 use tokio::sync::{mpsc::UnboundedSender, Mutex};
 use tower::{Layer, Service};
 use x25519_dalek::StaticSecret;
+use crate::errors::CustomRpcError;
 
 pub struct Context {
     pub backend: BackendConnection,
@@ -130,7 +125,7 @@ impl Context {
         let session = self
             .session_nonce
             .get(user_id)
-            .ok_or_else(|| anyhow::anyhow!("user not found"))?;
+            .ok_or_else(|| CustomRpcError::user_not_found())?;
         Ok(session.value().get_nonce().await)
     }
 
@@ -146,7 +141,7 @@ impl Context {
         let session = self
             .session_nonce
             .get(user_id)
-            .ok_or(anyhow::anyhow!("user not found"))?;
+            .ok_or(CustomRpcError::user_not_found())?;
         session.value().try_occupy_nonce(n).await?;
         let key = self.get_trading_key(user_id).await?;
         let mut to_be_signed = vec![];
@@ -157,7 +152,7 @@ impl Context {
         let hash = sp_core::blake2_256(&to_be_signed);
         log::debug!("user sign content: {}", hex::encode(&sig));
         log::debug!("server blake2 content: {}", hex::encode(&hash));
-        anyhow::ensure!(hash.as_slice() == sig, "invalid signature");
+        anyhow::ensure!(hash.as_slice() == sig, CustomRpcError::invalid_signature());
         Ok(())
     }
 
@@ -172,7 +167,7 @@ impl Context {
                     .backend
                     .get_order((*base, *quote), *order_id)
                     .await?
-                    .ok_or(anyhow::anyhow!("order not exists"))?;
+                    .ok_or(CustomRpcError::order_not_exist())?;
                 if format!("{:?}", order.user) != user_id {
                     Err(anyhow::anyhow!("invalid order id"))
                 } else {
@@ -351,9 +346,9 @@ impl Session {
     pub async fn try_occupy_nonce(&self, nonce: u32) -> anyhow::Result<()> {
         let mut occupied_nonce = self.occupied_nonce.lock().await;
         if occupied_nonce.contains(&nonce) {
-            Err(anyhow::anyhow!("Nonce {} is occupied", nonce))
+            Err(CustomRpcError::nonce_is_occupied(nonce))?
         } else if *occupied_nonce.first().expect("at least min;qed") > nonce {
-            Err(anyhow::anyhow!("Nonce {} is expired", nonce))
+            Err(CustomRpcError::nonce_is_expired(nonce))?
         } else {
             if occupied_nonce.len() > 100 {
                 let evict = *occupied_nonce.first().expect("at least min;qed");

@@ -21,6 +21,7 @@ pub mod context;
 mod db;
 pub mod endpoint;
 mod legacy_clearing;
+mod errors;
 
 use anyhow::anyhow;
 use parity_scale_codec::{Decode, Encode};
@@ -105,6 +106,7 @@ pub fn to_mapping_address(address: Vec<u8>) -> AccountId32 {
         .using_encoded(sp_core::hashing::blake2_256);
     Decode::decode(&mut h.as_ref()).expect("32 bytes; qed")
 }
+
 
 #[test]
 pub fn test_verify_ecdsa() {
