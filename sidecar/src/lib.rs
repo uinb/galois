@@ -107,26 +107,3 @@ pub fn to_mapping_address(address: Vec<u8>) -> AccountId32 {
         .using_encoded(sp_core::hashing::blake2_256);
     Decode::decode(&mut h.as_ref()).expect("32 bytes; qed")
 }
-
-
-pub fn th() -> anyhow::Result<()> {
-    Err(anyhow!(CustomRpcError::invalid_signature()))
-}
-#[test]
-pub fn test_verify_ecdsa() {
-  /*  /* let sig = hex::decode("baf92cd949d5de01f13fc6b7dfed13fe8dccf5fc73d4a52e38707f3616f3247f5ca737bd10a7452898f11cfdbc33714795a15087208321d66a9b9a06d0a861fb1b").unwrap();
-    let msg = "2b1197e72210c676be4ab80c71b74e74dea7e63599c564889794bf0e05651877";
-    let map_addr = "xxx";
-    verify_ecdsa(sig, msg, map_addr);*/
-    let v = hex::decode("847Dc5Ea89c407f1416f23D87B40CE317798E133").unwrap();
-    let addr = to_mapping_address(v);
-    println!("{}", addr.to_ss58check());*/
-    let r = th().map_err(|e|{
-        let x = e.downcast::<String>();
-        if let Ok(e ) = x {
-            println!("---- {:?}", e);
-        }
-
-
-    });
-}

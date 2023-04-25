@@ -1,6 +1,5 @@
 
 use jsonrpsee::core::Error;
-use crate::{rpc_error, error_msg};
 
 #[macro_export]
 macro_rules! error_msg {
