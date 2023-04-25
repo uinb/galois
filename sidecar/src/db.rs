@@ -13,16 +13,13 @@
 // limitations under the License.
 
 use crate::endpoint::TradingCommand;
-use galois_engine::cmd::CANCEL;
-use galois_engine::{core::*, input::Command};
+use galois_engine::{cmd::CANCEL, core::*, input::Command};
 use parity_scale_codec::Encode;
-use rust_decimal::prelude::ToPrimitive;
-use rust_decimal::Decimal;
+use rust_decimal::{prelude::ToPrimitive, Decimal};
 use serde::{Deserialize, Serialize};
-use sqlx::types::chrono::NaiveDateTime;
+use sqlx::types::chrono::{DateTime, Local, NaiveDateTime};
 use sqlx::{MySql, Pool, Row};
 use std::str::FromStr;
-use std::string::String;
 
 #[derive(Clone, Debug, Eq, PartialEq, sqlx::FromRow)]
 pub struct DbOrder {
@@ -61,7 +58,8 @@ pub struct ClearingResult {
     pub f_base_delta: Decimal,
     pub f_quote_charge: Decimal,
     pub f_base_charge: Decimal,
-    pub f_timestamp: NaiveDateTime,
+    // FIXME it is hard to fix - -
+    pub f_timestamp: DateTime<Local>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Eq, PartialEq, Encode)]
@@ -145,6 +143,7 @@ pub async fn save_trading_command(
     cmd: TradingCommand,
     _relayer: &String,
 ) -> anyhow::Result<u64> {
+    // TODO
     let fix_cmd_signature = "169d796416023558ef5c2580ef38c1c4f43f3c06f76ceab2412e6fc5d486a36eb0a9cb808dd4eb72f6264b4113c1a722479be205edc84d6ac5403d33d09b0087";
     let fix_cmd_nonce = 40020u32;
     let direction = cmd.get_direction_if_trade();

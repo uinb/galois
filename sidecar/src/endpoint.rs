@@ -14,7 +14,7 @@
 
 use crate::{
     context::{Context, Session},
-    db::{self, Order},
+    db,
 };
 use galois_engine::core::*;
 use jsonrpsee::RpcModule;
@@ -33,7 +33,7 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
             let signature = crate::hexstr_to_vec(&signature)?;
             let nonce = crate::hexstr_to_vec(&nonce)?;
             ctx.verify_trading_signature(&symbol, &user_id, &signature, &nonce)
-                .await?;
+                .await.map_err(handle_error)?;
             let symbol = Symbol::decode(&mut symbol.as_slice())
                 .map_err(|_| anyhow::anyhow!("invalid symbol"))?;
             db::query_pending_orders(&ctx.db, symbol, &user_id)
@@ -43,7 +43,7 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
                         .map(|o| crate::to_hexstr(o))
                         .collect::<Vec<_>>()
                 })
-                .map_err(|e| e.into())
+                .map_err(handle_error)
         })
         .unwrap();
     module
@@ -53,7 +53,7 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
             let signature = crate::hexstr_to_vec(&signature)?;
             let nonce = crate::hexstr_to_vec(&nonce)?;
             ctx.verify_trading_signature(&[], &user_id, &signature, &nonce)
-                .await?;
+                .await.map_err(handle_error)?;
             ctx.backend
                 .get_account(&user_id)
                 .await
@@ -62,7 +62,7 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
                         .map(|(k, v)| crate::to_hexstr((k, v)))
                         .collect::<Vec<_>>()
                 })
-                .map_err(|e| e.into())
+                .map_err(handle_error)
         })
         .unwrap();
     module
@@ -76,12 +76,12 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
             let cmd = TradingCommand::decode(&mut hex.clone().as_slice())
                 .map_err(|_| anyhow::anyhow!("Invalid command"))?;
             ctx.verify_trading_signature(&hex, &user_id, &signature, &nonce)
-                .await?;
-            ctx.validate_cmd(&user_id, &cmd).await?;
+                .await.map_err(handle_error)?;
+            ctx.validate_cmd(&user_id, &cmd).await.map_err(handle_error)?;
             db::save_trading_command(&ctx.db, user_id, cmd, &relayer)
                 .await
                 .map(|id| crate::to_hexstr(id))
-                .map_err(|e| e.into())
+                .map_err(handle_error)
         })
         .unwrap();
     module
@@ -98,9 +98,9 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
             let raw_sig = crate::hexstr_to_vec(&sig)?;
             if raw_sig.len() == 64 {
                 let message = format!("<Bytes>{}</Bytes>", user_x25519_pub);
-                crate::verify_sr25519(raw_sig, message.into_bytes().as_ref(), &user_id)?;
+                crate::verify_sr25519(raw_sig, message.into_bytes().as_ref(), &user_id).map_err(handle_error)?;
             } else {
-                crate::verify_ecdsa(raw_sig, &hex::encode(&user_x25519_pub_vec), &user_id)?;
+                crate::verify_ecdsa(raw_sig, &hex::encode(&user_x25519_pub_vec), &user_id).map_err(handle_error)?;
             }
             let user_x25519_pub: [u8; 32] = user_x25519_pub_vec
                 .try_into()
@@ -121,37 +121,50 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
             ctx.get_user_nonce(&user_id)
                 .await
                 .map(|n| crate::to_hexstr(n))
-                .map_err(|e| e.into())
+                .map_err(handle_error)
+        })
+        .unwrap();
+    module
+        .register_async_method("append_user", |p, ctx| async move {
+            let (user_id, signature, nonce, relayer) =
+                p.parse::<(String, String, String, String)>()?;
+            let user_id = crate::try_into_ss58(user_id)?;
+            let signature = crate::hexstr_to_vec(&signature)?;
+            let nonce = crate::hexstr_to_vec(&nonce)?;
+            ctx.verify_trading_signature(&[], &user_id, &signature, &nonce)
+                .await.map_err(handle_error)?;
+            let tx = ctx
+                .subscribers
+                .get(&format!("broker:{}", relayer))
+                .map(|b| b.value().clone())
+                .ok_or_else(|| anyhow::anyhow!("Broker not initialized."))?;
+            ctx.subscribers.insert(user_id, tx);
+            Ok(())
         })
         .unwrap();
     module
         .register_subscription("sub_trading", "", "unsub_trading", |p, mut sink, ctx| {
-            let (user_id, signature, nonce) = p.parse::<(String, String, String)>()?;
-            let user_id = crate::try_into_ss58(user_id)?;
-            let signature = crate::hexstr_to_vec(&signature)?;
-            let nonce = crate::hexstr_to_vec(&nonce)?;
-            futures::executor::block_on(async {
-                ctx.verify_trading_signature(&[], &user_id, &signature, &nonce)
-                    .await
-            })?;
+            let (broker,) = p.parse::<(String,)>()?;
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            sink.accept()?;
             tokio::spawn(async move {
                 loop {
-                    if let Some(msg) = rx.recv().await {
-                        let v = hex::encode(&Order::encode(&msg));
+                    if let Some((user_id, order)) = rx.recv().await {
+                        let v = serde_json::json!({
+                            "user_id": user_id,
+                            "order": crate::to_hexstr(order),
+                        });
                         match sink.send(&v) {
                             Ok(true) => {}
                             Ok(false) => break,
-                            Err(e) => {
-                                log::error!("Unable to serialize the msg into jsonrpc, {:?}", e)
-                            }
+                            Err(e) => log::error!("Unable to serialize msg, {:?}", e),
                         }
                     } else {
                         break;
                     }
                 }
             });
-            ctx.subscribers.insert(user_id, tx);
+            ctx.subscribers.insert(format!("broker:{}", broker), tx);
             Ok(())
         })
         .unwrap();
@@ -187,5 +200,13 @@ impl TradingCommand {
             TradingCommand::Bid { .. } => Some(AskOrBid::Bid.into()),
             _ => None,
         }
+    }
+}
+
+fn handle_error(e: anyhow::Error) -> jsonrpsee::core::Error{
+    let error = e.downcast::<jsonrpsee::core::Error>();
+    match error {
+        Ok(e) => {e}
+        Err(e) => {e.into()}
     }
 }

@@ -12,20 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{
-    backend::BackendConnection,
-    config::Config,
-    db::{self, Order},
-    endpoint::TradingCommand,
-    legacy_clearing, AccountId32, Sr25519Pair, Sr25519Public, Sr25519Signature,
-};
+use crate::{backend::BackendConnection, config::Config, db::{self, Order}, endpoint::TradingCommand, legacy_clearing, AccountId32, Sr25519Pair, Sr25519Public, Sr25519Signature};
 use dashmap::DashMap;
 use galois_engine::{core::*, fusotao::OffchainSymbol};
 use hyper::{Body, Request, Response};
 use parity_scale_codec::{Decode, Encode};
 use rust_decimal::Decimal;
 use sp_core::crypto::{Pair as Crypto, Ss58Codec};
-use sqlx::{MySql, Pool};
+use sqlx::mysql::MySqlConnectOptions;
+use sqlx::{ConnectOptions, MySql, Pool};
 use std::{
     collections::BTreeSet,
     error::Error,
@@ -39,12 +34,13 @@ use std::{
 use tokio::sync::{mpsc::UnboundedSender, Mutex};
 use tower::{Layer, Service};
 use x25519_dalek::StaticSecret;
+use crate::errors::CustomRpcError;
 
 pub struct Context {
     pub backend: BackendConnection,
     pub x25519: StaticSecret,
     pub db: Pool<MySql>,
-    pub subscribers: Arc<DashMap<String, UnboundedSender<Order>>>,
+    pub subscribers: Arc<DashMap<String, UnboundedSender<(String, Order)>>>,
     pub session_nonce: Arc<DashMap<String, Session>>,
     pub markets: Arc<DashMap<Symbol, (Arc<AtomicBool>, OffchainSymbol)>>,
 }
@@ -54,7 +50,12 @@ impl Context {
         let backend = BackendConnection::new(config.prover);
         let conn = backend.clone();
         let x25519 = futures::executor::block_on(async move { conn.get_x25519().await }).unwrap();
-        let db = futures::executor::block_on(async { Pool::connect(&config.db).await }).unwrap();
+        let db = futures::executor::block_on(async {
+            let mut option: MySqlConnectOptions = config.db.parse()?;
+            option.disable_statement_logging();
+            Pool::connect_with(option).await
+        })
+        .unwrap();
         let subscribers = Arc::new(DashMap::default());
         let conn = backend.clone();
         let markets = futures::executor::block_on(async move {
@@ -65,14 +66,15 @@ impl Context {
             })
         })
         .unwrap();
+        log::debug!("Loading marketings from backend: {:?}", markets);
         markets.iter().for_each(|e| {
             let pool = db.clone();
             let sub = subscribers.clone();
             let symbol = e.key().clone();
             let closed = e.value().0.clone();
-            tokio::spawn(
-                async move { legacy_clearing::update_order_task(sub, pool, symbol, closed) },
-            );
+            tokio::spawn(async move {
+                legacy_clearing::update_order_task(sub, pool, symbol, closed).await;
+            });
         });
         let conn = backend.clone();
         let started = markets.clone();
@@ -92,6 +94,7 @@ impl Context {
                                 let pool = pool.clone();
                                 tokio::spawn(async move {
                                     legacy_clearing::update_order_task(sub, pool, symbol, closed)
+                                        .await;
                                 });
                             }
                         }
@@ -122,7 +125,7 @@ impl Context {
         let session = self
             .session_nonce
             .get(user_id)
-            .ok_or_else(|| anyhow::anyhow!("user not found"))?;
+            .ok_or_else(|| CustomRpcError::user_not_found())?;
         Ok(session.value().get_nonce().await)
     }
 
@@ -138,7 +141,7 @@ impl Context {
         let session = self
             .session_nonce
             .get(user_id)
-            .ok_or(anyhow::anyhow!("user not found"))?;
+            .ok_or(CustomRpcError::user_not_found())?;
         session.value().try_occupy_nonce(n).await?;
         let key = self.get_trading_key(user_id).await?;
         let mut to_be_signed = vec![];
@@ -149,7 +152,7 @@ impl Context {
         let hash = sp_core::blake2_256(&to_be_signed);
         log::debug!("user sign content: {}", hex::encode(&sig));
         log::debug!("server blake2 content: {}", hex::encode(&hash));
-        anyhow::ensure!(hash.as_slice() == sig, "invalid signature");
+        anyhow::ensure!(hash.as_slice() == sig, CustomRpcError::invalid_signature());
         Ok(())
     }
 
@@ -164,7 +167,7 @@ impl Context {
                     .backend
                     .get_order((*base, *quote), *order_id)
                     .await?
-                    .ok_or(anyhow::anyhow!("order not exists"))?;
+                    .ok_or(CustomRpcError::order_not_exist())?;
                 if format!("{:?}", order.user) != user_id {
                     Err(anyhow::anyhow!("invalid order id"))
                 } else {
@@ -269,8 +272,8 @@ where
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
     type Response = S::Response;
 
-    fn poll_ready(&mut self, _cx: &mut TaskCtx<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
+    fn poll_ready(&mut self, cx: &mut TaskCtx<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx).map_err(|e| e.into())
     }
 
     fn call(&mut self, req: Request<Body>) -> Self::Future {
@@ -343,9 +346,9 @@ impl Session {
     pub async fn try_occupy_nonce(&self, nonce: u32) -> anyhow::Result<()> {
         let mut occupied_nonce = self.occupied_nonce.lock().await;
         if occupied_nonce.contains(&nonce) {
-            Err(anyhow::anyhow!("Nonce {} is occupied", nonce))
+            Err(CustomRpcError::nonce_is_occupied(nonce))?
         } else if *occupied_nonce.first().expect("at least min;qed") > nonce {
-            Err(anyhow::anyhow!("Nonce {} is expired", nonce))
+            Err(CustomRpcError::nonce_is_expired(nonce))?
         } else {
             if occupied_nonce.len() > 100 {
                 let evict = *occupied_nonce.first().expect("at least min;qed");

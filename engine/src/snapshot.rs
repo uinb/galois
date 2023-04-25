@@ -70,7 +70,9 @@ pub fn load() -> anyhow::Result<(u64, core::Data)> {
                 event_id,
                 event_id + 1
             );
-            Ok((event_id + 1, core::Data::from_raw(fs::File::open(f)?)?))
+            let data = core::Data::from_raw(fs::File::open(f)?)?;
+            print_symbols(&data);
+            Ok((event_id + 1, data))
         }
         None => match config::C.sequence.enable_from_genesis {
             true => Ok((1, core::Data::new())),
@@ -78,6 +80,20 @@ pub fn load() -> anyhow::Result<(u64, core::Data)> {
                 "missing snapshot, add `enable_from_genesis` to force to start"
             )),
         },
+    }
+}
+
+fn print_symbols(data: &core::Data) {
+    for k in &data.orderbooks {
+        log::info!(
+            "base:{}, quote:{}, base_scale:{}, quote_scale: {}, minbase:{}, minquote: {}",
+            k.0 .0,
+            k.0 .1,
+            k.1.base_scale,
+            k.1.quote_scale,
+            k.1.min_amount,
+            k.1.min_vol
+        );
     }
 }
 

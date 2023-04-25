@@ -29,6 +29,8 @@ async fn start() -> anyhow::Result<()> {
     let server = jsonrpsee::server::ServerBuilder::new()
         .ws_only()
         .set_middleware(builder)
+        .max_connections(10000)
+        .max_subscriptions_per_connection(1024)
         .build(bind_addr.parse::<std::net::SocketAddr>()?)
         .await?;
     server.start(endpoint::export_rpc(context))?.stopped().await;
