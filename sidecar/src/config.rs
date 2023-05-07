@@ -35,8 +35,6 @@ impl Config {
     fn decrypt(&mut self, key: &str) -> anyhow::Result<()> {
         use magic_crypt::MagicCryptTrait;
         let mc = magic_crypt::new_magic_crypt!(key, 64);
-        let dec = mc.decrypt_base64_to_string(&self.prover)?;
-        self.prover.replace_range(.., &dec);
         let dec = mc.decrypt_base64_to_string(&self.db)?;
         self.db.replace_range(.., &dec);
         Ok(())
@@ -46,8 +44,6 @@ impl Config {
     fn encrypt(&mut self, key: &str) -> anyhow::Result<()> {
         use magic_crypt::MagicCryptTrait;
         let mc = magic_crypt::new_magic_crypt!(key, 64);
-        let enc = mc.encrypt_str_to_base64(&self.prover);
-        self.prover.replace_range(.., &enc);
         let enc = mc.encrypt_str_to_base64(&self.db);
         self.db.replace_range(.., &enc);
         Ok(())
