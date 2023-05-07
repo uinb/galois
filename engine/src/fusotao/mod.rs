@@ -145,6 +145,7 @@ pub enum OnchainToken {
     ERC20(Vec<u8>, Vec<u8>, u128, bool, u8),
     BEP20(Vec<u8>, Vec<u8>, u128, bool, u8),
     FND10(Vec<u8>, u128),
+    POLYGON(Vec<u8>, Vec<u8>, u128, bool, u8),
 }
 
 #[derive(Clone, Decode, Debug, Default)]

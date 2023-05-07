@@ -1,3 +1,7 @@
+# v0.5.1
+
+- enable polygon
+
 # v0.5.0-rc3
 
 - update sidecar
