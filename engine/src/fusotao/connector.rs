@@ -432,14 +432,14 @@ impl FusoConnector {
             let xt: sub_api::UncheckedExtrinsicV4<_> = sub_api::compose_extrinsic!(
                 api,
                 "Verifier",
-                "verify_compress",
+                "verify_compress_v2",
                 Self::compress_proofs(batch)
             );
             api.send_extrinsic(xt.hex_encode(), sub_api::XtStatus::InBlock)
                 .map_err(|e| anyhow!("[-] submitting proofs failed, {:?}", e))?
         } else {
             let xt: sub_api::UncheckedExtrinsicV4<_> =
-                sub_api::compose_extrinsic!(api, "Verifier", "verify", batch);
+                sub_api::compose_extrinsic!(api, "Verifier", "verify_v2", batch);
             api.send_extrinsic(xt.hex_encode(), sub_api::XtStatus::InBlock)
                 .map_err(|e| anyhow!("[-] submitting proofs failed, {:?}", e))?
         };

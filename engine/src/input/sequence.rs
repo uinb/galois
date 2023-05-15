@@ -64,6 +64,11 @@ impl TryInto<Event> for Sequence {
                     ask_or_bid: AskOrBid::try_from(self.cmd.cmd)?,
                     nonce: self.cmd.nonce.ok_or(anyhow!(""))?,
                     signature: hex::decode(self.cmd.signature.ok_or(anyhow!(""))?)?,
+                    broker: self
+                        .cmd
+                        .broker
+                        .map(|b| UserId::from_str(b.as_ref()))
+                        .transpose()?,
                 };
                 Ok(Event::Limit(self.id, cmd, self.timestamp))
             }
@@ -373,6 +378,7 @@ pub struct LimitCmd {
     pub ask_or_bid: AskOrBid,
     pub nonce: u32,
     pub signature: Vec<u8>,
+    pub broker: Option<UserId>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

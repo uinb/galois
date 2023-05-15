@@ -20,9 +20,10 @@ pub mod config;
 pub mod context;
 mod db;
 pub mod endpoint;
-mod legacy_clearing;
 mod errors;
+mod legacy_clearing;
 
+use crate::errors::CustomRpcError;
 use anyhow::anyhow;
 use parity_scale_codec::{Decode, Encode};
 pub use sp_core::crypto::AccountId32;
@@ -31,7 +32,6 @@ pub use sp_core::sr25519::{
     Pair as Sr25519Pair, Public as Sr25519Public, Signature as Sr25519Signature,
 };
 use sp_core::{crypto::Ss58Codec, Pair};
-use crate::errors::CustomRpcError;
 
 pub fn hexstr_to_vec(h: impl AsRef<str>) -> anyhow::Result<Vec<u8>> {
     hex::decode(h.as_ref().trim_start_matches("0x")).map_err(|_| anyhow::anyhow!("invalid hex str"))
@@ -41,10 +41,8 @@ pub fn to_hexstr<T: Encode>(t: T) -> String {
     format!("0x{}", hex::encode(t.encode()))
 }
 
-pub fn verify_sr25519(sig: Vec<u8>, data: &[u8], ss58: impl AsRef<str>) -> anyhow::Result<()> {
-    let public = AccountId32::from_ss58check(ss58.as_ref())
-        .map_err(|_| anyhow::anyhow!(""))
-        .map(|a| Sr25519Public::from_raw(*a.as_ref()))?;
+pub fn verify_sr25519(sig: Vec<u8>, data: &[u8], account: &AccountId32) -> anyhow::Result<()> {
+    let public = Sr25519Public::from_raw(*AsRef::<[u8; 32]>::as_ref(account));
     let sig = Sr25519Signature::decode(&mut &sig[..])
         .map_err(|_| anyhow::anyhow!("Invalid signature"))?;
     let verified = Sr25519Pair::verify(&sig, data, &public);
@@ -71,7 +69,7 @@ pub fn verify_ecdsa(sig: Vec<u8>, data: &str, mapping_addr: impl AsRef<str>) -> 
     let digest = sp_core::hashing::keccak_256(&wrapped_msg[..]);
     let pubkey = sp_io::crypto::secp256k1_ecdsa_recover(&sig.0, &digest)
         .map_err(|_| anyhow!("Invalid ECDSA signature"))?;
-    log::debug!(" metamask public === {}", hex::encode(pubkey));
+    log::debug!("metamask public === {}", hex::encode(pubkey));
     let addr = sp_io::hashing::keccak_256(pubkey.as_ref())[12..].to_vec();
     log::debug!("recovered eth address{}", hex::encode(addr.clone()));
     let addr = to_mapping_address(addr);
@@ -83,23 +81,26 @@ pub fn verify_ecdsa(sig: Vec<u8>, data: &str, mapping_addr: impl AsRef<str>) -> 
 }
 
 pub fn try_into_ss58(addr: String) -> anyhow::Result<String> {
+    try_into_account(addr).map(|a| a.to_ss58check())
+}
+
+pub fn try_into_account(addr: String) -> anyhow::Result<AccountId32> {
     if addr.starts_with("0x") {
         let addr = hexstr_to_vec(&addr)?;
         match addr.len() {
-            32 => {
-                let addr = AccountId32::decode(&mut &addr[..])
-                    .map_err(|_| anyhow::anyhow!("Invalid substrate address"))?;
-                Ok(addr.to_ss58check())
-            }
-            20 => {
-                let addr = to_mapping_address(addr);
-                Ok(addr.to_ss58check())
-            }
+            32 => AccountId32::decode(&mut &addr[..])
+                .map_err(|_| anyhow::anyhow!("Invalid substrate address")),
+            20 => Ok(to_mapping_address(addr)),
             _ => Err(anyhow::anyhow!("Invalid address")),
         }
     } else {
-        Ok(addr)
+        AccountId32::from_ss58check(&addr).map_err(|_| anyhow::anyhow!("Invalid ss58 address"))
     }
+}
+
+pub fn to_proxy_address(user_id: Vec<u8>, bot_id: Vec<u8>) -> AccountId32 {
+    let h = (b"-*-#fusotao-proxy#-*-", user_id, bot_id).using_encoded(sp_core::hashing::blake2_256);
+    Decode::decode(&mut h.as_ref()).expect("32 bytes; qed")
 }
 
 pub fn to_mapping_address(address: Vec<u8>) -> AccountId32 {
