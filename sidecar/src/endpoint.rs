@@ -130,7 +130,7 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
     module
         .register_async_method("register_trading_key_for_subaccount", |p, ctx| async move {
             let (user_id, bot_id, token, bot_x25519_pub, sig) =
-                p.parse::<(String, String, String, String)>()?;
+                p.parse::<(String, String, u32, String, String)>()?;
             log::debug!(
                 "user = {}, bot = {}, x25519 = {}, sign = {} ",
                 &user_id,
