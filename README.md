@@ -1,3 +1,4 @@
+[![SAY NO TO THE TRADEMARK POLICY ](https://gist.githubusercontent.com/blyxyas/8f17fbe1cafdeff65bbe6b332d4f4723/raw/715a24df3ad74b838c6b0ff8079d3f7f9172b0db/banner.svg)](https://github.com/blyxyas/no-rust-policy-change)
 # Galois
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg)](#LICENSE)
@@ -6,9 +7,8 @@
   
 ## Introduction
 
-Galois is an extremely high performance matching engine written in Rust.
-
-Galois uses Event Sourcing pattern to handle tens of thousands of orders per second or even better, depending on the performance of persistence. Basic architecture is shown below.
+Galois is an extremely high performance matching engine written in Rust which uses event-sourcing pattern to handle tens of thousands of orders per second or even better, depending on the performance of persistence. 
+Basic architecture is shown below.
 
 ```
                    core dump(disk)
@@ -16,7 +16,7 @@ Galois uses Event Sourcing pattern to handle tens of thousands of orders per sec
                         ^
                    +----------+
 events(mysql)  >>  |  galois  |  >> match results(mysql)/best n price(redis)
-                   +----------+
+will be replaced   +----------+     will be replaced
                         ^
                         ^
                  query requests(TCP) 
@@ -24,7 +24,7 @@ events(mysql)  >>  |  galois  |  >> match results(mysql)/best n price(redis)
 ```
 
 Galois works as the prover(a.k.a Proof of Matches) component of [Fusotao](https://github.com/uinb/fusotao). From v0.4.0, we don't support running Galois in standalone mode anymore.
-According to the Roadmap 2023, the UINB team is workding on implementing the Proof of Order Relay which enables users to run #[Fusotao Node](https://github.com/uinb/fusotao) as an order relayer(a.k.a broker) rather than supporting multiple prover instance in the network. In the near future, galois will be recoverable from anywhere by pulling the core data and sequences from [Arweave](https://arweave.org/) and under management of the FusoDAO.
+According to the Roadmap 2023, the UINB team is working on implementing the Proof of Order Relay which enables users to run [Fusotao Node](https://github.com/uinb/fusotao) as an order relayer(a.k.a broker) rather than supporting multiple prover instances in the network. In the near future, galois will be recoverable from anywhere by pulling the core data and sequences from [Arweave](https://arweave.org/) and under management of the FusoDAO.
 
 ## Getting Started
 
