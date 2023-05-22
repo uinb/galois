@@ -98,8 +98,9 @@ pub fn try_into_account(addr: String) -> anyhow::Result<AccountId32> {
     }
 }
 
-pub fn to_proxy_address(user_id: Vec<u8>, bot_id: Vec<u8>) -> AccountId32 {
-    let h = (b"-*-#fusotao-proxy#-*-", user_id, bot_id).using_encoded(sp_core::hashing::blake2_256);
+pub fn derive_sub_account(user_id: Vec<u8>, bot_id: Vec<u8>, token: u32) -> AccountId32 {
+    let h = (b"-*-#fusotao-proxy#-*-", token, user_id, bot_id)
+        .using_encoded(sp_core::hashing::blake2_256);
     Decode::decode(&mut h.as_ref()).expect("32 bytes; qed")
 }
 

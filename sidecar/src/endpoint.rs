@@ -84,7 +84,7 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
             ctx.validate_cmd(&user_id, &cmd)
                 .await
                 .map_err(handle_error)?;
-            db::save_trading_command(&ctx.db, user_id, cmd, &relayer)
+            db::save_trading_command(&ctx.db, user_id, cmd, relayer)
                 .await
                 .map(|id| crate::to_hexstr(id))
                 .map_err(handle_error)
@@ -128,8 +128,8 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
         })
         .unwrap();
     module
-        .register_async_method("register_delegated_trading_key", |p, ctx| async move {
-            let (user_id, bot_id, bot_x25519_pub, sig) =
+        .register_async_method("register_trading_key_for_subaccount", |p, ctx| async move {
+            let (user_id, bot_id, token, bot_x25519_pub, sig) =
                 p.parse::<(String, String, String, String)>()?;
             log::debug!(
                 "user = {}, bot = {}, x25519 = {}, sign = {} ",
@@ -140,9 +140,10 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
             );
             let user_id = crate::try_into_account(user_id)?;
             let bot_id = crate::try_into_account(bot_id)?;
-            let proxy_id = crate::to_proxy_address(
+            let sub_id = crate::derive_sub_account(
                 AsRef::<[u8; 32]>::as_ref(&user_id).to_vec(),
                 AsRef::<[u8; 32]>::as_ref(&bot_id).to_vec(),
+                token,
             );
             let bot_x25519_pub_vec = crate::hexstr_to_vec(&bot_x25519_pub)?;
             let raw_sig = crate::hexstr_to_vec(&sig)?;
@@ -156,10 +157,10 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
             let bot_x25519_pub = x25519_dalek::PublicKey::from(bot_x25519_pub);
             let key = ctx.x25519.diffie_hellman(&bot_x25519_pub).to_bytes();
             let key = format!("0x{}", hex::encode(&key));
-            db::save_trading_key(&ctx.db, &proxy_id.to_ss58check(), &key).await?;
+            db::save_trading_key(&ctx.db, &sub_id.to_ss58check(), &key).await?;
             let init_nonce = rand::thread_rng().gen_range(1..10000);
             ctx.session_nonce
-                .insert(proxy_id.to_ss58check(), Session::new(init_nonce));
+                .insert(sub_id.to_ss58check(), Session::new(init_nonce));
             Ok(crate::to_hexstr(init_nonce + 1))
         })
         .unwrap();
