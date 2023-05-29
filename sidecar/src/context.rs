@@ -12,7 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{backend::BackendConnection, config::Config, db::{self, Order}, endpoint::TradingCommand, legacy_clearing, AccountId32, Sr25519Pair, Sr25519Public, Sr25519Signature};
+use crate::errors::CustomRpcError;
+use crate::{
+    backend::BackendConnection,
+    config::Config,
+    db::{self, Order},
+    endpoint::TradingCommand,
+    legacy_clearing, AccountId32, Sr25519Pair, Sr25519Public, Sr25519Signature,
+};
 use dashmap::DashMap;
 use galois_engine::{core::*, fusotao::OffchainSymbol};
 use hyper::{Body, Request, Response};
@@ -34,7 +41,6 @@ use std::{
 use tokio::sync::{mpsc::UnboundedSender, Mutex};
 use tower::{Layer, Service};
 use x25519_dalek::StaticSecret;
-use crate::errors::CustomRpcError;
 
 pub struct Context {
     pub backend: BackendConnection,
@@ -138,12 +144,13 @@ impl Context {
     ) -> anyhow::Result<()> {
         let mut decode = nonce.clone();
         let n = u32::decode(&mut decode)?;
+        let key = self.get_trading_key(user_id).await?;
+        // FIXME when sidecar reboot, the session_nonce will be empty
         let session = self
             .session_nonce
             .get(user_id)
             .ok_or(CustomRpcError::user_not_found())?;
         session.value().try_occupy_nonce(n).await?;
-        let key = self.get_trading_key(user_id).await?;
         let mut to_be_signed = vec![];
         to_be_signed.extend_from_slice(data);
         to_be_signed.extend_from_slice(key.as_slice());

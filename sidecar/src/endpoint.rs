@@ -21,6 +21,7 @@ use jsonrpsee::RpcModule;
 use parity_scale_codec::{Decode, Encode};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use sp_core::crypto::Ss58Codec;
 
 pub fn export_rpc(context: Context) -> RpcModule<Context> {
     let mut module = RpcModule::new(context);
@@ -33,7 +34,8 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
             let signature = crate::hexstr_to_vec(&signature)?;
             let nonce = crate::hexstr_to_vec(&nonce)?;
             ctx.verify_trading_signature(&symbol, &user_id, &signature, &nonce)
-                .await.map_err(handle_error)?;
+                .await
+                .map_err(handle_error)?;
             let symbol = Symbol::decode(&mut symbol.as_slice())
                 .map_err(|_| anyhow::anyhow!("invalid symbol"))?;
             db::query_pending_orders(&ctx.db, symbol, &user_id)
@@ -53,7 +55,8 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
             let signature = crate::hexstr_to_vec(&signature)?;
             let nonce = crate::hexstr_to_vec(&nonce)?;
             ctx.verify_trading_signature(&[], &user_id, &signature, &nonce)
-                .await.map_err(handle_error)?;
+                .await
+                .map_err(handle_error)?;
             ctx.backend
                 .get_account(&user_id)
                 .await
@@ -76,9 +79,12 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
             let cmd = TradingCommand::decode(&mut hex.clone().as_slice())
                 .map_err(|_| anyhow::anyhow!("Invalid command"))?;
             ctx.verify_trading_signature(&hex, &user_id, &signature, &nonce)
-                .await.map_err(handle_error)?;
-            ctx.validate_cmd(&user_id, &cmd).await.map_err(handle_error)?;
-            db::save_trading_command(&ctx.db, user_id, cmd, &relayer)
+                .await
+                .map_err(handle_error)?;
+            ctx.validate_cmd(&user_id, &cmd)
+                .await
+                .map_err(handle_error)?;
+            db::save_trading_command(&ctx.db, user_id, cmd, relayer)
                 .await
                 .map(|id| crate::to_hexstr(id))
                 .map_err(handle_error)
@@ -88,19 +94,25 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
         .register_async_method("register_trading_key", |p, ctx| async move {
             let (user_id, user_x25519_pub, sig) = p.parse::<(String, String, String)>()?;
             log::debug!(
-                "userID== {}, x225519 = {}, sign = {} ",
+                "user = {}, x25519 = {}, sign = {} ",
                 &user_id,
                 &user_x25519_pub,
                 &sig
             );
-            let user_id = crate::try_into_ss58(user_id)?;
+            let user_id = crate::try_into_account(user_id)?;
             let user_x25519_pub_vec = crate::hexstr_to_vec(&user_x25519_pub)?;
             let raw_sig = crate::hexstr_to_vec(&sig)?;
             if raw_sig.len() == 64 {
                 let message = format!("<Bytes>{}</Bytes>", user_x25519_pub);
-                crate::verify_sr25519(raw_sig, message.into_bytes().as_ref(), &user_id).map_err(handle_error)?;
+                crate::verify_sr25519(raw_sig, message.into_bytes().as_ref(), &user_id)
+                    .map_err(handle_error)?;
             } else {
-                crate::verify_ecdsa(raw_sig, &hex::encode(&user_x25519_pub_vec), &user_id).map_err(handle_error)?;
+                crate::verify_ecdsa(
+                    raw_sig,
+                    &hex::encode(&user_x25519_pub_vec),
+                    &user_id.to_ss58check(),
+                )
+                .map_err(handle_error)?;
             }
             let user_x25519_pub: [u8; 32] = user_x25519_pub_vec
                 .try_into()
@@ -108,9 +120,47 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
             let user_x25519_pub = x25519_dalek::PublicKey::from(user_x25519_pub);
             let key = ctx.x25519.diffie_hellman(&user_x25519_pub).to_bytes();
             let key = format!("0x{}", hex::encode(&key));
-            db::save_trading_key(&ctx.db, &user_id, &key).await?;
+            db::save_trading_key(&ctx.db, &user_id.to_ss58check(), &key).await?;
             let init_nonce = rand::thread_rng().gen_range(1..10000);
-            ctx.session_nonce.insert(user_id, Session::new(init_nonce));
+            ctx.session_nonce
+                .insert(user_id.to_ss58check(), Session::new(init_nonce));
+            Ok(crate::to_hexstr(init_nonce + 1))
+        })
+        .unwrap();
+    module
+        .register_async_method("register_trading_key_for_subaccount", |p, ctx| async move {
+            let (user_id, bot_id, token, bot_x25519_pub, sig) =
+                p.parse::<(String, String, u32, String, String)>()?;
+            log::debug!(
+                "user = {}, bot = {}, x25519 = {}, sign = {} ",
+                &user_id,
+                &bot_id,
+                &bot_x25519_pub,
+                &sig
+            );
+            let user_id = crate::try_into_account(user_id)?;
+            let bot_id = crate::try_into_account(bot_id)?;
+            let sub_id = crate::derive_sub_account(
+                AsRef::<[u8; 32]>::as_ref(&user_id).to_vec(),
+                AsRef::<[u8; 32]>::as_ref(&bot_id).to_vec(),
+                token,
+            );
+            let bot_x25519_pub_vec = crate::hexstr_to_vec(&bot_x25519_pub)?;
+            let raw_sig = crate::hexstr_to_vec(&sig)?;
+            let message = format!("<Bytes>{}</Bytes>", bot_x25519_pub);
+            // the bot account must be sr25519
+            crate::verify_sr25519(raw_sig, message.into_bytes().as_ref(), &bot_id)
+                .map_err(handle_error)?;
+            let bot_x25519_pub: [u8; 32] = bot_x25519_pub_vec
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("Invalid public key"))?;
+            let bot_x25519_pub = x25519_dalek::PublicKey::from(bot_x25519_pub);
+            let key = ctx.x25519.diffie_hellman(&bot_x25519_pub).to_bytes();
+            let key = format!("0x{}", hex::encode(&key));
+            db::save_trading_key(&ctx.db, &sub_id.to_ss58check(), &key).await?;
+            let init_nonce = rand::thread_rng().gen_range(1..10000);
+            ctx.session_nonce
+                .insert(sub_id.to_ss58check(), Session::new(init_nonce));
             Ok(crate::to_hexstr(init_nonce + 1))
         })
         .unwrap();
@@ -132,7 +182,8 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
             let signature = crate::hexstr_to_vec(&signature)?;
             let nonce = crate::hexstr_to_vec(&nonce)?;
             ctx.verify_trading_signature(&[], &user_id, &signature, &nonce)
-                .await.map_err(handle_error)?;
+                .await
+                .map_err(handle_error)?;
             let tx = ctx
                 .subscribers
                 .get(&format!("broker:{}", relayer))
@@ -203,10 +254,10 @@ impl TradingCommand {
     }
 }
 
-fn handle_error(e: anyhow::Error) -> jsonrpsee::core::Error{
+fn handle_error(e: anyhow::Error) -> jsonrpsee::core::Error {
     let error = e.downcast::<jsonrpsee::core::Error>();
     match error {
-        Ok(e) => {e}
-        Err(e) => {e.into()}
+        Ok(e) => e,
+        Err(e) => e.into(),
     }
 }

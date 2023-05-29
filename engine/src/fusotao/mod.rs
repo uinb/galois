@@ -231,73 +231,93 @@ impl WrapperTypeDecode for UserId {
 
 #[derive(Clone, Encode, Decode, Eq, PartialEq, Debug)]
 pub enum FusoCommand {
-    // price, amounnt, maker_fee, taker_fee, base, quote
-    AskLimit(
-        Compact<u128>,
-        Compact<u128>,
-        Compact<u32>,
-        Compact<u32>,
-        Compact<u32>,
-        Compact<u32>,
-    ),
-    BidLimit(
-        Compact<u128>,
-        Compact<u128>,
-        Compact<u32>,
-        Compact<u32>,
-        Compact<u32>,
-        Compact<u32>,
-    ),
-    Cancel(Compact<u32>, Compact<u32>),
-    TransferOut(Compact<u32>, Compact<u128>),
-    TransferIn(Compact<u32>, Compact<u128>),
-    RejectTransferOut(Compact<u32>, Compact<u128>),
+    AskLimit {
+        price: Compact<u128>,
+        amount: Compact<u128>,
+        maker_fee: Compact<u32>,
+        taker_fee: Compact<u32>,
+        base: Compact<u32>,
+        quote: Compact<u32>,
+        broker: Option<FusoAccountId>,
+    },
+    BidLimit {
+        price: Compact<u128>,
+        amount: Compact<u128>,
+        maker_fee: Compact<u32>,
+        taker_fee: Compact<u32>,
+        base: Compact<u32>,
+        quote: Compact<u32>,
+        broker: Option<FusoAccountId>,
+    },
+    Cancel {
+        base: Compact<u32>,
+        quote: Compact<u32>,
+    },
+    TransferOut {
+        currency: Compact<u32>,
+        amount: Compact<u128>,
+    },
+    TransferIn {
+        currency: Compact<u32>,
+        amount: Compact<u128>,
+    },
+    RejectTransferOut {
+        currency: Compact<u32>,
+        amount: Compact<u128>,
+    },
     RejectTransferIn,
 }
 
 impl Into<FusoCommand> for (LimitCmd, Fee, Fee) {
     fn into(self) -> FusoCommand {
         match self.0.ask_or_bid {
-            AskOrBid::Ask => FusoCommand::AskLimit(
-                self.0.price.to_amount().into(),
-                self.0.amount.to_amount().into(),
-                self.1.to_fee().into(),
-                self.2.to_fee().into(),
-                self.0.symbol.0.into(),
-                self.0.symbol.1.into(),
-            ),
-            AskOrBid::Bid => FusoCommand::BidLimit(
-                self.0.price.to_amount().into(),
-                self.0.amount.to_amount().into(),
-                self.1.to_fee().into(),
-                self.2.to_fee().into(),
-                self.0.symbol.0.into(),
-                self.0.symbol.1.into(),
-            ),
+            AskOrBid::Ask => FusoCommand::AskLimit {
+                price: self.0.price.to_amount().into(),
+                amount: self.0.amount.to_amount().into(),
+                maker_fee: self.1.to_fee().into(),
+                taker_fee: self.2.to_fee().into(),
+                base: self.0.symbol.0.into(),
+                quote: self.0.symbol.1.into(),
+                broker: self.0.broker.map(|x| FusoAccountId::from_raw(x.0)),
+            },
+            AskOrBid::Bid => FusoCommand::BidLimit {
+                price: self.0.price.to_amount().into(),
+                amount: self.0.amount.to_amount().into(),
+                maker_fee: self.1.to_fee().into(),
+                taker_fee: self.2.to_fee().into(),
+                base: self.0.symbol.0.into(),
+                quote: self.0.symbol.1.into(),
+                broker: self.0.broker.map(|x| FusoAccountId::from_raw(x.0)),
+            },
         }
     }
 }
 
 impl Into<FusoCommand> for CancelCmd {
     fn into(self) -> FusoCommand {
-        FusoCommand::Cancel(self.symbol.0.into(), self.symbol.1.into())
+        FusoCommand::Cancel {
+            base: self.symbol.0.into(),
+            quote: self.symbol.1.into(),
+        }
     }
 }
 
 impl Into<FusoCommand> for (AssetsCmd, bool) {
     fn into(self) -> FusoCommand {
         match (self.0.in_or_out, self.1) {
-            (InOrOut::In, true) => {
-                FusoCommand::TransferIn(self.0.currency.into(), self.0.amount.to_amount().into())
-            }
+            (InOrOut::In, true) => FusoCommand::TransferIn {
+                currency: self.0.currency.into(),
+                amount: self.0.amount.to_amount().into(),
+            },
             (InOrOut::In, false) => FusoCommand::RejectTransferIn,
-            (InOrOut::Out, true) => {
-                FusoCommand::TransferOut(self.0.currency.into(), self.0.amount.to_amount().into())
-            }
-            (InOrOut::Out, false) => FusoCommand::RejectTransferOut(
-                self.0.currency.into(),
-                self.0.amount.to_amount().into(),
-            ),
+            (InOrOut::Out, true) => FusoCommand::TransferOut {
+                currency: self.0.currency.into(),
+                amount: self.0.amount.to_amount().into(),
+            },
+            (InOrOut::Out, false) => FusoCommand::RejectTransferOut {
+                currency: self.0.currency.into(),
+                amount: self.0.amount.to_amount().into(),
+            },
         }
     }
 }

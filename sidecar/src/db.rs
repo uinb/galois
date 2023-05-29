@@ -141,7 +141,7 @@ pub async fn save_trading_command(
     pool: &Pool<MySql>,
     user_id: impl ToString,
     cmd: TradingCommand,
-    _relayer: &String,
+    relayer: impl ToString,
 ) -> anyhow::Result<u64> {
     // TODO
     let fix_cmd_signature = "169d796416023558ef5c2580ef38c1c4f43f3c06f76ceab2412e6fc5d486a36eb0a9cb808dd4eb72f6264b4113c1a722479be205edc84d6ac5403d33d09b0087";
@@ -204,7 +204,7 @@ pub async fn save_trading_command(
             place.price = Decimal::from_str(&price).ok();
             place.amount = Decimal::from_str(&amount).ok();
             place.nonce = Some(fix_cmd_nonce);
-
+            place.broker = Some(relayer.to_string());
             sqlx::query("insert into t_sequence(f_cmd) values(?)")
                 .bind(serde_json::to_string(&place).expect("jsonser;qed"))
                 .execute(&mut tx)

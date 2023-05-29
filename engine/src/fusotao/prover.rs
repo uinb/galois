@@ -688,6 +688,7 @@ mod test {
                 ask_or_bid: AskOrBid::Ask,
                 nonce: 1,
                 signature: vec![0],
+                broker: None,
             };
             let (best_ask_before, best_bid_before) =
                 data.orderbooks.get(&(1, 0)).unwrap().get_size_of_best();
@@ -732,6 +733,7 @@ mod test {
                 ask_or_bid: AskOrBid::Bid,
                 nonce: 1,
                 signature: vec![0],
+                broker: None,
             };
             let (best_ask_before, best_bid_before) =
                 data.orderbooks.get(&(1, 0)).unwrap().get_size_of_best();
@@ -776,6 +778,7 @@ mod test {
                 ask_or_bid: AskOrBid::Ask,
                 nonce: 1,
                 signature: vec![0],
+                broker: None,
             };
             let (best_ask_before, best_bid_before) =
                 data.orderbooks.get(&(1, 0)).unwrap().get_size_of_best();
@@ -820,6 +823,7 @@ mod test {
                 ask_or_bid: AskOrBid::Bid,
                 nonce: 1,
                 signature: vec![0],
+                broker: None,
             };
             let (best_ask_before, best_bid_before) =
                 data.orderbooks.get(&(1, 0)).unwrap().get_size_of_best();
@@ -865,6 +869,7 @@ mod test {
                 ask_or_bid: AskOrBid::Ask,
                 nonce: 1,
                 signature: vec![0],
+                broker: None,
             };
             let (best_ask_before, best_bid_before) =
                 data.orderbooks.get(&(1, 0)).unwrap().get_size_of_best();
@@ -1128,6 +1133,7 @@ mod test {
                     ask_or_bid: AskOrBid::Ask,
                     nonce: 1,
                     signature: vec![0],
+                    broker: None,
                 };
                 let (best_ask_before, best_bid_before) =
                     data.orderbooks.get(&(0, 1)).unwrap().get_size_of_best();
@@ -1174,6 +1180,7 @@ mod test {
                     ask_or_bid: AskOrBid::Ask,
                     nonce: 1,
                     signature: vec![0],
+                    broker: None,
                 };
                 let (best_ask_before, best_bid_before) =
                     data.orderbooks.get(&(0, 1)).unwrap().get_size_of_best();
@@ -1220,6 +1227,7 @@ mod test {
                     ask_or_bid: AskOrBid::Ask,
                     nonce: 1,
                     signature: vec![0],
+                    broker: None,
                 };
                 let (best_ask_before, best_bid_before) =
                     data.orderbooks.get(&(0, 1)).unwrap().get_size_of_best();
@@ -1266,6 +1274,7 @@ mod test {
                     ask_or_bid: AskOrBid::Bid,
                     nonce: 1,
                     signature: vec![0],
+                    broker: None,
                 };
                 let (best_ask_before, best_bid_before) =
                     data.orderbooks.get(&(0, 1)).unwrap().get_size_of_best();
@@ -1483,6 +1492,7 @@ mod test {
                     ask_or_bid: AskOrBid::Ask,
                     nonce: 1,
                     signature: vec![0],
+                    broker: None,
                 };
                 let (best_ask_before, best_bid_before) =
                     data.orderbooks.get(&(0, 1)).unwrap().get_size_of_best();
@@ -1529,6 +1539,7 @@ mod test {
                     ask_or_bid: AskOrBid::Ask,
                     nonce: 1,
                     signature: vec![0],
+                    broker: None,
                 };
                 let (best_ask_before, best_bid_before) =
                     data.orderbooks.get(&(0, 1)).unwrap().get_size_of_best();

@@ -121,6 +121,8 @@ pub struct Command {
     pub event_id: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timestamp: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub broker: Option<String>,
 }
 
 unsafe impl Send for Command {}
