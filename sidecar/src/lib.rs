@@ -98,8 +98,8 @@ pub fn try_into_account(addr: String) -> anyhow::Result<AccountId32> {
     }
 }
 
-pub fn derive_sub_account(user_id: Vec<u8>, bot_id: Vec<u8>, token: u32) -> AccountId32 {
-    let h = (b"-*-#fusotao-proxy#-*-", token, user_id, bot_id)
+pub fn derive_sub_account(user_addr: &AccountId32, bot_addr: &AccountId32, token: u32) -> AccountId32 {
+    let h = (b"-*-#fusotao-proxy#-*-", token, user_addr, bot_addr)
         .using_encoded(sp_core::hashing::blake2_256);
     Decode::decode(&mut h.as_ref()).expect("32 bytes; qed")
 }
@@ -108,4 +108,18 @@ pub fn to_mapping_address(address: Vec<u8>) -> AccountId32 {
     let h = (b"-*-#fusotao#-*-", LEGACY_MAPPING_CODE, address)
         .using_encoded(sp_core::hashing::blake2_256);
     Decode::decode(&mut h.as_ref()).expect("32 bytes; qed")
+}
+
+#[test]
+fn test_derive_sub_account() {
+    use sp_keyring::AccountKeyring;
+    use std::str::FromStr;
+    let alice = AccountKeyring::Alice.to_account_id();
+    let bot = AccountKeyring::Ferdie.to_account_id();
+    let r = derive_sub_account(&alice, &bot, 1u32);
+    assert_eq!(
+        r,
+        AccountId32::from_str("0x768cff70bf523090fa1d09494cda1d4686361d1bc99129db3d67fe8b57649b7f")
+            .unwrap()
+    );
 }

@@ -141,8 +141,8 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
             let user_id = crate::try_into_account(user_id)?;
             let bot_id = crate::try_into_account(bot_id)?;
             let sub_id = crate::derive_sub_account(
-                AsRef::<[u8; 32]>::as_ref(&user_id).to_vec(),
-                AsRef::<[u8; 32]>::as_ref(&bot_id).to_vec(),
+                &user_id,
+                &bot_id,
                 token,
             );
             let bot_x25519_pub_vec = crate::hexstr_to_vec(&bot_x25519_pub)?;
