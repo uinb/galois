@@ -40,3 +40,5 @@ sp-core = { git = "https://github.com/paritytech/substrate.git", branch = "polka
 sp-io = { git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.30", package = "sp-io" }
 galois-engine = { path = "../engine" }
 hex-literal = "0.4.1"
+[dev-dependencies]
+sp-keyring = { git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.30" }
