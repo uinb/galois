@@ -1,3 +1,7 @@
+# v0.6.1
+
+- enable amm
+
 # v0.5.1
 
 - enable polygon
