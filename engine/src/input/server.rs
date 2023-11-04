@@ -16,7 +16,6 @@ use crate::{
     config::C,
     input::{Command, Input, Message},
     shared::Shared,
-    whistle::Whistle,
 };
 use async_std::{
     net::{TcpListener, TcpStream},
@@ -43,7 +42,14 @@ type FromSession = UnboundedReceiver<Message>;
 type ToBackend = Sender<Input>;
 type FromBackend = Receiver<(u64, Message)>;
 
-pub fn init(sender: ToBackend, receiver: FromBackend, shared: Shared, ready: Arc<AtomicBool>) {
+pub fn init(
+    sender: ToBackend,
+    receiver: FromBackend,
+    shared: Shared,
+    ready: Arc<AtomicBool>,
+    id: u64,
+) {
+    let current_id = Arc::new(AtomicU64::new(ensure_loaded(id)));
     let listener = task::block_on(async { TcpListener::bind(&C.server.bind_addr).await }).unwrap();
     let sessions = Arc::new(DashMap::<u64, ToSession>::new());
     let sx = sessions.clone();
@@ -51,7 +57,7 @@ pub fn init(sender: ToBackend, receiver: FromBackend, shared: Shared, ready: Arc
         log::error!("session relayer interrupted, {:?}", relay(receiver, sx));
     });
     log::info!("server initialized");
-    let future = accept(listener, sender, shared, sessions, ready);
+    let future = accept(listener, sender, shared, sessions, ready, current_id);
     let _ = task::block_on(future);
     log::info!("bye!");
 }
@@ -78,6 +84,7 @@ async fn accept(
     shared: Shared,
     sessions: Arc<DashMap<u64, ToSession>>,
     ready: Arc<AtomicBool>,
+    current_id: Arc<AtomicU64>,
 ) -> Result<()> {
     let mut incoming = listener.incoming();
     let mut session_id = 0_u64;
@@ -89,7 +96,8 @@ async fn accept(
                 stream,
                 to_backend.clone(),
                 shared.clone(),
-                &sessions,
+                sessions.clone(),
+                current_id.clone(),
             );
             session_id += 1;
         }
@@ -102,7 +110,8 @@ fn register(
     stream: TcpStream,
     to_backend: ToBackend,
     shared: Shared,
-    sessions: &Arc<DashMap<u64, ToSession>>,
+    sessions: Arc<DashMap<u64, ToSession>>,
+    current_id: Arc<AtomicU64>,
 ) {
     match stream.set_nodelay(true) {
         Ok(_) => {}
@@ -117,7 +126,8 @@ fn register(
         shared,
         session_id,
         stream,
-        sessions.clone(),
+        sessions,
+        current_id,
     ));
 }
 
@@ -142,6 +152,7 @@ async fn read_loop(
     session_id: u64,
     stream: Arc<TcpStream>,
     sessions: Arc<DashMap<u64, ToSession>>,
+    current_id: Arc<AtomicU64>,
 ) -> Result<()> {
     let mut stream = &*stream;
     let mut buf = Vec::<u8>::with_capacity(4096);
@@ -180,6 +191,7 @@ async fn read_loop(
                 session_id,
                 req_id,
                 json,
+                &current_id,
             )
             .await
             {
@@ -198,20 +210,23 @@ async fn handle_req(
     to_back: &mut ToBackend,
     to_session: &mut ToSession,
     shared: &Shared,
-    session_id: u64,
+    session: u64,
     req_id: u64,
     json: String,
+    current_id: &Arc<AtomicU64>,
 ) -> Result<()> {
     let cmd: Command = serde_json::from_str(&json)
         .map_err(|e| anyhow::anyhow!("deser command failed, {:?}", e))?;
     if cmd.is_querying_core_data() {
-        let w = Input::NonModifier(Whistle {
-            session: session_id,
+        let input = Input {
+            session,
             req_id,
+            sequence: 0,
             cmd,
-        });
+        };
+        let event = input.try_into()?;
         to_back
-            .send(w)
+            .send(event)
             .map_err(|e| anyhow::anyhow!("read loop -> executor -> {:?}", e))?;
         Ok(())
     } else if cmd.is_querying_share_data() {
@@ -222,6 +237,22 @@ async fn handle_req(
             .map_err(|e| anyhow::anyhow!("read loop -> write loop -> {:?}", e))?;
         Ok(())
     } else {
-        Err(anyhow::anyhow!("unsupported command {} from sidecar", cmd.cmd).into())
+        let current_id = current_id.fetch_add(1, Ordering::Relaxed);
+        // TODO write to rocksdb then send to executor
+        let input = Input {
+            session,
+            req_id,
+            sequence: current_id,
+            cmd,
+        };
+        let event = input.try_into()?;
+        to_back
+            .send(event)
+            .map_err(|e| anyhow::anyhow!("read loop -> executor -> {:?}", e))?;
     }
+}
+
+// TODO
+fn ensure_loaded(id: u64) -> u64 {
+    0
 }

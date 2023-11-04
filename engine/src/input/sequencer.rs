@@ -33,6 +33,7 @@ use thiserror::Error;
 pub struct Sequence {
     pub id: u64,
     pub cmd: Command,
+    // TODO after migrate to rocksdb, this field will be replaced by version
     pub status: u32,
     pub timestamp: u64,
 }
@@ -184,120 +185,120 @@ impl Sequence {
 
 unsafe impl Send for Sequence {}
 
-pub fn init(sender: Sender<Input>, id: u64, startup: Arc<AtomicBool>) {
-    let mut id = id;
-    let mut counter = 0_usize;
-    let event_sender = sender.clone();
-    log::info!("sequencer initialized");
-    std::thread::spawn(move || loop {
-        let seq = fetch_sequence_from(id);
-        if seq.is_empty() {
-            startup.store(true, Ordering::Relaxed);
-            std::thread::sleep(Duration::from_millis(C.sequence.fetch_intervel_ms));
-        } else {
-            let from = if id == 0 { 0 } else { id - 1 };
-            for s in seq.into_iter() {
-                // found break point
-                if id != s.id {
-                    log::info!("expecting {}, but {} found", id, s.id);
-                    let rs = insert_nop(id);
-                    match rs {
-                        // it means sequence rollback, {id} is void, adjust id = id + 1
-                        Some(true) => {
-                            id += 1;
-                        }
-                        // it means sequence commit, abort current batch and retry
-                        Some(false) => {}
-                        // other error
-                        None => {}
-                    }
-                    break;
-                }
-                if s.rejected() {
-                    id += 1;
-                    continue;
-                }
-                match C.dry_run {
-                    Some(0) => {}
-                    Some(n) => {
-                        if id > n {
-                            std::thread::park();
-                        }
-                    }
-                    None => {}
-                }
-                event_sender.send(Input::Modifier(s)).unwrap();
-                counter += 1;
-                if counter >= C.sequence.checkpoint {
-                    counter = 0;
-                    let t = SystemTime::now()
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs();
-                    event_sender
-                        .send(Input::NonModifier(Whistle::new_dump_whistle(id, t)))
-                        .unwrap();
-                }
-                id += 1;
-            }
-            event_sender
-                .send(Input::NonModifier(Whistle::new_confirm_whistle(from, id)))
-                .unwrap();
-        }
-    });
-    std::thread::spawn(move || loop {
-        if C.dry_run.is_some() {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(500));
-        let whistle = Whistle::new_update_depth_whistle();
-        sender.send(Input::NonModifier(whistle)).unwrap();
-    });
-}
+// pub fn init(sender: Sender<Input>, id: u64, startup: Arc<AtomicBool>) {
+//     let mut id = id;
+//     let mut counter = 0_usize;
+//     let event_sender = sender.clone();
+//     log::info!("sequencer initialized");
+//     std::thread::spawn(move || loop {
+//         let seq = fetch_sequence_from(id);
+//         if seq.is_empty() {
+//             startup.store(true, Ordering::Relaxed);
+//             std::thread::sleep(Duration::from_millis(C.sequence.fetch_intervel_ms));
+//         } else {
+//             let from = if id == 0 { 0 } else { id - 1 };
+//             for s in seq.into_iter() {
+//                 // found break point
+//                 if id != s.id {
+//                     log::info!("expecting {}, but {} found", id, s.id);
+//                     let rs = insert_nop(id);
+//                     match rs {
+//                         // it means sequence rollback, {id} is void, adjust id = id + 1
+//                         Some(true) => {
+//                             id += 1;
+//                         }
+//                         // it means sequence commit, abort current batch and retry
+//                         Some(false) => {}
+//                         // other error
+//                         None => {}
+//                     }
+//                     break;
+//                 }
+//                 if s.rejected() {
+//                     id += 1;
+//                     continue;
+//                 }
+//                 match C.dry_run {
+//                     Some(0) => {}
+//                     Some(n) => {
+//                         if id > n {
+//                             std::thread::park();
+//                         }
+//                     }
+//                     None => {}
+//                 }
+//                 event_sender.send(Input::Modifier(s)).unwrap();
+//                 counter += 1;
+//                 if counter >= C.sequence.checkpoint {
+//                     counter = 0;
+//                     let t = SystemTime::now()
+//                         .duration_since(SystemTime::UNIX_EPOCH)
+//                         .unwrap()
+//                         .as_secs();
+//                     event_sender
+//                         .send(Input::NonModifier(Whistle::new_dump_whistle(id, t)))
+//                         .unwrap();
+//                 }
+//                 id += 1;
+//             }
+//             event_sender
+//                 .send(Input::NonModifier(Whistle::new_confirm_whistle(from, id)))
+//                 .unwrap();
+//         }
+//     });
+//     std::thread::spawn(move || loop {
+//         if C.dry_run.is_some() {
+//             break;
+//         }
+//         std::thread::sleep(Duration::from_millis(500));
+//         let whistle = Whistle::new_update_depth_whistle();
+//         sender.send(Input::NonModifier(whistle)).unwrap();
+//     });
+// }
 
-fn fetch_sequence_from(id: u64) -> Vec<Sequence> {
-    let sql = "SELECT f_id,f_cmd,f_status,UNIX_TIMESTAMP(f_timestamp) as f_timestamp FROM t_sequence WHERE f_id>=? LIMIT ?";
-    let conn = DB.get_conn();
-    if conn.is_err() {
-        log::error!("retrieve mysql connection failed while fetch_sequence");
-        return vec![];
-    }
-    let mut conn = conn.unwrap();
-    conn.exec_map(
-        sql,
-        (id, C.sequence.batch_size),
-        |(f_id, f_cmd, f_status, f_timestamp): (u64, String, u32, u64)| Sequence {
-            id: f_id,
-            cmd: serde_json::from_str(&f_cmd)
-                .unwrap_or_else(|_| serde_json::from_str(r#"{"cmd":999999}"#).unwrap()),
-            status: f_status,
-            timestamp: f_timestamp,
-        },
-    )
-    .unwrap_or_default()
-}
+// fn fetch_sequence_from(id: u64) -> Vec<Sequence> {
+//     let sql = "SELECT f_id,f_cmd,f_status,UNIX_TIMESTAMP(f_timestamp) as f_timestamp FROM t_sequence WHERE f_id>=? LIMIT ?";
+//     let conn = DB.get_conn();
+//     if conn.is_err() {
+//         log::error!("retrieve mysql connection failed while fetch_sequence");
+//         return vec![];
+//     }
+//     let mut conn = conn.unwrap();
+//     conn.exec_map(
+//         sql,
+//         (id, C.sequence.batch_size),
+//         |(f_id, f_cmd, f_status, f_timestamp): (u64, String, u32, u64)| Sequence {
+//             id: f_id,
+//             cmd: serde_json::from_str(&f_cmd)
+//                 .unwrap_or_else(|_| serde_json::from_str(r#"{"cmd":999999}"#).unwrap()),
+//             status: f_status,
+//             timestamp: f_timestamp,
+//         },
+//     )
+//     .unwrap_or_default()
+// }
 
-pub fn insert_nop(id: u64) -> Option<bool> {
-    let sql = "INSERT INTO t_sequence(f_id,f_cmd,f_status) VALUES(?,?,?)";
-    let conn = DB.get_conn();
-    if conn.is_err() {
-        log::error!("retrieve mysql connection failed while insert_nop");
-        return None;
-    }
-    let mut conn = conn.unwrap();
-    match conn.exec_drop(sql, (id, r#"{"cmd":999999}"#, ERROR)) {
-        Ok(()) => Some(true),
-        Err(err) => {
-            if let mysql::error::Error::MySqlError(e) = err {
-                // FIXME better way to determine duplicated entry
-                if e.code == 1062 && e.message.contains("Duplicate entry") {
-                    return Some(false);
-                }
-            }
-            None
-        }
-    }
-}
+// pub fn insert_nop(id: u64) -> Option<bool> {
+//     let sql = "INSERT INTO t_sequence(f_id,f_cmd,f_status) VALUES(?,?,?)";
+//     let conn = DB.get_conn();
+//     if conn.is_err() {
+//         log::error!("retrieve mysql connection failed while insert_nop");
+//         return None;
+//     }
+//     let mut conn = conn.unwrap();
+//     match conn.exec_drop(sql, (id, r#"{"cmd":999999}"#, ERROR)) {
+//         Ok(()) => Some(true),
+//         Err(err) => {
+//             if let mysql::error::Error::MySqlError(e) = err {
+//                 // FIXME better way to determine duplicated entry
+//                 if e.code == 1062 && e.message.contains("Duplicate entry") {
+//                     return Some(false);
+//                 }
+//             }
+//             None
+//         }
+//     }
+// }
 
 pub fn update_sequence_status(id: u64, status: u32) -> anyhow::Result<()> {
     let sql = "UPDATE t_sequence SET f_status=? WHERE f_id=?";
@@ -336,103 +337,6 @@ pub fn confirm(from: u64, exclude: u64) -> anyhow::Result<()> {
 pub const PENDING: u32 = 0;
 pub const ACCEPTED: u32 = 1;
 pub const ERROR: u32 = 2;
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub enum Event {
-    Limit(EventId, LimitCmd, Timestamp),
-    Cancel(EventId, CancelCmd, Timestamp),
-    TransferOut(EventId, AssetsCmd, Timestamp),
-    TransferIn(EventId, AssetsCmd, Timestamp),
-    UpdateSymbol(EventId, SymbolCmd, Timestamp),
-    CancelAll(EventId, Symbol, Timestamp),
-}
-
-impl Event {
-    pub fn is_trading_cmd(&self) -> bool {
-        matches!(self, Event::Limit(_, _, _)) || matches!(self, Event::Cancel(_, _, _))
-    }
-
-    pub fn is_assets_cmd(&self) -> bool {
-        matches!(self, Event::TransferIn(_, _, _)) || matches!(self, Event::TransferOut(_, _, _))
-    }
-
-    pub fn get_id(&self) -> u64 {
-        match self {
-            Event::Limit(id, _, _) => *id,
-            Event::Cancel(id, _, _) => *id,
-            Event::TransferOut(id, _, _) => *id,
-            Event::TransferIn(id, _, _) => *id,
-            Event::UpdateSymbol(id, _, _) => *id,
-            Event::CancelAll(id, _, _) => *id,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct LimitCmd {
-    pub symbol: Symbol,
-    pub user_id: UserId,
-    pub order_id: OrderId,
-    pub price: Price,
-    pub amount: Amount,
-    pub ask_or_bid: AskOrBid,
-    pub nonce: u32,
-    pub signature: Vec<u8>,
-    pub broker: Option<UserId>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CancelCmd {
-    pub symbol: Symbol,
-    pub user_id: UserId,
-    pub order_id: OrderId,
-    pub nonce: u32,
-    pub signature: Vec<u8>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum InOrOut {
-    In,
-    Out,
-}
-
-impl std::convert::TryFrom<u32> for InOrOut {
-    type Error = anyhow::Error;
-
-    fn try_from(x: u32) -> anyhow::Result<Self> {
-        match x {
-            crate::cmd::TRANSFER_IN => Ok(InOrOut::In),
-            crate::cmd::TRANSFER_OUT => Ok(InOrOut::Out),
-            _ => Err(anyhow::anyhow!("")),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct AssetsCmd {
-    pub user_id: UserId,
-    pub in_or_out: InOrOut,
-    pub currency: Currency,
-    pub amount: Amount,
-    pub block_number: u32,
-    pub extrinsic_hash: Vec<u8>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SymbolCmd {
-    pub symbol: Symbol,
-    pub open: bool,
-    pub base_scale: Scale,
-    pub quote_scale: Scale,
-    pub taker_fee: Fee,
-    pub maker_fee: Fee,
-    pub base_maker_fee: Fee,
-    pub base_taker_fee: Fee,
-    pub fee_times: u32,
-    pub min_amount: Amount,
-    pub min_vol: Vol,
-    pub enable_market_order: bool,
-}
 
 #[derive(Debug, Error)]
 pub enum EventsError {

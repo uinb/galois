@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::{config, core};
+use chrono::{prelude::DateTime, Utc};
 use std::{
     fs, path, thread,
     time::{Duration, UNIX_EPOCH},
 };
-
-use chrono::{prelude::DateTime, Utc};
-
-use crate::{config, core};
 
 /// dump snapshot at id(executed)
 pub fn dump(id: u64, time: u64, data: &core::Data) {
@@ -99,12 +97,11 @@ fn print_symbols(data: &core::Data) {
 
 #[cfg(test)]
 mod test {
+    use chrono::{prelude::DateTime, Utc};
     use std::{
         path::Path,
         time::{Duration, UNIX_EPOCH},
     };
-
-    use chrono::{prelude::DateTime, Utc};
 
     #[test]
     pub fn test_syspath() {

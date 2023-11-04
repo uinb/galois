@@ -20,10 +20,10 @@ pub mod orderbook;
 use crate::{
     core::*,
     fusotao::{Proof, Prover},
-    input::{Event, EventsError, Input, Inspection, Message},
+    input::{Event, Input, Inspection, Message},
     orderbook::*,
     output::{self, Output},
-    sequence, snapshot,
+    sequencer, snapshot,
 };
 use anyhow::anyhow;
 use rust_decimal::{prelude::*, Decimal};
@@ -33,17 +33,27 @@ use std::{
     sync::mpsc::{Receiver, Sender},
 };
 
-type EventExecutionResult = Result<(), EventsError>;
 type OutputChannel = Sender<Vec<Output>>;
 type DriverChannel = Receiver<Input>;
 type ProofChannel = Sender<Proof>;
-type BackToServer = Sender<(u64, Message)>;
+type ResponseChannel = Sender<(u64, Message)>;
+
+#[derive(Debug, Error)]
+pub enum EventsError {
+    Interrupted(u64),
+    /// event id, session id, request id, error
+    EventRejected(u64, u64, u64, anyhow::Error),
+    /// event id, error
+    EventIgnored(u64, anyhow::Error),
+}
+
+pub type ExecutionResult = Result<(), EventsError>;
 
 pub fn init(
     recv: DriverChannel,
-    sender: OutputChannel,
+    output: OutputChannel,
     proofs: ProofChannel,
-    messages: BackToServer,
+    response: ResponseChannel,
     mut data: Data,
 ) {
     std::thread::spawn(move || {
@@ -51,54 +61,38 @@ pub fn init(
         let mut ephemeral = Ephemeral::new();
         log::info!("executor initialized");
         loop {
-            let fusion = recv.recv().unwrap();
-            match fusion {
-                Input::NonModifier(whistle) => {
-                    let (s, r) = (whistle.session, whistle.req_id);
-                    if let Ok(inspection) = whistle.try_into() {
-                        do_inspect(inspection, &data, &messages).unwrap();
-                    } else {
-                        let r = messages.send((s, Message::new(r, vec![])));
-                        log::error!("{:?}", r);
-                    }
+            let event = recv.recv().unwrap();
+            match do_execute(event, &mut data, &mut ephemeral, &output, &response, &prover) {
+                Ok(_) => {}
+                Err(EventExecutionError::EventRejected(id, session, req_id, e)) => {
+                    log::debug!("event {} rejected: {}", id, e);
+                    let msg = serde_json::json!({"error": e.to_string()});
+                    let v = serde_json::to_vec(&msg).unwrap_or_default();
+                    let _ = response.send((session, Message::new(req_id, v)));
                 }
-                Input::Modifier(seq) => {
-                    let id = seq.id;
-                    match seq.try_into() {
-                        Ok(event) => {
-                            let r = do_event(event, &mut data, &mut ephemeral, &sender, &prover);
-                            match r {
-                                Err(EventsError::EventRejected(id, msg)) => {
-                                    log::info!("Error occur in sequence {}: {:?}", id, msg);
-                                    sequence::update_sequence_status(id, sequence::ERROR).unwrap();
-                                }
-                                Err(EventsError::Interrupted) => {
-                                    panic!("sequence thread panic");
-                                }
-                                Ok(()) => {}
-                            }
-                        }
-                        Err(e) => {
-                            log::info!("Error occur in sequence {}: {:?}", id, e);
-                            sequence::update_sequence_status(id, sequence::ERROR).unwrap();
-                        }
-                    }
+                Err(EventExecutionError::EventIgnored(id, e)) => {
+                    log::info!("event {} ignored: {}", id, e);
+                }
+                Err(EventExecutionError::Interrupted(id)) => {
+                    log::info!("executor thread interrupted at {}", id);
+                    break;
                 }
             }
         }
     });
 }
 
-fn do_event(
+fn do_execute(
     event: Event,
     data: &mut Data,
     ephemeral: &mut Ephemeral,
-    sender: &OutputChannel,
+    output: &OutputChannel,
+    response: &ResponseChannel,
     prover: &Prover,
 ) -> EventExecutionResult {
-    data.current_event_id = event.get_id();
     match event {
-        Event::Limit(id, cmd, time) => {
+        Event::Limit(id, cmd, time, session, req_id) => {
+            data.current_event_id = id;
             let orderbook = data
                 .orderbooks
                 .get_mut(&cmd.symbol)
@@ -106,6 +100,8 @@ fn do_event(
                 .filter(|b| b.find_order(cmd.order_id).is_none())
                 .ok_or(EventsError::EventRejected(
                     id,
+                    session,
+                    req_id,
                     anyhow!("order can't be accepted"),
                 ))?;
             log::debug!(
@@ -121,7 +117,7 @@ fn do_event(
                 assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.1);
             let (c, val) = assets::freeze_if(&cmd.symbol, cmd.ask_or_bid, cmd.price, cmd.amount);
             assets::try_freeze(&mut data.accounts, &cmd.user_id, c, val)
-                .map_err(|e| EventsError::EventRejected(id, e))?;
+                .map_err(|e| EventsError::EventRejected(id, session, req_id, e))?;
             let mr = matcher::execute_limit(
                 orderbook,
                 cmd.user_id,
@@ -154,10 +150,10 @@ fn do_event(
                 &out,
                 &mr,
             );
-            sender.send(out).map_err(|_| EventsError::Interrupted)?;
-            Ok(())
+            sender.send(out).map_err(|_| EventsError::Interrupted(id))
         }
-        Event::Cancel(id, cmd, time) => {
+        Event::Cancel(id, cmd, time, session, req_id) => {
+            data.current_event_id = id;
             // 0. symbol exsits
             // 1. check order's owner
             let orderbook =
@@ -165,12 +161,19 @@ fn do_event(
                     .get_mut(&cmd.symbol)
                     .ok_or(EventsError::EventRejected(
                         id,
-                        anyhow!("orderbook not exists"),
+                        session,
+                        req_id,
+                        anyhow!("orderbook not found"),
                     ))?;
             orderbook
                 .find_order(cmd.order_id)
                 .filter(|o| o.user == cmd.user_id)
-                .ok_or(EventsError::EventRejected(id, anyhow!("order not exists")))?;
+                .ok_or(EventsError::EventRejected(
+                    id,
+                    session,
+                    req_id,
+                    anyhow!("order doesn't exist"),
+                ))?;
             log::debug!(
                 "predicate root=0x{} before applying {}",
                 hex::encode(data.merkle_tree.root()),
@@ -182,9 +185,12 @@ fn do_event(
                 assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.0);
             let taker_quote_before =
                 assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.symbol.1);
-
-            let mr = matcher::cancel(orderbook, cmd.order_id)
-                .ok_or(EventsError::EventRejected(id, anyhow!("")))?;
+            let mr = matcher::cancel(orderbook, cmd.order_id).ok_or(EventsError::EventRejected(
+                id,
+                session,
+                req_id,
+                anyhow!("order doesn't exist"),
+            ))?;
             let out = clearing::clear(
                 &mut data.accounts,
                 id,
@@ -208,40 +214,12 @@ fn do_event(
                 &out,
                 &mr,
             );
-            sender.send(out).map_err(|_| EventsError::Interrupted)?;
-            Ok(())
-        }
-        Event::CancelAll(..) => {
-            // let orderbook = data
-            //     .orderbooks
-            //     .get_mut(&symbol)
-            //     .ok_or(EventsError::EventRejected(
-            //         id,
-            //         anyhow!("orderbook not exists"),
-            //     ))?;
-            // let ids = orderbook.indices.keys().copied().collect::<Vec<_>>();
-            // let matches = ids
-            //     .into_iter()
-            //     .filter_map(|id| matcher::cancel(orderbook, id))
-            //     .collect::<Vec<_>>();
-            // let (taker_fee, maker_fee) = (orderbook.taker_fee, orderbook.maker_fee);
-            // matches.iter().for_each(|mr| {
-            //     let out = clearing::clear(
-            //         &mut data.accounts,
-            //         id,
-            //         &symbol,
-            //         taker_fee,
-            //         maker_fee,
-            //         mr,
-            //         time,
-            //     );
-            //     sender.send(out).unwrap();
-            // });
-            Ok(())
+            sender.send(out).map_err(|_| EventsError::Interrupted)
         }
         Event::TransferOut(id, cmd, _) => {
+            data.current_event_id = id;
             if !ephemeral.save_receipt((cmd.block_number, cmd.user_id)) {
-                return Err(EventsError::EventRejected(
+                return Err(EventsError::EventIgnored(
                     id,
                     anyhow!("Duplicated transfer_out extrinsic"),
                 ));
@@ -255,7 +233,7 @@ fn do_event(
             if data.tvl < cmd.amount {
                 prover.prove_cmd_rejected(&mut data.merkle_tree, id, cmd, &before);
                 log::error!("TVL less than transfer_out amount, event={}", id);
-                return Err(EventsError::EventRejected(id, anyhow!("LessThanTVL")));
+                return Err(EventsError::EventIgnored(id, anyhow!("TVL not enough")));
             }
             match assets::deduct_available(
                 &mut data.accounts,
@@ -270,13 +248,14 @@ fn do_event(
                 }
                 Err(e) => {
                     prover.prove_cmd_rejected(&mut data.merkle_tree, id, cmd, &before);
-                    Err(EventsError::EventRejected(id, e))
+                    Err(EventsError::EventIgnored(id, e))
                 }
             }
         }
         Event::TransferIn(id, cmd, _) => {
+            data.current_event_id = id;
             if !ephemeral.save_receipt((cmd.block_number, cmd.user_id)) {
-                return Err(EventsError::EventRejected(
+                return Err(EventsError::EventIgnored(
                     id,
                     anyhow!("Duplicated transfer_in extrinsic"),
                 ));
@@ -286,7 +265,7 @@ fn do_event(
                     assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.currency);
                 prover.prove_rejecting_no_reason(&mut data.merkle_tree, id, cmd, &before);
                 log::error!("TVL out of limit, event={}", id);
-                return Err(EventsError::EventRejected(id, anyhow!("TVLOutOfLimit")));
+                return Err(EventsError::EventIgnored(id, anyhow!("TVL out of limit")));
             }
             log::debug!(
                 "predicate root=0x{} before applying {}",
@@ -300,12 +279,13 @@ fn do_event(
                 cmd.currency,
                 cmd.amount,
             )
-            .map_err(|e| EventsError::EventRejected(id, e))?;
+            .map_err(|e| EventsError::EventIgnored(id, e))?;
             data.tvl = data.tvl + cmd.amount;
             prover.prove_assets_cmd(&mut data.merkle_tree, id, cmd, &before, &after);
             Ok(())
         }
-        Event::UpdateSymbol(_, cmd, _) => {
+        Event::UpdateSymbol(id, cmd, _) => {
+            data.current_event_id = id;
             if !data.orderbooks.contains_key(&cmd.symbol) {
                 let orderbook = OrderBook::new(
                     cmd.base_scale,
@@ -337,35 +317,29 @@ fn do_event(
             }
             Ok(())
         }
-    }
-}
-
-fn do_inspect(
-    inspection: Inspection,
-    data: &Data,
-    messages: &BackToServer,
-) -> EventExecutionResult {
-    match inspection {
-        Inspection::QueryOrder(symbol, order_id, session, req_id) => {
+        Event::QueryOrder(symbol, order_id, session, req_id) => {
             let v = match data.orderbooks.get(&symbol) {
                 Some(orderbook) => orderbook.find_order(order_id).map_or(vec![], |order| {
                     serde_json::to_vec(order).unwrap_or_default()
                 }),
                 None => vec![],
             };
-            let _ = messages.send((session, Message::new(req_id, v)));
+            let _ = response.send((session, Message::new(req_id, v)));
+            Ok(())
         }
-        Inspection::QueryBalance(user_id, currency, session, req_id) => {
+        Event::QueryBalance(user_id, currency, session, req_id) => {
             let a = assets::get_balance_to_owned(&data.accounts, &user_id, currency);
             let v = serde_json::to_vec(&a).unwrap_or_default();
-            let _ = messages.send((session, Message::new(req_id, v)));
+            let _ = response.send((session, Message::new(req_id, v)));
+            Ok(())
         }
-        Inspection::QueryAccounts(user_id, session, req_id) => {
+        Event::QueryAccounts(user_id, session, req_id) => {
             let a = assets::get_account_to_owned(&data.accounts, &user_id);
             let v = serde_json::to_vec(&a).unwrap_or_default();
-            let _ = messages.send((session, Message::new(req_id, v)));
+            let _ = response,send((session, Message::new(req_id, v)));
+            Ok(())
         }
-        Inspection::QueryExchangeFee(symbol, session, req_id) => {
+        Event::QueryExchangeFee(symbol, session, req_id) => {
             let mut v: HashMap<String, Fee> = HashMap::new();
             let orderbook = data.orderbooks.get(&symbol);
             match orderbook {
@@ -379,22 +353,13 @@ fn do_inspect(
                 }
             }
             let v = serde_json::to_vec(&v).unwrap_or_default();
-            let _ = messages.send((session, Message::new(req_id, v)));
+            let _ = response.send((session, Message::new(req_id, v)));
+            Ok(())
         }
-        Inspection::UpdateDepth => {
-            let writing = data
-                .orderbooks
-                .iter()
-                .map(|(k, v)| v.as_depth(32, *k))
-                .collect::<Vec<_>>();
-            output::write_depth(writing);
-        }
-        Inspection::ConfirmAll(from, exclude) => {
-            sequence::confirm(from, exclude).map_err(|_| EventsError::Interrupted)?;
-        }
-        Inspection::Dump(id, time) => {
+        Event::Dump(id, time) => {
+            // TODO erase some old events after dump
             snapshot::dump(id, time, data);
+            Ok(())
         }
     }
-    Ok(())
 }
