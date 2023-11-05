@@ -42,14 +42,7 @@ type FromSession = UnboundedReceiver<Message>;
 type ToBackend = Sender<Input>;
 type FromBackend = Receiver<(u64, Message)>;
 
-pub fn init(
-    sender: ToBackend,
-    receiver: FromBackend,
-    shared: Shared,
-    ready: Arc<AtomicBool>,
-    id: u64,
-) {
-    let current_id = Arc::new(AtomicU64::new(ensure_loaded(id)));
+pub fn init(receiver: FromBackend, sender: ToBackend, shared: Shared) {
     let listener = task::block_on(async { TcpListener::bind(&C.server.bind_addr).await }).unwrap();
     let sessions = Arc::new(DashMap::<u64, ToSession>::new());
     let sx = sessions.clone();
@@ -57,7 +50,7 @@ pub fn init(
         log::error!("session relayer interrupted, {:?}", relay(receiver, sx));
     });
     log::info!("server initialized");
-    let future = accept(listener, sender, shared, sessions, ready, current_id);
+    let future = accept(listener, sender, shared, sessions, ready);
     let _ = task::block_on(future);
     log::info!("bye!");
 }
@@ -69,7 +62,7 @@ fn relay(receiver: FromBackend, sessions: Arc<DashMap<u64, ToSession>>) -> Resul
         // relay the messages from backend to session, need to switch the runtime using async
         if let Some(mut session) = sessions.get_mut(&session_id) {
             let _ = task::block_on(session.send(msg));
-        } else {
+        } else if session_id != 0 {
             log::error!(
                 "received reply from executor, but session {} not found",
                 session_id
@@ -83,24 +76,20 @@ async fn accept(
     to_backend: ToBackend,
     shared: Shared,
     sessions: Arc<DashMap<u64, ToSession>>,
-    ready: Arc<AtomicBool>,
-    current_id: Arc<AtomicU64>,
 ) -> Result<()> {
     let mut incoming = listener.incoming();
-    let mut session_id = 0_u64;
+    // NOTICE: session id must be started from 1
+    let mut session_id = 1_u64;
     while let Some(stream) = incoming.next().await {
-        if ready.load(Ordering::Relaxed) {
-            let stream = stream?;
-            register(
-                session_id,
-                stream,
-                to_backend.clone(),
-                shared.clone(),
-                sessions.clone(),
-                current_id.clone(),
-            );
-            session_id += 1;
-        }
+        let stream = stream?;
+        register(
+            session_id,
+            stream,
+            to_backend.clone(),
+            shared.clone(),
+            sessions.clone(),
+        );
+        session_id += 1;
     }
     Ok(())
 }
@@ -111,7 +100,6 @@ fn register(
     to_backend: ToBackend,
     shared: Shared,
     sessions: Arc<DashMap<u64, ToSession>>,
-    current_id: Arc<AtomicU64>,
 ) {
     match stream.set_nodelay(true) {
         Ok(_) => {}
@@ -127,7 +115,6 @@ fn register(
         session_id,
         stream,
         sessions,
-        current_id,
     ));
 }
 
@@ -152,7 +139,6 @@ async fn read_loop(
     session_id: u64,
     stream: Arc<TcpStream>,
     sessions: Arc<DashMap<u64, ToSession>>,
-    current_id: Arc<AtomicU64>,
 ) -> Result<()> {
     let mut stream = &*stream;
     let mut buf = Vec::<u8>::with_capacity(4096);
@@ -191,7 +177,6 @@ async fn read_loop(
                 session_id,
                 req_id,
                 json,
-                &current_id,
             )
             .await
             {
@@ -212,24 +197,11 @@ async fn handle_req(
     shared: &Shared,
     session: u64,
     req_id: u64,
-    json: String,
-    current_id: &Arc<AtomicU64>,
+    body: String,
 ) -> Result<()> {
-    let cmd: Command = serde_json::from_str(&json)
+    let cmd: Command = serde_json::from_str(&body)
         .map_err(|e| anyhow::anyhow!("deser command failed, {:?}", e))?;
-    if cmd.is_querying_core_data() {
-        let input = Input {
-            session,
-            req_id,
-            sequence: 0,
-            cmd,
-        };
-        let event = input.try_into()?;
-        to_back
-            .send(event)
-            .map_err(|e| anyhow::anyhow!("read loop -> executor -> {:?}", e))?;
-        Ok(())
-    } else if cmd.is_querying_share_data() {
+    if cmd.is_querying_share_data() {
         let w = shared.handle_req(&cmd)?;
         to_session
             .send(Message::new(req_id, w))
@@ -237,22 +209,14 @@ async fn handle_req(
             .map_err(|e| anyhow::anyhow!("read loop -> write loop -> {:?}", e))?;
         Ok(())
     } else {
-        let current_id = current_id.fetch_add(1, Ordering::Relaxed);
-        // TODO write to rocksdb then send to executor
         let input = Input {
             session,
             req_id,
-            sequence: current_id,
+            sequence: 0,
             cmd,
         };
-        let event = input.try_into()?;
         to_back
-            .send(event)
+            .send(input)
             .map_err(|e| anyhow::anyhow!("read loop -> executor -> {:?}", e))?;
     }
-}
-
-// TODO
-fn ensure_loaded(id: u64) -> u64 {
-    0
 }

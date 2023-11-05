@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::{core::*, orderbook::*};
 use anyhow::{anyhow, ensure};
 use rust_decimal::prelude::Zero;
 use serde::{Deserialize, Serialize};
-
-use crate::{core::*, orderbook::AskOrBid};
 
 #[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq, Default)]
 pub struct Balance {

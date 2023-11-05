@@ -222,31 +222,13 @@ pub enum Event {
     Dump(EventId, Timestamp),
 }
 
-impl Event {
-    // pub fn is_trading_cmd(&self) -> bool {
-    //     matches!(self, Event::Limit(_, _, _)) || matches!(self, Event::Cancel(_, _, _))
-    // }
-
-    // pub fn is_assets_cmd(&self) -> bool {
-    //     matches!(self, Event::TransferIn(_, _, _)) || matches!(self, Event::TransferOut(_, _, _))
-    // }
-
-    // pub fn get_sequence(&self) -> u64 {
-    //     match self {
-    //         Event::Limit(id, _, _, _, _) => *id,
-    //         Event::Cancel(id, _, _, _, _) => *id,
-    //         Event::TransferOut(id, _, _) => *id,
-    //         Event::TransferIn(id, _, _) => *id,
-    //         Event::UpdateSymbol(id, _, _, ) => *id,
-    //         _ => 0,
-    //     }
-    // }
-}
+impl Event {}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LimitCmd {
     pub symbol: Symbol,
     pub user_id: UserId,
+    // TODO this field is deprecated
     pub order_id: OrderId,
     pub price: Price,
     pub amount: Amount,

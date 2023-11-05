@@ -158,16 +158,34 @@ pub fn max_number() -> Amount {
 
 // we only keep the last 1000 transfer_in/out receipts to remove duplicates
 const RECEIPTS_RECORDS_CAPACITY: usize = 1000;
+const MAX_OPEN_ORDERS_PER_SYMBOL: usize = 100;
+
+#[derive(Clone, Debug)]
+pub struct PendingOrder {
+    order_id: u64,
+    symbol: Symbol,
+    direction: u8,
+    create_timestamp: u64,
+    amount: String,
+    price: String,
+    status: u8,
+    matched_quote_amount: String,
+    matched_base_amount: String,
+    base_fee: Decimal,
+    quote_fee: Decimal,
+}
 
 #[derive(Clone, Debug)]
 pub struct Ephemeral {
     onchain_receipt_records: IndexSet<(u32, UserId)>,
+    user_pending_orders: HashMap<(Symbol, UserId), HashMap<OrderId, PendingOrder>>,
 }
 
 impl Ephemeral {
     pub fn new() -> Self {
         Self {
             onchain_receipt_records: IndexSet::with_capacity(RECEIPTS_RECORDS_CAPACITY),
+            user_pending_orders: HashMap::new(),
         }
     }
 

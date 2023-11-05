@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use rust_decimal::{prelude::Zero, Decimal};
-
 use crate::{
     assets,
     core::*,
@@ -21,6 +19,7 @@ use crate::{
     orderbook::AskOrBid,
     output::Output,
 };
+use rust_decimal::{prelude::Zero, Decimal};
 
 pub fn clear(
     accounts: &mut Accounts,

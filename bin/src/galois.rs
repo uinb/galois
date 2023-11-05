@@ -13,24 +13,42 @@
 // limitations under the License.
 
 use clap::Parser;
-use galois_engine::{
-    config, executor, fusotao, output, sequence, server, shared::Shared, snapshot,
-};
-use std::sync::{atomic, mpsc, Arc};
+use engine::*;
+use std::sync::mpsc::channel;
 
+/// Overview:
+///
+///           sidecar   chain <-+
+///             |         |      \
+///             |         |       \
+///             v         v        \
+///   +-----> server   scanner      +
+///   |          \       /          |
+///   |\          \     /           |
+///   | \          \   /            |
+///   |  +-<-    sequencer          |
+///   +              |              |
+///   |\             |              |
+///   | \            v              |
+///   |  +-<-    executor           |
+///   +            /   \            +
+///    \          /     \          /
+///     \        /       \        /
+///      +-<- output   prover ->-+
+///
 fn start() {
     let (id, coredump) = snapshot::load().unwrap();
-    let (output_tx, output_rx) = mpsc::channel();
-    let (event_tx, event_rx) = mpsc::channel();
-    let (proof_tx, proof_rx) = mpsc::channel();
-    let (msg_tx, msg_rx) = mpsc::channel();
+    let (output_tx, output_rx) = channel();
+    let (event_tx, event_rx) = channel();
+    let (proof_tx, proof_rx) = channel();
+    let (input_tx, input_rx) = channel();
+    let (reply_tx, reply_rx) = channel();
+    let prover = fusotao::init(proof_rx);
+    let shared = shared::Shared::new(prover.state, config::C.fusotao.get_x25519_prikey());
     output::init(output_rx);
-    let fuso = fusotao::init(proof_rx);
-    let shared = Shared::new(fuso.state, config::C.fusotao.get_x25519_prikey().unwrap());
-    executor::init(event_rx, output_tx, proof_tx, msg_tx, coredump);
-    let ready = Arc::new(atomic::AtomicBool::new(false));
-    sequence::init(event_tx.clone(), id, ready.clone());
-    server::init(event_tx, msg_rx, shared, ready);
+    executor::init(event_rx, output_tx, proof_tx, reply_tx.clone(), coredump);
+    sequencer::init(input_rx, event_tx, reply_tx, id);
+    server::init(msg_rx, input_tx, shared);
 }
 
 fn main() {
