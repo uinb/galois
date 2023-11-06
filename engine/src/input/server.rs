@@ -209,12 +209,7 @@ async fn handle_req(
             .map_err(|e| anyhow::anyhow!("read loop -> write loop -> {:?}", e))?;
         Ok(())
     } else {
-        let input = Input {
-            session,
-            req_id,
-            sequence: 0,
-            cmd,
-        };
+        let input = Input::new_with_req(cmd, session, req_id);
         to_back
             .send(input)
             .map_err(|e| anyhow::anyhow!("read loop -> executor -> {:?}", e))?;

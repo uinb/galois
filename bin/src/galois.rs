@@ -14,7 +14,6 @@
 
 use clap::Parser;
 use engine::*;
-use std::sync::mpsc::channel;
 
 /// Overview:
 ///
@@ -34,20 +33,22 @@ use std::sync::mpsc::channel;
 ///   +            /   \            +
 ///    \          /     \          /
 ///     \        /       \        /
-///      +-<- output   prover ->-+
+///      +-<- output  committer -+
 ///
 fn start() {
     let (id, coredump) = snapshot::load().unwrap();
-    let (output_tx, output_rx) = channel();
-    let (event_tx, event_rx) = channel();
-    let (proof_tx, proof_rx) = channel();
-    let (input_tx, input_rx) = channel();
-    let (reply_tx, reply_rx) = channel();
-    let prover = fusotao::init(proof_rx);
-    let shared = shared::Shared::new(prover.state, config::C.fusotao.get_x25519_prikey());
+    let (connector, state) = fusotao::sync().unwrap();
+    let (output_tx, output_rx) = std::sync::mpsc::channel();
+    let (event_tx, event_rx) = std::sync::mpsc::channel();
+    let (proof_tx, proof_rx) = std::sync::mpsc::channel();
+    let (input_tx, input_rx) = std::sync::mpsc::channel();
+    let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+    let shared = Shared::new(prover.state, C.fusotao.get_x25519());
     output::init(output_rx);
+    committer::init(proof_rx);
     executor::init(event_rx, output_tx, proof_tx, reply_tx.clone(), coredump);
     sequencer::init(input_rx, event_tx, reply_tx, id);
+    scanner::init(input_tx.clone(), connector, state);
     server::init(msg_rx, input_tx, shared);
 }
 
@@ -56,7 +57,7 @@ fn main() {
     match opts.sub {
         Some(config::SubCmd::EncryptConfig) => config::print_config(&opts.file).unwrap(),
         None => {
-            lazy_static::initialize(&config::C);
+            lazy_static::initialize(&C);
             start();
         }
     }

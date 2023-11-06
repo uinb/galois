@@ -123,7 +123,7 @@ pub struct FusotaoConfig {
 }
 
 impl FusotaoConfig {
-    pub fn get_x25519_prikey(&self) -> String {
+    pub fn get_x25519(&self) -> String {
         self.x25519_priv.clone()
     }
 }

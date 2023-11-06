@@ -29,6 +29,26 @@ pub struct Input {
     pub cmd: Command,
 }
 
+impl Input {
+    pub fn new_with_req(cmd: Command, session: u64, req_id: u64) -> Self {
+        Self {
+            session,
+            req_id,
+            sequence: 0,
+            cmd,
+        }
+    }
+
+    pub fn new(cmd: Command) -> Self {
+        Self {
+            session: 0,
+            req_id: 0,
+            sequence: 0,
+            cmd,
+        }
+    }
+}
+
 impl TryInto<Event> for Input {
     type Error = anyhow::Error;
 

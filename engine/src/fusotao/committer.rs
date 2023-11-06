@@ -95,3 +95,29 @@ fn append(proof: Option<Proof>, pending: &mut Vec<Proof>) {
         }
     }
 }
+
+fn start_submitting(api: FusoApi, proving_progress: Arc<AtomicU64>) {
+    let api = api.clone();
+    log::info!(
+        "submitting proofs from {}",
+        proving_progress.load(Ordering::Relaxed)
+    );
+    std::thread::spawn(move || loop {
+        let start_from = proving_progress.load(Ordering::Relaxed);
+        let new_max_submitted = std::panic::catch_unwind(|| -> u64 {
+            let (end_to, truncated) = Self::fetch_proofs(start_from);
+            if start_from == end_to {
+                return end_to;
+            }
+            log::info!("[+] unsubmitted proofs [{}:{}] found", start_from, end_to);
+            let submit_result = Self::submit_batch(&api, truncated);
+            Self::handle_submit_result(submit_result, (start_from, end_to))
+        })
+        .unwrap_or(start_from);
+        if start_from == new_max_submitted {
+            std::thread::sleep(Duration::from_millis(1000));
+            continue;
+        }
+        proving_progress.store(new_max_submitted, Ordering::Relaxed);
+    });
+}

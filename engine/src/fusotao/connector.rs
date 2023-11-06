@@ -22,10 +22,16 @@ use sp_core::{sr25519::Public, Pair};
 use std::{sync::atomic::Ordering, time::Duration};
 use sub_api::{rpc::WsRpcClient, Hash};
 
+#[derive(Clone)]
 pub struct FusoConnector {
     pub api: FusoApi,
     pub signer: Sr25519Key,
-    pub state: Arc<FusoState>,
+}
+
+impl FusoConnector {
+    pub fn get_pubkey(&self) -> Public {
+        self.signer.public().clone()
+    }
 }
 
 impl FusoConnector {
@@ -114,18 +120,18 @@ impl FusoConnector {
     }
 
     fn fully_sync_chain(
-        who: &Public,
+        dominator: &Public,
         api: &FusoApi,
         hash: Hash,
-        util: u32,
+        until: u32,
     ) -> anyhow::Result<FusoState> {
         let state = FusoState::default();
         let decoder = RuntimeDecoder::new(api.metadata.clone());
 
         // proving progress, map AccountId -> Dominator
-        let key = api
-            .metadata
-            .storage_map_key::<FusoAccountId>("Verifier", "Dominators", *who)?;
+        let key =
+            api.metadata
+                .storage_map_key::<FusoAccountId>("Verifier", "Dominators", *dominator)?;
         let payload = api
             .get_opaque_storage_by_key_hash(key, Some(hash))?
             .ok_or(anyhow!(""))?;
@@ -137,7 +143,7 @@ impl FusoConnector {
         // market list, double map AccountId, Symbol -> Market
         let key = api
             .metadata
-            .storage_double_map_partial_key::<FusoAccountId>("Market", "Markets", who)?;
+            .storage_double_map_partial_key::<FusoAccountId>("Market", "Markets", dominator)?;
         let payload = api
             .get_opaque_storage_pairs_by_key_hash(key, Some(hash))?
             .ok_or(anyhow!(""))?;
@@ -145,7 +151,7 @@ impl FusoConnector {
             let symbol = RuntimeDecoder::extract_double_map_identifier::<(u32, u32), FusoAccountId>(
                 StorageHasher::Blake2_128Concat,
                 StorageHasher::Blake2_128Concat,
-                who,
+                dominator,
                 &mut k.as_slice(),
             )?;
             let market = OnchainSymbol::decode(&mut v.as_slice())?;
@@ -181,7 +187,7 @@ impl FusoConnector {
         // pending receipts, double map AccountId, AccountId -> Receipt
         let key = api
             .metadata
-            .storage_double_map_partial_key::<FusoAccountId>("Verifier", "Receipts", who)?;
+            .storage_double_map_partial_key::<FusoAccountId>("Verifier", "Receipts", dominator)?;
         let payload = api
             .get_opaque_storage_pairs_by_key_hash(key, Some(hash))?
             .ok_or(anyhow!(""))?;
@@ -190,7 +196,7 @@ impl FusoConnector {
             let user = RuntimeDecoder::extract_double_map_identifier::<FusoAccountId, FusoAccountId>(
                 StorageHasher::Blake2_128Concat,
                 StorageHasher::Blake2_128Concat,
-                who,
+                dominator,
                 &mut k.as_slice(),
             )?;
             let unexecuted = decoder.decode_raw_enum(
@@ -224,8 +230,8 @@ impl FusoConnector {
             log::info!("pending receipts detected: {:?}", commands);
         }
         sequence::insert_sequences(&commands)?;
-        state.scanning_progress.store(util + 1, Ordering::Relaxed);
-        state.chain_height.store(util, Ordering::Relaxed);
+        state.scanning_progress.store(until + 1, Ordering::Relaxed);
+        state.chain_height.store(until, Ordering::Relaxed);
         Ok(state)
     }
 

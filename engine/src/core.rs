@@ -14,11 +14,12 @@
 
 pub use crate::{
     assets::Balance,
+    fusotao::GlobalStates,
     matcher::{Role, State as OrderState},
     orderbook::AskOrBid,
+    orderbook::OrderBook,
     sequence::InOrOut,
 };
-use crate::{fusotao::GlobalStates, orderbook::OrderBook};
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use indexmap::IndexSet;
 use rust_decimal::{prelude::Zero, Decimal};
