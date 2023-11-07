@@ -16,13 +16,13 @@ use crate::{config::C, fusotao::*};
 use std::{sync::mpsc::Receiver, time::Duration};
 
 pub fn init(rx: Receiver<Proof>, connector: FusoConnector, progress: Arc<FusoState>) {
-    // let mut pending = Vec::with_capacity(100);
+    let mut pending = Vec::with_capacity(C.fusotao.proof_batch_limit);
     std::thread::spawn(move || loop {
         let proof = match rx.recv_timeout(Duration::from_millis(10_000)) {
             Ok(p) => Some(p),
             Err(RecvTimeoutError::Timeout) => None,
             Err(RecvTimeoutError::Disconnected) => {
-                log::error!("Proof persistence thread interrupted!");
+                log::error!("Proof committer interrupted!");
                 break;
             }
         };

@@ -37,23 +37,31 @@ impl FusoConnector {
             .map(|api| api.set_signer(signer.clone()))
             .inspect_err(|e| log::error!("{:?}", e))
             .map_err(|_| anyhow!("fusotao node not available or metadata check failed."))?;
-        // let state = if dry_run {
-        //     Arc::new(Default::default())
-        // } else {
-        //     let (block_number, hash) = Self::get_finalized_block(&api)?;
-        //     let state = Arc::new(Self::fully_sync_chain(
-        //         &signer.public(),
-        //         &api,
-        //         hash,
-        //         block_number,
-        //     )?);
-        //     state
-        // };
         Ok(Self { api, signer })
     }
 
     pub fn get_pubkey(&self) -> Public {
         self.signer.public().clone()
+    }
+
+    pub fn sync_progress(&self) -> anyhow::Result<FusoState> {
+        let state = FusoState::default();
+        let (block_number, hash) = self.get_finalized_block()?;
+        let decoder = RuntimeDecoder::new(self.api.metadata.clone());
+        let key = self.api.metadata.storage_map_key::<FusoAccountId>(
+            "Verifier",
+            "Dominators",
+            self.get_pubkey(),
+        )?;
+        let payload = self
+            .api
+            .get_opaque_storage_by_key_hash(key, Some(hash))?
+            .ok_or(anyhow!("{} isn't the prover", self.get_pubkey()))?;
+        let result = Dominator::decode(&mut payload.as_slice())?;
+        state
+            .proved_event_id
+            .store(result.sequence.0, Ordering::Relaxed);
+        Ok(state)
     }
 
     pub fn fully_sync_chain(&self) -> anyhow::Result<FusoState> {

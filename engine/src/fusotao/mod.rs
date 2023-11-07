@@ -56,7 +56,7 @@ const MAX_EXTRINSIC_SIZE: usize = 3 * 1024 * 1024;
 /// 2. new or from public
 pub fn sync() -> anyhow::Result<(FusoConnector, Arc<FusoState>)> {
     let connector = FusoConnector::new(C.dry_run.is_some())?;
-    let state = connector.fully_sync_chain()?;
+    let state = connector.sync_progress()?;
     log::info!("chain states synchronized");
     Ok((connector, Arc::new(state)))
 }
@@ -68,7 +68,6 @@ pub struct FusoState {
     pub proved_event_id: Arc<AtomicU64>,
     pub scanning_progress: Arc<AtomicU32>,
     pub symbols: DashMap<Symbol, OnchainSymbol>,
-    // TODO transform OnchainCurrency to offchain currency
     pub currencies: DashMap<Currency, OnchainToken>,
     pub brokers: DashMap<UserId, u32>,
 }

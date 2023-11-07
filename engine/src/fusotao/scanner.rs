@@ -24,10 +24,11 @@ use sub_api::{rpc::WsRpcClient, Hash};
 
 pub fn init(tx: Sender<Input>, connector: FusoConnector, state: Arc<FusoState>) {
     let decoder = RuntimeDecoder::new(connector.api.metadata.clone());
+    // TODO fully sync
     thread::spawn(move || loop {
         let at = state.scanning_progress.load(Ordering::Relaxed);
         if let Ok((finalized, _)) = connector.get_finalized_block() {
-            log::info!("block {} finalized, current progress={}", finalized, at);
+            log::info!("block {} finalized, ours {}", finalized, at);
             state.chain_height.store(finalized, Ordering::Relaxed);
             if finalized >= at {
                 match handle_finalized_block(&connector, at, &decoder, &state, &tx) {
@@ -41,7 +42,7 @@ pub fn init(tx: Sender<Input>, connector: FusoConnector, state: Arc<FusoState>) 
                 thread::sleep(Duration::from_millis(6000));
             }
         } else {
-            log::error!("scanning connection temporarily unavailable, retrying...");
+            log::error!("scanning connection temporarily lost, retrying...");
             thread::sleep(Duration::from_millis(1000));
         }
     });
@@ -139,8 +140,6 @@ fn handle_finalized_block(
                         // useless
                         cmd.min_vol = Some(Decimal::from_str("10").unwrap());
                         cmd.enable_market_order = Some(false);
-                        // TODO
-                        // crate::output::legacy::create_mysql_table((decoded.base, decoded.quote))?;
                         let _ = to_seq.send(Input::new(cmd));
                         state.symbols.insert(
                             (decoded.base, decoded.quote),

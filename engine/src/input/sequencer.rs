@@ -45,8 +45,10 @@ pub fn init(
             if let Ok(event) = input.try_into() {
                 save(current_id, cmd)?;
                 to_executor.send(event)?;
+                if current_id % C.sequence.checkpoint == 0 {
+                    to_executor.send(Event::Dump(current_id))?;
+                }
                 current_id += 1;
-                // TODO auto generate dump command
             } else {
                 to_server.send((session, Message::new(req_id, vec![])))?;
             }
@@ -80,7 +82,7 @@ fn ensure_fully_loaded(init_at: u64, tx: Sender<Event>) -> anyhow::Result<u64> {
     Ok(current_id + 1)
 }
 
-pub fn drop_before(id: u64) -> anyhow::Result<()> {
+pub fn remove_before(id: u64) -> anyhow::Result<()> {
     let mut batch = WriteBatchWithTransaction::<false>::default();
     batch.delete_range(id_to_key(1), id_to_key(id));
     STORAGE.write(batch)?;
@@ -152,21 +154,19 @@ mod test {
     pub fn test_deserialize_cmd() {
         let transfer_in = r#"{"currency":100, "amount":"100.0", "user_id":"5Ccr8Qcp6NBMCvdUHSoqDaQMJHnA5PAC879NbWkzaiUwBdMm", "cmd":11, "block_number":1000, "extrinsic_hash":""}"#;
         let e = serde_json::from_str::<Command>(transfer_in).unwrap();
-        let s: anyhow::Result<Event> = Sequence {
-            id: 1,
+        let s: anyhow::Result<Event> = Input {
             cmd: e,
-            status: 0,
-            timestamp: 0,
+            session: 0,
+            req_id: 0,
         }
         .try_into();
         assert!(s.is_ok());
         let bid_limit = r#"{"quote":100, "base":101, "cmd":1, "price":"10.0", "amount":"0.5", "order_id":1, "user_id":"5Ccr8Qcp6NBMCvdUHSoqDaQMJHnA5PAC879NbWkzaiUwBdMm","nonce":1,"signature":""}"#;
         let e = serde_json::from_str::<Command>(bid_limit).unwrap();
         let s: anyhow::Result<Event> = Sequence {
-            id: 2,
             cmd: e,
-            status: 0,
-            timestamp: 0,
+            session: 1,
+            req_id: 0,
         }
         .try_into();
         assert!(s.is_ok());

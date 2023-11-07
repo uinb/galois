@@ -16,17 +16,7 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Parser)]
-#[command(author, version, about = r#"
-                 **       **
-   *******     ******     **               **    ******
-  ***               **    **     *****     **   **    *
- **              *****    **   ***   ***       **
- **            *******    **   **     **   **   **
- **    *****  **    **    **   *       *   **     *****
-  **     ***  **    **    **   **     **   **         **
-   *********   **  ****   **    *******    **    **   **
-      *    *    ****  *   **      ***      **     ****"#,
-long_about = None)]
+#[command(author, version)]
 pub struct GaloisCli {
     #[arg(short('c'), long("config"), required = true, value_name = "FILE")]
     pub file: std::path::PathBuf,
@@ -72,18 +62,10 @@ pub trait EncryptedConfig {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ServerConfig {
     pub bind_addr: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct SequenceConfig {
     pub data_home: String,
-    pub checkpoint: usize,
-    pub batch_size: usize,
-    pub fetch_intervel_ms: u64,
-    pub enable_from_genesis: bool,
 }
 
-impl SequenceConfig {
+impl ServerConfig {
     pub fn get_coredump_path(&self) -> String {
         format!("{}/coredump/", self.data_home)
     }
@@ -91,6 +73,12 @@ impl SequenceConfig {
     pub fn get_storage_path(&self) -> String {
         format!("{}/storage/", self.data_home)
     }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct SequenceConfig {
+    pub checkpoint: u64,
+    pub enable_from_genesis: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -122,7 +110,6 @@ pub struct FusotaoConfig {
     pub key_seed: String,
     pub claim_block: u32,
     pub proof_batch_limit: usize,
-    pub compress_proofs: bool,
     pub x25519_priv: String,
 }
 
@@ -224,12 +211,12 @@ pub fn test_default() {
     let toml = r#"
         [server]
         bind_addr = "127.0.0.1:8097"
+        data_home = "/tmp/galois"
+
         [sequence]
         checkpoint = 100000
-        data_home = "/tmp/galois"
-        batch_size = 1000
-        fetch_intervel_ms = 5
         enable_from_genesis = true
+
         [fusotao]
         node_url = "ws://localhost:9944"
         key_seed = "//Alice"
@@ -239,7 +226,6 @@ pub fn test_default() {
         compress_proofs = true
         fee_adjust_threshold = 1000
     "#;
-    let config = init_config(&toml, None).unwrap();
-    let mysql_opts = mysql::Opts::from_url(&config.mysql.url).unwrap();
-    assert_eq!("password", mysql_opts.get_pass().unwrap());
+    let config = init_config(&toml, None);
+    assert!(config.is_ok())
 }

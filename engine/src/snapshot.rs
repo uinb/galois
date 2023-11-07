@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{config, core};
+use crate::{config, core, sequencer};
 
 /// dump snapshot at id(executed)
 pub fn dump(id: u64, data: &core::Data) {
@@ -21,7 +21,7 @@ pub fn dump(id: u64, data: &core::Data) {
     }
     let data = data.clone();
     std::thread::spawn(move || -> anyhow::Result<()> {
-        let f = std::path::Path::new(&config::C.sequence.get_coredump_path())
+        let f = std::path::Path::new(&config::C.server.get_coredump_path())
             .join(id.to_string())
             .with_extension("gz");
         let file = std::fs::OpenOptions::new()
@@ -29,6 +29,7 @@ pub fn dump(id: u64, data: &core::Data) {
             .create_new(true)
             .open(f)?;
         data.into_raw(file)?;
+        sequencer::remove_before(id)?;
         log::info!("snapshot dumped at sequence {}", id);
         Ok(())
     });
@@ -45,7 +46,7 @@ fn get_id(path: &std::path::Path) -> u64 {
 
 /// return the id(not executed yet), and the snapshot
 pub fn load() -> anyhow::Result<(u64, core::Data)> {
-    let dir = std::fs::read_dir(&config::C.sequence.get_coredump_path())?;
+    let dir = std::fs::read_dir(&config::C.server.get_coredump_path())?;
     let file_path = dir
         .map(|e| e.unwrap())
         .filter(|f| f.file_type().unwrap().is_file())

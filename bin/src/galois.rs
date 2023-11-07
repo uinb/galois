@@ -58,8 +58,24 @@ fn main() {
     match opts.sub {
         Some(config::SubCmd::EncryptConfig) => config::print_config(&opts.file).unwrap(),
         None => {
+            print_banner();
             lazy_static::initialize(&C);
             start();
         }
     }
+}
+
+fn print_banner() {
+    println!(
+        r#"
+        **       **
+   *******     ******     **               **    ******
+  ***               **    **     *****     **   **    *
+ **              *****    **   ***   ***       **
+ **            *******    **   **     **   **   **
+ **    *****  **    **    **   *       *   **     *****
+  **     ***  **    **    **   **     **   **         **
+   *********   **  ****   **    *******    **    **   **
+      *    *    ****  *   **      ***      **     ****"#
+    );
 }
