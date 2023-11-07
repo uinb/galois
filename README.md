@@ -8,19 +8,26 @@
 ## Introduction
 
 Galois is an extremely high performance matching engine written in Rust which uses event-sourcing pattern to handle tens of thousands of orders per second or even better, depending on the performance of persistence. 
-Basic architecture is shown below.
 
 ```
-                   core dump(disk)
-                        ^
-                        ^
-                   +----------+
-events(mysql)  >>  |  galois  |  >> match results(mysql)/best n price(redis)
-will be replaced   +----------+     will be replaced
-                        ^
-                        ^
-                 query requests(TCP) 
-                       
+           sidecar   chain <-+
+             |         |      \
+             |         |       \
+             v         v        \
+   +-----> server   scanner      +
+   |          \       /          |
+   |\          \     /           |
+   | \          \   /            |
+   |  +-<-    sequencer          |
+   +              |              |
+   |\             |              |
+   | \            v              |
+   |  +-<-    executor           |
+   +            /   \            +
+    \          /     \          /
+     \        /       \        /
+      +-<- output  committer -+
+
 ```
 
 Galois works as the prover(a.k.a Proof of Matches) component of [Fusotao](https://github.com/uinb/fusotao). From v0.4.0, we don't support running Galois in standalone mode anymore.
@@ -30,18 +37,8 @@ According to the Roadmap 2023, the UINB team is working on implementing the Proo
 
 [Fusotao Docs](https://docs.fusotao.org/)
 
-### Dependencies
-
-- MySQL(will be replaced with RocksDB): persist the events and output the match result
-- Redis(will be removed): output the best n price of the orderbook
-
 ### Quick Start
 
-TODO, or refer to the old version.
-
-### Instructions
-
-TODO, or refer to the old version.
 
 ## License
 Galois is licensed under [Apache 2.0](LICENSE).

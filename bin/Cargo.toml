@@ -1,6 +1,6 @@
 [package]
 name = "galois-bin"
-version = "0.5.0-dev"
+version = "0.7.0-dev"
 authors = ["UINB Technologies"]
 edition = "2021"
 license = "Apache-2.0"
