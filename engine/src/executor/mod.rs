@@ -20,7 +20,7 @@ pub mod orderbook;
 use crate::{
     core::*,
     fusotao::{Proof, Prover},
-    input::{Event, Input, Inspection, Message},
+    input::{Event, Input, Message},
     orderbook::*,
     output::{self, Output},
     sequencer, snapshot,
@@ -32,18 +32,22 @@ use std::{
     convert::TryInto,
     sync::mpsc::{Receiver, Sender},
 };
+use thiserror::Error;
 
 type OutputChannel = Sender<Vec<Output>>;
-type DriverChannel = Receiver<Input>;
+type DriverChannel = Receiver<Event>;
 type ProofChannel = Sender<Proof>;
 type ResponseChannel = Sender<(u64, Message)>;
 
 #[derive(Debug, Error)]
 pub enum EventsError {
+    #[error("event {0} interrupted")]
     Interrupted(u64),
     /// event id, session id, request id, error
+    #[error("event {0} executed failed, {3}")]
     EventRejected(u64, u64, u64, anyhow::Error),
     /// event id, error
+    #[error("event {0} executed failed, {1}")]
     EventIgnored(u64, anyhow::Error),
 }
 
@@ -62,18 +66,25 @@ pub fn init(
         log::info!("executor initialized");
         loop {
             let event = recv.recv().unwrap();
-            match do_execute(event, &mut data, &mut ephemeral, &output, &response, &prover) {
+            match do_execute(
+                event,
+                &mut data,
+                &mut ephemeral,
+                &output,
+                &response,
+                &prover,
+            ) {
                 Ok(_) => {}
-                Err(EventExecutionError::EventRejected(id, session, req_id, e)) => {
+                Err(EventsError::EventRejected(id, session, req_id, e)) => {
                     log::debug!("event {} rejected: {}", id, e);
                     let msg = serde_json::json!({"error": e.to_string()});
                     let v = serde_json::to_vec(&msg).unwrap_or_default();
                     let _ = response.send((session, Message::new(req_id, v)));
                 }
-                Err(EventExecutionError::EventIgnored(id, e)) => {
+                Err(EventsError::EventIgnored(id, e)) => {
                     log::info!("event {} ignored: {}", id, e);
                 }
-                Err(EventExecutionError::Interrupted(id)) => {
+                Err(EventsError::Interrupted(id)) => {
                     log::info!("executor thread interrupted at {}", id);
                     break;
                 }
@@ -90,7 +101,7 @@ fn do_execute(
     output: &OutputChannel,
     response: &ResponseChannel,
     prover: &Prover,
-) -> EventExecutionResult {
+) -> ExecutionResult {
     match event {
         Event::Limit(id, cmd, time, session, req_id) => {
             data.current_event_id = id;
@@ -151,7 +162,7 @@ fn do_execute(
                 &out,
                 &mr,
             );
-            sender.send(out).map_err(|_| EventsError::Interrupted(id))
+            output.send(out).map_err(|_| EventsError::Interrupted(id))
         }
         Event::Cancel(id, cmd, time, session, req_id) => {
             data.current_event_id = id;
@@ -215,9 +226,9 @@ fn do_execute(
                 &out,
                 &mr,
             );
-            sender.send(out).map_err(|_| EventsError::Interrupted)
+            output.send(out).map_err(|_| EventsError::Interrupted(id))
         }
-        Event::TransferOut(id, cmd, _) => {
+        Event::TransferOut(id, cmd) => {
             data.current_event_id = id;
             if !ephemeral.save_receipt((cmd.block_number, cmd.user_id)) {
                 return Err(EventsError::EventIgnored(
@@ -253,7 +264,7 @@ fn do_execute(
                 }
             }
         }
-        Event::TransferIn(id, cmd, _) => {
+        Event::TransferIn(id, cmd) => {
             data.current_event_id = id;
             if !ephemeral.save_receipt((cmd.block_number, cmd.user_id)) {
                 return Err(EventsError::EventIgnored(
@@ -285,7 +296,7 @@ fn do_execute(
             prover.prove_assets_cmd(&mut data.merkle_tree, id, cmd, &before, &after);
             Ok(())
         }
-        Event::UpdateSymbol(id, cmd, _) => {
+        Event::UpdateSymbol(id, cmd) => {
             data.current_event_id = id;
             if !data.orderbooks.contains_key(&cmd.symbol) {
                 let orderbook = OrderBook::new(
@@ -337,7 +348,7 @@ fn do_execute(
         Event::QueryAccounts(user_id, session, req_id) => {
             let a = assets::get_account_to_owned(&data.accounts, &user_id);
             let v = serde_json::to_vec(&a).unwrap_or_default();
-            let _ = response,send((session, Message::new(req_id, v)));
+            let _ = response.send((session, Message::new(req_id, v)));
             Ok(())
         }
         Event::QueryExchangeFee(symbol, session, req_id) => {

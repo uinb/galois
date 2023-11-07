@@ -53,6 +53,7 @@ fn start() {
 }
 
 fn main() {
+    env_logger::init();
     let opts = config::GaloisCli::parse();
     match opts.sub {
         Some(config::SubCmd::EncryptConfig) => config::print_config(&opts.file).unwrap(),

@@ -12,38 +12,49 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::core::*;
+use crate::{core::*, fusotao::ToBlockChainNumeric};
+use anyhow::{anyhow, ensure};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use std::{str::FromStr, time::SystemTime};
 
 pub mod sequencer;
 pub mod server;
-
-pub use sequencer::*;
 
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
 pub struct Input {
     pub session: u64,
     pub req_id: u64,
     pub sequence: u64,
+    pub timestamp: u64,
     pub cmd: Command,
 }
 
 impl Input {
     pub fn new_with_req(cmd: Command, session: u64, req_id: u64) -> Self {
+        let time = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
         Self {
             session,
             req_id,
             sequence: 0,
+            timestamp: time,
             cmd,
         }
     }
 
     pub fn new(cmd: Command) -> Self {
+        let time = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
         Self {
             session: 0,
             req_id: 0,
             sequence: 0,
+            timestamp: time,
             cmd,
         }
     }
@@ -117,7 +128,6 @@ impl TryInto<Event> for Input {
                     block_number: self.cmd.block_number.ok_or(anyhow!(""))?,
                     extrinsic_hash: hex::decode(self.cmd.extrinsic_hash.ok_or(anyhow!(""))?)?,
                 },
-                self.timestamp,
             )),
             TRANSFER_IN => Ok(Event::TransferIn(
                 self.sequence,
@@ -133,7 +143,6 @@ impl TryInto<Event> for Input {
                     block_number: self.cmd.block_number.ok_or(anyhow!(""))?,
                     extrinsic_hash: hex::decode(self.cmd.extrinsic_hash.ok_or(anyhow!(""))?)?,
                 },
-                self.timestamp,
             )),
             UPDATE_SYMBOL => Ok(Event::UpdateSymbol(
                 self.sequence,
@@ -183,9 +192,6 @@ impl TryInto<Event> for Input {
                         .ok_or(anyhow!(""))?,
                     enable_market_order: self.cmd.enable_market_order.ok_or(anyhow!(""))?,
                 },
-                self.timestamp,
-                self.session,
-                self.req_id,
             )),
             QUERY_ORDER => Ok(Event::QueryOrder(
                 self.cmd.symbol().ok_or(anyhow!(""))?,
@@ -203,11 +209,6 @@ impl TryInto<Event> for Input {
                 UserId::from_str(self.cmd.user_id.as_ref().ok_or(anyhow!(""))?)?,
                 self.session,
                 self.req_id,
-            )),
-            UPDATE_DEPTH => Ok(Event::UpdateDepth),
-            CONFIRM_ALL => Ok(Event::ConfirmAll(
-                self.cmd.from.ok_or(anyhow!(""))?,
-                self.cmd.exclude.ok_or(anyhow!(""))?,
             )),
             QUERY_EXCHANGE_FEE => Ok(Event::QueryExchangeFee(
                 self.cmd.symbol().ok_or(anyhow!(""))?,
@@ -230,9 +231,9 @@ pub enum Event {
     // write
     Limit(EventId, LimitCmd, Timestamp, u64, u64),
     Cancel(EventId, CancelCmd, Timestamp, u64, u64),
-    TransferOut(EventId, AssetsCmd, Timestamp),
-    TransferIn(EventId, AssetsCmd, Timestamp),
-    UpdateSymbol(EventId, SymbolCmd, Timestamp),
+    TransferOut(EventId, AssetsCmd),
+    TransferIn(EventId, AssetsCmd),
+    UpdateSymbol(EventId, SymbolCmd),
     // read
     QueryOrder(Symbol, OrderId, u64, u64),
     QueryBalance(UserId, Currency, u64, u64),
@@ -278,8 +279,8 @@ impl std::convert::TryFrom<u32> for InOrOut {
 
     fn try_from(x: u32) -> anyhow::Result<Self> {
         match x {
-            crate::cmd::TRANSFER_IN => Ok(InOrOut::In),
-            crate::cmd::TRANSFER_OUT => Ok(InOrOut::Out),
+            cmd::TRANSFER_IN => Ok(InOrOut::In),
+            cmd::TRANSFER_OUT => Ok(InOrOut::Out),
             _ => Err(anyhow::anyhow!("")),
         }
     }
@@ -315,7 +316,6 @@ pub mod cmd {
     pub const ASK_LIMIT: u32 = 0;
     pub const BID_LIMIT: u32 = 1;
     pub const CANCEL: u32 = 4;
-    #[must_not_use]
     pub const CANCEL_ALL: u32 = 5; /* DEPRECATED */
     pub const TRANSFER_OUT: u32 = 10;
     pub const TRANSFER_IN: u32 = 11;
@@ -327,9 +327,7 @@ pub mod cmd {
     pub const QUERY_EXCHANGE_FEE: u32 = 21;
 
     pub const DUMP: u32 = 17;
-    #[must_not_use]
     pub const UPDATE_DEPTH: u32 = 18; /* DEPRECATED */
-    #[must_not_use]
     pub const CONFIRM_ALL: u32 = 19; /* DEPRECATED */
 
     pub const QUERY_PROVING_PERF_INDEX: u32 = 22; /* DEPRECATED  */

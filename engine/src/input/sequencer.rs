@@ -23,7 +23,7 @@ use std::{
     str::FromStr,
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc::Sender,
+        mpsc::*,
         Arc,
     },
     time::{Duration, SystemTime},
@@ -35,7 +35,7 @@ pub fn init(
     to_server: Sender<(u64, Message)>,
     init_at: u64,
 ) {
-    let current_id = ensure_fully_loaded(init_at, tx.clone());
+    let current_id = ensure_fully_loaded(init_at, to_executor.clone());
     std::thread::spawn(move || -> anyhow::Result<()> {
         let mut current_id = current_id;
         loop {
@@ -44,10 +44,10 @@ pub fn init(
             input.sequence = current_id;
             if let Ok(event) = input.try_into() {
                 current_id += 1;
-                // TODO save to rocksdb
                 to_executor.send(event)?;
             } else {
-                to_server.send((session, Message::new(req_id, v)))?;
+                // TODO
+                to_server.send((session, Message::new(req_id, vec![])))?;
             }
         }
     });

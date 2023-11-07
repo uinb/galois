@@ -50,7 +50,7 @@ pub fn init(receiver: FromBackend, sender: ToBackend, shared: Shared) {
         log::error!("session relayer interrupted, {:?}", relay(receiver, sx));
     });
     log::info!("server initialized");
-    let future = accept(listener, sender, shared, sessions, ready);
+    let future = accept(listener, sender, shared, sessions);
     let _ = task::block_on(future);
     log::info!("bye!");
 }
@@ -213,5 +213,6 @@ async fn handle_req(
         to_back
             .send(input)
             .map_err(|e| anyhow::anyhow!("read loop -> executor -> {:?}", e))?;
+        Ok(())
     }
 }

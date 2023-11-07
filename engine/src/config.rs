@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use clap::Parser;
-use log4rs::config::{Logger, RawConfig as LogConfig};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Parser)]
@@ -63,8 +62,6 @@ pub struct Config {
     pub mysql: MysqlConfig,
     pub redis: RedisConfig,
     pub fusotao: FusotaoConfig,
-    #[serde(skip_serializing)]
-    pub log: LogConfig,
     #[serde(skip_serializing)]
     pub dry_run: Option<u64>,
 }
@@ -216,29 +213,6 @@ fn init_config(toml: &str, key: Option<String>) -> anyhow::Result<Config> {
         cfg.redis.decrypt(&key)?;
         cfg.fusotao.decrypt(&key)?;
     }
-    // TODO replace with env_log
-    let mut loggers = cfg
-        .log
-        .loggers()
-        .iter()
-        .map(|l| (l.name().to_string(), l.clone()))
-        .collect::<std::collections::HashMap<String, _>>();
-    loggers
-        .entry("ws".to_string())
-        .or_insert_with(|| Logger::builder().build("ws".to_string(), log::LevelFilter::Error));
-    loggers.entry("ac_node_api".to_string()).or_insert_with(|| {
-        Logger::builder().build("ac_node_api".to_string(), log::LevelFilter::Error)
-    });
-    loggers
-        .entry("fusotao_rust_client".to_string())
-        .or_insert_with(|| {
-            Logger::builder().build("fusotao_rust_client".to_string(), log::LevelFilter::Error)
-        });
-    let log = log4rs::Config::builder()
-        .loggers::<Vec<_>>(loggers.into_values().collect())
-        .appenders(cfg.log.appenders_lossy(&Default::default()).0)
-        .build(cfg.log.root())?;
-    log4rs::init_config(log)?;
     Ok(cfg)
 }
 

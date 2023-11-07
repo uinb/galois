@@ -15,8 +15,8 @@ name = "sidecar"
 path = "src/sidecar.rs"
 
 [dependencies]
-engine = { path = "../engine" }
-sidecar = { path = "../sidecar" }
+engine = { path = "../engine", package = "galois-engine" }
+sidecar = { path = "../sidecar", package = "galois-sidecar" }
 jsonrpsee = { version = "0.16.2", features = ["full"] }
 tokio = { version = "1.16", features = ["full"] }
 tower = "0.4.13"

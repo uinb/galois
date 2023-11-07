@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{config::C, core::*, sequence::*};
+use crate::{config::C, core::*, input::*};
 use connector::FusoConnector;
 use dashmap::DashMap;
 use parity_scale_codec::{Compact, Decode, Encode, WrapperTypeDecode, WrapperTypeEncode};
@@ -28,7 +28,6 @@ use std::{
     },
 };
 
-pub use committer;
 pub use prover::Prover;
 
 mod committer;

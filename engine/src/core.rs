@@ -15,10 +15,10 @@
 pub use crate::{
     assets::Balance,
     fusotao::GlobalStates,
+    input::InOrOut,
     matcher::{Role, State as OrderState},
     orderbook::AskOrBid,
     orderbook::OrderBook,
-    sequence::InOrOut,
 };
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use indexmap::IndexSet;

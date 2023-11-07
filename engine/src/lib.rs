@@ -30,8 +30,8 @@ pub mod output;
 pub mod shared;
 pub mod snapshot;
 
+pub use ::core::*;
 pub use config::C;
-pub use core::*;
 pub use executor::*;
 pub use fusotao::*;
 pub use input::*;

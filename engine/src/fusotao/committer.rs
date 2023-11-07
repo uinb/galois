@@ -16,7 +16,7 @@ use crate::{config::C, db::DB, fusotao::*};
 use mysql::{prelude::*, *};
 use std::{sync::mpsc::Receiver, time::Duration};
 
-pub fn init(rx: Receiver<Proof>) {
+pub fn init(rx: Receiver<Proof>, connector: FusoApi, progress: Arc<AtomicU64>) {
     let mut pending = Vec::with_capacity(100);
     std::thread::spawn(move || loop {
         let proof = match rx.recv_timeout(Duration::from_millis(10_000)) {
@@ -27,97 +27,92 @@ pub fn init(rx: Receiver<Proof>) {
                 break;
             }
         };
-        if C.dry_run.is_some() {
-            if let Some(p) = proof {
-                log::info!("{}(dry-run) => 0x{}", p.event_id, &hex::encode(p.root));
-            }
-            continue;
-        } else {
-            append(proof, &mut pending);
-        }
+        // if C.dry_run.is_some() {
+        //     if let Some(p) = proof {
+        //         log::info!("{}(dry-run) => 0x{}", p.event_id, &hex::encode(p.root));
+        //     }
+        //     continue;
+        // } else {
+        //     append(proof, &mut pending);
+        // }
     });
 }
 
-pub fn fetch_raw_after(event_id: u64) -> Vec<(u64, RawParameter)> {
-    let sql = "SELECT f_event_id,f_proof FROM t_proof WHERE f_event_id>? LIMIT ?";
-    let conn = DB.get_conn();
-    if conn.is_err() {
-        log::error!("retrieve mysql connection failed while fetch_proofs");
-        return vec![];
-    }
-    let mut conn = conn.unwrap();
-    conn.exec_map(
-        sql,
-        // TODO calculate max_weight and max_length
-        (event_id, C.fusotao.proof_batch_limit),
-        |(f_event_id, f_proof): (u64, Vec<u8>)| (f_event_id, RawParameter(f_proof)),
-    )
-    .unwrap_or_default()
-}
+// fn start_submitting(api: FusoApi, proving_progress: Arc<AtomicU64>) {
+//     let api = api.clone();
+//     log::info!(
+//         "submitting proofs from {}",
+//         proving_progress.load(Ordering::Relaxed)
+//     );
+//     std::thread::spawn(move || loop {
+//         let start_from = proving_progress.load(Ordering::Relaxed);
+//         let new_max_submitted = std::panic::catch_unwind(|| -> u64 {
+//             let (end_to, truncated) = Self::fetch_proofs(start_from);
+//             if start_from == end_to {
+//                 return end_to;
+//             }
+//             log::info!("[+] unsubmitted proofs [{}:{}] found", start_from, end_to);
+//             let submit_result = Self::submit_batch(&api, truncated);
+//             Self::handle_submit_result(submit_result, (start_from, end_to))
+//         })
+//         .unwrap_or(start_from);
+//         if start_from == new_max_submitted {
+//             std::thread::sleep(Duration::from_millis(1000));
+//             continue;
+//         }
+//         proving_progress.store(new_max_submitted, Ordering::Relaxed);
+//     });
+// }
 
-fn flush(pending: &mut Vec<Proof>) {
-    let sql = r#"INSERT IGNORE INTO t_proof(f_event_id,f_proof) VALUES (:event_id,:proof)"#;
-    let conn = DB.get_conn();
-    if conn.is_err() {
-        log::error!("Error: acquire mysql connection failed, {:?}", conn);
-        return;
-    }
-    let mut conn = conn.unwrap();
-    let r = conn.exec_batch(
-        sql,
-        pending.iter().map(|p| {
-            params! {
-                "event_id" => p.event_id,
-                "proof" => p.encode(),
-            }
-        }),
-    );
-    match r {
-        Ok(_) => pending.clear(),
-        Err(err) => {
-            log::error!("Error: writing proofs to mysql failed, {:?}", err);
-        }
-    }
-}
+// fn compress_proofs(raws: Vec<RawParameter>) -> Vec<u8> {
+//     let r = raws.encode();
+//     let uncompress_size = r.len();
+//     let compressed_proofs = lz4_flex::compress_prepend_size(r.as_ref());
+//     let compressed_size = compressed_proofs.len();
+//     log::info!(
+//         "proof compress: uncompress size = {}, compressed size = {}",
+//         uncompress_size,
+//         compressed_size
+//     );
+//     compressed_proofs
+// }
 
-fn append(proof: Option<Proof>, pending: &mut Vec<Proof>) {
-    match proof {
-        None => {
-            if !pending.is_empty() {
-                flush(pending);
-            }
-        }
-        Some(p) => {
-            pending.push(p);
-            if pending.len() >= 50 {
-                flush(pending);
-            }
-        }
-    }
-}
-
-fn start_submitting(api: FusoApi, proving_progress: Arc<AtomicU64>) {
-    let api = api.clone();
-    log::info!(
-        "submitting proofs from {}",
-        proving_progress.load(Ordering::Relaxed)
-    );
-    std::thread::spawn(move || loop {
-        let start_from = proving_progress.load(Ordering::Relaxed);
-        let new_max_submitted = std::panic::catch_unwind(|| -> u64 {
-            let (end_to, truncated) = Self::fetch_proofs(start_from);
-            if start_from == end_to {
-                return end_to;
-            }
-            log::info!("[+] unsubmitted proofs [{}:{}] found", start_from, end_to);
-            let submit_result = Self::submit_batch(&api, truncated);
-            Self::handle_submit_result(submit_result, (start_from, end_to))
-        })
-        .unwrap_or(start_from);
-        if start_from == new_max_submitted {
-            std::thread::sleep(Duration::from_millis(1000));
-            continue;
-        }
-        proving_progress.store(new_max_submitted, Ordering::Relaxed);
-    });
-}
+// fn submit_batch(api: &FusoApi, batch: Vec<RawParameter>) -> anyhow::Result<()> {
+//     if batch.is_empty() {
+//         return Ok(());
+//     }
+//     log::info!(
+//         "[+] starting to submit_proofs at {}",
+//         Local::now().timestamp_millis()
+//     );
+//     let hash = if C.fusotao.compress_proofs {
+//         let xt: sub_api::UncheckedExtrinsicV4<_> = sub_api::compose_extrinsic!(
+//             api,
+//             "Verifier",
+//             "verify_compress_v2",
+//             Self::compress_proofs(batch)
+//         );
+//         api.send_extrinsic(xt.hex_encode(), sub_api::XtStatus::InBlock)
+//             .map_err(|e| anyhow!("[-] submitting proofs failed, {:?}", e))?
+//     } else {
+//         let xt: sub_api::UncheckedExtrinsicV4<_> =
+//             sub_api::compose_extrinsic!(api, "Verifier", "verify_v2", batch);
+//         api.send_extrinsic(xt.hex_encode(), sub_api::XtStatus::InBlock)
+//             .map_err(|e| anyhow!("[-] submitting proofs failed, {:?}", e))?
+//     };
+//     log::info!(
+//         "[+] ending submit_proofs at {}",
+//         Local::now().timestamp_millis()
+//     );
+//     if hash.is_none() {
+//         Err(anyhow!(
+//             "[-] verify extrinsic executed failed, no extrinsic returns"
+//         ))
+//     } else {
+//         log::info!(
+//             "[+] submitting proofs ok, extrinsic hash: {:?}",
+//             hex::encode(hash.unwrap())
+//         );
+//         Ok(())
+//     }
+// }

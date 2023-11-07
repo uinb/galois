@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::*;
-use crate::{assets::Balance, matcher::*, orderbook::AskOrBid, output::Output};
+use crate::{assets::Balance, input::*, matcher::*, orderbook::AskOrBid, output::Output};
 use blake2::{Blake2b, Digest};
 use generic_array::typenum::U32;
 use std::{collections::HashMap, sync::mpsc::Sender};
