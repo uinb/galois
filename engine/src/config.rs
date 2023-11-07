@@ -88,8 +88,8 @@ impl SequenceConfig {
         format!("{}/coredump/", self.data_home)
     }
 
-    pub fn get_sequence_path(&self) -> String {
-        format!("{}/sequence/", self.data_home)
+    pub fn get_storage_path(&self) -> String {
+        format!("{}/storage/", self.data_home)
     }
 }
 

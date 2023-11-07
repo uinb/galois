@@ -13,22 +13,17 @@
 // limitations under the License.
 
 use crate::{config, core};
-use chrono::{prelude::DateTime, Utc};
-use std::time::{Duration, UNIX_EPOCH};
 
 /// dump snapshot at id(executed)
-pub fn dump(id: u64, time: u64, data: &core::Data) {
+pub fn dump(id: u64, data: &core::Data) {
     if config::C.dry_run.is_some() {
         return;
     }
     let data = data.clone();
-    let timestamp = UNIX_EPOCH + Duration::from_secs(time);
-    let datetime = DateTime::<Utc>::from(timestamp);
-    let format = datetime.format("%Y-%m-%dT%H:%M:%S").to_string();
     std::thread::spawn(move || -> anyhow::Result<()> {
         let f = std::path::Path::new(&config::C.sequence.get_coredump_path())
             .join(id.to_string())
-            .with_extension(format!("{}.gz", format));
+            .with_extension("gz");
         let file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -94,20 +89,12 @@ fn print_symbols(data: &core::Data) {
 
 #[cfg(test)]
 mod test {
-    use chrono::{prelude::DateTime, Utc};
-    use std::{
-        path::Path,
-        time::{Duration, UNIX_EPOCH},
-    };
+    use std::path::Path;
 
     #[test]
     pub fn test_syspath() {
-        let timestamp = UNIX_EPOCH + Duration::from_secs(1524885322);
-        let datetime = DateTime::<Utc>::from(timestamp);
-        let format = datetime.format("%Y-%m-%dT%H:%M:%S").to_string();
         let f = Path::new("/tmp/snapshot/")
             .join("2980")
-            .with_extension(format)
             .with_extension("gz");
         assert_eq!("gz", f.extension().unwrap());
         let filename = Path::new(f.file_stem().unwrap()).file_stem().unwrap();
@@ -117,17 +104,10 @@ mod test {
 
     #[test]
     pub fn test_max_seq() {
-        let timestamp = UNIX_EPOCH + Duration::from_secs(1524885322);
-        let datetime = DateTime::<Utc>::from(timestamp);
-        let format = datetime.format("%Y-%m-%dT%H:%M:%S").to_string();
         let f0 = Path::new("/tmp/snapshot/")
             .join("2980")
-            .with_extension(&format)
             .with_extension("gz");
-        let f1 = Path::new("/tmp/snapshot/")
-            .join("310")
-            .with_extension(&format)
-            .with_extension("gz");
+        let f1 = Path::new("/tmp/snapshot/").join("310").with_extension("gz");
         assert_eq!(
             std::cmp::Ordering::Greater,
             super::get_id(&f0).cmp(&super::get_id(&f1))

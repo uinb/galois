@@ -15,7 +15,7 @@
 use crate::fusotao::ToBlockChainNumeric;
 use crate::{config::C, core::*, input::*};
 use anyhow::{anyhow, ensure};
-use rocksdb::{Direction, IteratorMode, Options, DB};
+use rocksdb::{Direction, IteratorMode, Options, WriteBatchWithTransaction};
 use serde::{Deserialize, Serialize};
 use std::{
     convert::{TryFrom, TryInto},
@@ -34,32 +34,72 @@ pub fn init(
     to_server: Sender<(u64, Message)>,
     init_at: u64,
 ) {
-    let current_id = ensure_fully_loaded(init_at, to_executor.clone());
+    let recovery = ensure_fully_loaded(init_at, to_executor.clone()).unwrap();
     std::thread::spawn(move || -> anyhow::Result<()> {
-        let mut current_id = current_id;
+        let mut current_id = recovery;
         loop {
             let mut input = rx.recv()?;
             let (session, req_id) = (input.session, input.req_id);
             input.sequence = current_id;
+            let cmd = serde_json::to_vec(&input.cmd)?;
             if let Ok(event) = input.try_into() {
-                current_id += 1;
+                save(current_id, cmd)?;
                 to_executor.send(event)?;
+                current_id += 1;
+                // TODO auto generate dump command
             } else {
-                // TODO
                 to_server.send((session, Message::new(req_id, vec![])))?;
             }
         }
     });
 }
 
-fn ensure_fully_loaded(init_at: u64, tx: Sender<Event>) -> u64 {
-    // TODO load all events from rocksdb starting from init_at then return the expected sequence id
-
-    init_at
+fn save(id: u64, cmd: Vec<u8>) -> anyhow::Result<()> {
+    STORAGE.put(id_to_key(id), cmd)?;
+    Ok(())
 }
 
-pub fn seq_key(id: u64) -> [u8; 16] {
+fn ensure_fully_loaded(init_at: u64, tx: Sender<Event>) -> anyhow::Result<u64> {
+    let mut current_id = init_at;
+    let iter = STORAGE.iterator(IteratorMode::From(&id_to_key(init_at), Direction::Forward));
+    for item in iter {
+        let (key, value) = item?;
+        current_id = key_to_id(&key);
+        let input = Input {
+            session: 0,
+            req_id: 0,
+            sequence: current_id,
+            cmd: value_to_cmd(&value)
+                .map_err(|_| anyhow::anyhow!("id {} is invalid", current_id))?,
+        };
+        let event = input
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("id {} is invalid", current_id))?;
+        tx.send(event)?;
+    }
+    Ok(current_id + 1)
+}
+
+pub fn drop_before(id: u64) -> anyhow::Result<()> {
+    let mut batch = WriteBatchWithTransaction::<false>::default();
+    batch.delete_range(id_to_key(1), id_to_key(id));
+    STORAGE.write(batch)?;
+    Ok(())
+}
+
+pub fn id_to_key(id: u64) -> [u8; 16] {
     unsafe { std::mem::transmute::<[[u8; 8]; 2], [u8; 16]>([*b"sequence", id.to_be_bytes()]) }
+}
+
+pub fn key_to_id(key: &[u8]) -> u64 {
+    let mut id = [0u8; 8];
+    id.copy_from_slice(&key[8..]);
+    u64::from_be_bytes(id)
+}
+
+pub fn value_to_cmd(value: &[u8]) -> anyhow::Result<Command> {
+    let cmd = serde_json::from_slice(value)?;
+    Ok(cmd)
 }
 
 #[cfg(test)]

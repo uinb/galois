@@ -31,6 +31,10 @@ use std::{
     io::{BufReader, BufWriter},
 };
 
+lazy_static::lazy_static! {
+    pub static ref STORAGE: rocksdb::DB = rocksdb::DB::open_default(&crate::C.sequence.get_storage_path()).unwrap();
+}
+
 pub type Base = u32;
 pub type Quote = u32;
 pub type Price = Decimal;

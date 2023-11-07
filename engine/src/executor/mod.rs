@@ -368,9 +368,9 @@ fn do_execute(
             let _ = response.send((session, Message::new(req_id, v)));
             Ok(())
         }
-        Event::Dump(id, time) => {
+        Event::Dump(id) => {
             // TODO erase some old events after dump
-            snapshot::dump(id, time, data);
+            snapshot::dump(id, data);
             Ok(())
         }
     }

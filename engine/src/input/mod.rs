@@ -26,35 +26,24 @@ pub struct Input {
     pub session: u64,
     pub req_id: u64,
     pub sequence: u64,
-    pub timestamp: u64,
     pub cmd: Command,
 }
 
 impl Input {
     pub fn new_with_req(cmd: Command, session: u64, req_id: u64) -> Self {
-        let time = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
         Self {
             session,
             req_id,
             sequence: 0,
-            timestamp: time,
             cmd,
         }
     }
 
     pub fn new(cmd: Command) -> Self {
-        let time = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
         Self {
             session: 0,
             req_id: 0,
             sequence: 0,
-            timestamp: time,
             cmd,
         }
     }
@@ -96,7 +85,7 @@ impl TryInto<Event> for Input {
                 Ok(Event::Limit(
                     self.sequence,
                     cmd,
-                    self.timestamp,
+                    self.cmd.timestamp.ok_or(anyhow!(""))?,
                     self.session,
                     self.req_id,
                 ))
@@ -110,7 +99,7 @@ impl TryInto<Event> for Input {
                     nonce: self.cmd.nonce.ok_or(anyhow!(""))?,
                     signature: hex::decode(self.cmd.signature.ok_or(anyhow!(""))?)?,
                 },
-                self.timestamp,
+                self.cmd.timestamp.ok_or(anyhow!(""))?,
                 self.session,
                 self.req_id,
             )),
@@ -215,10 +204,7 @@ impl TryInto<Event> for Input {
                 self.session,
                 self.req_id,
             )),
-            DUMP => Ok(Event::Dump(
-                self.cmd.event_id.ok_or(anyhow!(""))?,
-                self.cmd.timestamp.ok_or(anyhow!(""))?,
-            )),
+            DUMP => Ok(Event::Dump(self.cmd.event_id.ok_or(anyhow!(""))?)),
             _ => Err(anyhow!("Unsupported Command")),
         }
     }
@@ -239,8 +225,8 @@ pub enum Event {
     QueryBalance(UserId, Currency, u64, u64),
     QueryAccounts(UserId, u64, u64),
     QueryExchangeFee(Symbol, u64, u64),
-    // special: `EventId` means dump at `EventId`
-    Dump(EventId, Timestamp),
+    // the `EventId` has been executed
+    Dump(EventId),
 }
 
 impl Event {}
@@ -408,7 +394,6 @@ impl Command {
         Some((self.base?, self.quote?))
     }
 
-    #[must_use]
     pub const fn is_querying_core_data(&self) -> bool {
         matches!(
             self.cmd,
@@ -416,7 +401,6 @@ impl Command {
         )
     }
 
-    #[must_use]
     pub const fn is_querying_share_data(&self) -> bool {
         matches!(
             self.cmd,
@@ -429,7 +413,6 @@ impl Command {
         )
     }
 
-    #[must_use]
     pub const fn is_internally_generated(&self) -> bool {
         matches!(self.cmd, UPDATE_DEPTH | CONFIRM_ALL | DUMP)
     }

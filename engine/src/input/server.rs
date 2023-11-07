@@ -199,8 +199,13 @@ async fn handle_req(
     req_id: u64,
     body: String,
 ) -> Result<()> {
-    let cmd: Command = serde_json::from_str(&body)
+    let mut cmd: Command = serde_json::from_str(&body)
         .map_err(|e| anyhow::anyhow!("deser command failed, {:?}", e))?;
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    cmd.timestamp = Some(timestamp);
     if cmd.is_querying_share_data() {
         let w = shared.handle_req(&cmd)?;
         to_session
