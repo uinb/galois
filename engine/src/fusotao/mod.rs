@@ -28,11 +28,12 @@ use std::{
     },
 };
 
+mod prover;
 pub use prover::Prover;
 
-mod committer;
-mod connector;
-mod prover;
+pub mod committer;
+pub mod connector;
+pub mod scanner;
 
 pub type BlockNumber = u32;
 pub type GlobalStates = SparseMerkleTree<Blake2bHasher, H256, DefaultStore<H256>>;
@@ -55,8 +56,9 @@ const MAX_EXTRINSIC_SIZE: usize = 3 * 1024 * 1024;
 /// 2. new or from public
 pub fn sync() -> anyhow::Result<(FusoConnector, Arc<FusoState>)> {
     let connector = FusoConnector::new(C.dry_run.is_some())?;
-    log::info!("prover initialized");
-    connector
+    let state = connector.fully_sync_chain()?;
+    log::info!("chain states synchronized");
+    Ok((connector, Arc::new(state)))
 }
 
 /// tracking essential onchain states

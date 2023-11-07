@@ -13,9 +13,8 @@
 // limitations under the License.
 
 use crate::fusotao::ToBlockChainNumeric;
-use crate::{cmd::*, config::C, core::*, db::DB, input::*, orderbook::AskOrBid};
+use crate::{config::C, core::*, input::*};
 use anyhow::{anyhow, ensure};
-use mysql::{prelude::*, *};
 use rocksdb::{Direction, IteratorMode, Options, DB};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -55,7 +54,12 @@ pub fn init(
 
 fn ensure_fully_loaded(init_at: u64, tx: Sender<Event>) -> u64 {
     // TODO load all events from rocksdb starting from init_at then return the expected sequence id
+
     init_at
+}
+
+pub fn seq_key(id: u64) -> [u8; 16] {
+    unsafe { std::mem::transmute::<[[u8; 8]; 2], [u8; 16]>([*b"sequence", id.to_be_bytes()]) }
 }
 
 #[cfg(test)]

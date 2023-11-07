@@ -37,18 +37,18 @@ impl FusoConnector {
             .map(|api| api.set_signer(signer.clone()))
             .inspect_err(|e| log::error!("{:?}", e))
             .map_err(|_| anyhow!("fusotao node not available or metadata check failed."))?;
-        let state = if dry_run {
-            Arc::new(Default::default())
-        } else {
-            let (block_number, hash) = Self::get_finalized_block(&api)?;
-            let state = Arc::new(Self::fully_sync_chain(
-                &signer.public(),
-                &api,
-                hash,
-                block_number,
-            )?);
-            state
-        };
+        // let state = if dry_run {
+        //     Arc::new(Default::default())
+        // } else {
+        //     let (block_number, hash) = Self::get_finalized_block(&api)?;
+        //     let state = Arc::new(Self::fully_sync_chain(
+        //         &signer.public(),
+        //         &api,
+        //         hash,
+        //         block_number,
+        //     )?);
+        //     state
+        // };
         Ok(Self { api, signer })
     }
 
@@ -56,20 +56,19 @@ impl FusoConnector {
         self.signer.public().clone()
     }
 
-    fn fully_sync_chain(
-        dominator: &Public,
-        api: &FusoApi,
-        hash: Hash,
-        until: u32,
-    ) -> anyhow::Result<FusoState> {
+    pub fn fully_sync_chain(&self) -> anyhow::Result<FusoState> {
         let state = FusoState::default();
-        let decoder = RuntimeDecoder::new(api.metadata.clone());
+        let (block_number, hash) = self.get_finalized_block()?;
+        let decoder = RuntimeDecoder::new(self.api.metadata.clone());
 
         // proving progress, map AccountId -> Dominator
-        let key =
-            api.metadata
-                .storage_map_key::<FusoAccountId>("Verifier", "Dominators", *dominator)?;
-        let payload = api
+        let key = self.api.metadata.storage_map_key::<FusoAccountId>(
+            "Verifier",
+            "Dominators",
+            self.get_pubkey(),
+        )?;
+        let payload = self
+            .api
             .get_opaque_storage_by_key_hash(key, Some(hash))?
             .ok_or(anyhow!(""))?;
         let result = Dominator::decode(&mut payload.as_slice())?;
@@ -78,27 +77,38 @@ impl FusoConnector {
             .store(result.sequence.0, Ordering::Relaxed);
 
         // market list, double map AccountId, Symbol -> Market
-        let key = api
+        let key = self
+            .api
             .metadata
-            .storage_double_map_partial_key::<FusoAccountId>("Market", "Markets", dominator)?;
-        let payload = api
+            .storage_double_map_partial_key::<FusoAccountId>(
+                "Market",
+                "Markets",
+                &self.get_pubkey(),
+            )?;
+        let payload = self
+            .api
             .get_opaque_storage_pairs_by_key_hash(key, Some(hash))?
             .ok_or(anyhow!(""))?;
         for (k, v) in payload.into_iter() {
             let symbol = RuntimeDecoder::extract_double_map_identifier::<(u32, u32), FusoAccountId>(
                 StorageHasher::Blake2_128Concat,
                 StorageHasher::Blake2_128Concat,
-                dominator,
+                &self.get_pubkey(),
                 &mut k.as_slice(),
             )?;
             let market = OnchainSymbol::decode(&mut v.as_slice())?;
-            crate::output::legacy::create_mysql_table(symbol.clone())?;
+            // TODO
+            // crate::output::legacy::create_mysql_table(symbol.clone())?;
             state.symbols.insert(symbol, market);
         }
 
         // token list, map TokenId -> Token
-        let key = api.metadata.storage_map_key_prefix("Token", "Tokens")?;
-        let payload = api
+        let key = self
+            .api
+            .metadata
+            .storage_map_key_prefix("Token", "Tokens")?;
+        let payload = self
+            .api
             .get_opaque_storage_pairs_by_key_hash(key, Some(hash))?
             .ok_or(anyhow!(""))?;
         for (k, v) in payload.into_iter() {
@@ -111,8 +121,11 @@ impl FusoConnector {
         }
 
         // broker list, map AccountId -> Broker
-        let key = api.metadata.storage_map_key_prefix("Market", "Brokers")?;
-        let payload = api.get_keys(key, Some(hash))?.ok_or(anyhow!(""))?;
+        let key = self
+            .api
+            .metadata
+            .storage_map_key_prefix("Market", "Brokers")?;
+        let payload = self.api.get_keys(key, Some(hash))?.ok_or(anyhow!(""))?;
         for k in payload.into_iter() {
             let broker: FusoAccountId = RuntimeDecoder::extract_map_identifier(
                 StorageHasher::Blake2_128Concat,
@@ -122,10 +135,16 @@ impl FusoConnector {
         }
 
         // pending receipts, double map AccountId, AccountId -> Receipt
-        let key = api
+        let key = self
+            .api
             .metadata
-            .storage_double_map_partial_key::<FusoAccountId>("Verifier", "Receipts", dominator)?;
-        let payload = api
+            .storage_double_map_partial_key::<FusoAccountId>(
+                "Verifier",
+                "Receipts",
+                &self.get_pubkey(),
+            )?;
+        let payload = self
+            .api
             .get_opaque_storage_pairs_by_key_hash(key, Some(hash))?
             .ok_or(anyhow!(""))?;
         let mut commands = vec![];
@@ -133,7 +152,7 @@ impl FusoConnector {
             let user = RuntimeDecoder::extract_double_map_identifier::<FusoAccountId, FusoAccountId>(
                 StorageHasher::Blake2_128Concat,
                 StorageHasher::Blake2_128Concat,
-                dominator,
+                &self.get_pubkey(),
                 &mut k.as_slice(),
             )?;
             let unexecuted = decoder.decode_raw_enum(
@@ -168,8 +187,8 @@ impl FusoConnector {
         }
         // TODO
         // sequence::insert_sequences(&commands)?;
-        state.scanning_progress.store(until + 1, Ordering::Relaxed);
-        state.chain_height.store(until, Ordering::Relaxed);
+        // state.scanning_progress.store(until + 1, Ordering::Relaxed);
+        // state.chain_height.store(until, Ordering::Relaxed);
         Ok(state)
     }
 
@@ -187,7 +206,7 @@ impl FusoConnector {
     }
 
     fn fetch_proofs(start_from: u64) -> (u64, Vec<RawParameter>) {
-        let proofs = persistence::fetch_raw_after(start_from);
+        let proofs = Vec::<(u64, RawParameter)>::new();
         let mut total_size = 0usize;
         let mut last_submit = start_from;
         let mut truncated = vec![];
@@ -202,11 +221,13 @@ impl FusoConnector {
         (last_submit, truncated)
     }
 
-    fn get_finalized_block(api: &FusoApi) -> anyhow::Result<(u32, Hash)> {
-        let hash = api
+    pub fn get_finalized_block(&self) -> anyhow::Result<(u32, Hash)> {
+        let hash = self
+            .api
             .get_finalized_head()?
             .ok_or(anyhow!("finalized headers cant be found"))?;
-        let block_number = api
+        let block_number = self
+            .api
             .get_signed_block(Some(hash))?
             .ok_or(anyhow!("signed block {} can't be found", hash))
             .map(|b: sub_api::SignedBlock<FusoBlock>| b.block.header.number)?;

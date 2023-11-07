@@ -59,8 +59,6 @@ pub struct RunCmd {
 pub struct Config {
     pub server: ServerConfig,
     pub sequence: SequenceConfig,
-    pub mysql: MysqlConfig,
-    pub redis: RedisConfig,
     pub fusotao: FusotaoConfig,
     #[serde(skip_serializing)]
     pub dry_run: Option<u64>,
@@ -78,12 +76,21 @@ pub struct ServerConfig {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SequenceConfig {
-    pub coredump_dir: String,
+    pub data_home: String,
     pub checkpoint: usize,
     pub batch_size: usize,
-    pub dump_mode: String,
     pub fetch_intervel_ms: u64,
     pub enable_from_genesis: bool,
+}
+
+impl SequenceConfig {
+    pub fn get_coredump_path(&self) -> String {
+        format!("{}/coredump/", self.data_home)
+    }
+
+    pub fn get_sequence_path(&self) -> String {
+        format!("{}/sequence/", self.data_home)
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -199,8 +206,6 @@ pub fn print_config(f: &std::path::PathBuf) -> anyhow::Result<()> {
         .ok_or(anyhow::anyhow!("env MAGIC_KEY not set"))?;
     let toml = std::fs::read_to_string(f)?;
     let mut cfg: Config = toml::from_str(&toml)?;
-    cfg.mysql.encrypt(&key)?;
-    cfg.redis.encrypt(&key)?;
     cfg.fusotao.encrypt(&key)?;
     println!("{}", toml::to_string(&cfg)?);
     Ok(())
@@ -209,8 +214,6 @@ pub fn print_config(f: &std::path::PathBuf) -> anyhow::Result<()> {
 fn init_config(toml: &str, key: Option<String>) -> anyhow::Result<Config> {
     let mut cfg: Config = toml::from_str(toml)?;
     if let Some(key) = key {
-        cfg.mysql.decrypt(&key)?;
-        cfg.redis.decrypt(&key)?;
         cfg.fusotao.decrypt(&key)?;
     }
     Ok(cfg)
@@ -221,23 +224,12 @@ pub fn test_default() {
     let toml = r#"
         [server]
         bind_addr = "127.0.0.1:8097"
-        [mysql]
-        url = "mysql://username:password@localhost:3306/galois"
-        [redis]
-        url = "redis://localhost:6379/0"
         [sequence]
         checkpoint = 100000
-        coredump_dir = "/tmp/snapshot"
+        data_home = "/tmp/galois"
         batch_size = 1000
-        dump_mode = "disk"
         fetch_intervel_ms = 5
         enable_from_genesis = true
-        [log]
-        [log.appenders.console]
-        kind = "console"
-        [log.root]
-        level = "info"
-        appenders = ["console"]
         [fusotao]
         node_url = "ws://localhost:9944"
         key_seed = "//Alice"

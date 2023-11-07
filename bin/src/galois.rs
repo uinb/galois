@@ -38,18 +38,18 @@ use engine::*;
 fn start() {
     let (id, coredump) = snapshot::load().unwrap();
     let (connector, state) = fusotao::sync().unwrap();
+    let shared = Shared::new(state.clone(), C.fusotao.get_x25519());
     let (output_tx, output_rx) = std::sync::mpsc::channel();
     let (event_tx, event_rx) = std::sync::mpsc::channel();
     let (proof_tx, proof_rx) = std::sync::mpsc::channel();
     let (input_tx, input_rx) = std::sync::mpsc::channel();
     let (reply_tx, reply_rx) = std::sync::mpsc::channel();
-    let shared = Shared::new(prover.state, C.fusotao.get_x25519());
     output::init(output_rx);
-    committer::init(proof_rx);
+    committer::init(proof_rx, connector.clone(), state.clone());
     executor::init(event_rx, output_tx, proof_tx, reply_tx.clone(), coredump);
     sequencer::init(input_rx, event_tx, reply_tx, id);
     scanner::init(input_tx.clone(), connector, state);
-    server::init(msg_rx, input_tx, shared);
+    server::init(reply_rx, input_tx, shared);
 }
 
 fn main() {

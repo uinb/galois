@@ -19,10 +19,11 @@ use chrono::Local;
 use node_api::decoder::{Raw, RuntimeDecoder, StorageHasher};
 use parity_scale_codec::{Decode, Error as CodecError};
 use sp_core::{sr25519::Public, Pair};
-use std::{sync::atomic::Ordering, thread, time::Duration};
+use std::{sync::atomic::Ordering, sync::mpsc::Sender, thread, time::Duration};
 use sub_api::{rpc::WsRpcClient, Hash};
 
-pub fn init(tx: Sender<Input>, state: Arc<FusoState>, connector: FusoConnector) {
+pub fn init(tx: Sender<Input>, connector: FusoConnector, state: Arc<FusoState>) {
+    let decoder = RuntimeDecoder::new(connector.api.metadata.clone());
     thread::spawn(move || loop {
         let at = state.scanning_progress.load(Ordering::Relaxed);
         if let Ok((finalized, _)) = connector.get_finalized_block() {
@@ -74,7 +75,7 @@ fn handle_finalized_block(
             match (raw.pallet.as_ref(), raw.variant.as_ref()) {
                 ("Verifier", "TokenHosted") => {
                     let decoded = TokenHostedEvent::decode(&mut &raw.data[..])?;
-                    if &decoded.dominator == connector.signer {
+                    if decoded.dominator == connector.get_pubkey() {
                         let mut cmd = Command::default();
                         cmd.cmd = crate::cmd::TRANSFER_IN;
                         cmd.currency = Some(decoded.token_id);
@@ -87,7 +88,7 @@ fn handle_finalized_block(
                 }
                 ("Verifier", "TokenRevoked") => {
                     let decoded = TokenHostedEvent::decode(&mut &raw.data[..])?;
-                    if &decoded.dominator == connector.signer {
+                    if decoded.dominator == connector.get_pubkey() {
                         let mut cmd = Command::default();
                         cmd.cmd = crate::cmd::TRANSFER_OUT;
                         cmd.currency = Some(decoded.token_id);
@@ -100,11 +101,13 @@ fn handle_finalized_block(
                 }
                 ("Token", "TokenIssued") => {
                     let decoded = TokenIssuedEvent::decode(&mut &raw.data[..])?;
-                    let key = api
+                    let key = connector
+                        .api
                         .metadata
                         .storage_map_key::<u32>("Token", "Tokens", decoded.token_id)
                         .map_err(|e| anyhow!("Read storage failed: {:?}", e))?;
-                    let payload = api
+                    let payload = connector
+                        .api
                         .get_opaque_storage_by_key_hash(key, Some(hash))?
                         .ok_or(anyhow::anyhow!(""))?;
                     let token = OnchainToken::decode(&mut payload.as_slice())?;
@@ -116,7 +119,7 @@ fn handle_finalized_block(
                 }
                 ("Market", "MarketOpened") => {
                     let decoded = MarketOpenedEvent::decode(&mut &raw.data[..])?;
-                    if &decoded.dominator == connector.signer {
+                    if decoded.dominator == connector.get_pubkey() {
                         let mut cmd = Command::default();
                         let milli = Decimal::from_str("0.001").unwrap();
                         cmd.cmd = crate::cmd::UPDATE_SYMBOL;
@@ -155,7 +158,7 @@ fn handle_finalized_block(
                 }
                 ("Market", "MarketClosed") => {
                     let decoded = MarketClosedEvent::decode(&mut &raw.data[..])?;
-                    if &decoded.dominator == connector.signer {
+                    if decoded.dominator == connector.get_pubkey() {
                         let market = state.symbols.remove(&(decoded.base, decoded.quote));
                         let mut cmd = Command::default();
                         let milli = Decimal::from_str("0.001").unwrap();

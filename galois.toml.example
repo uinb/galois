@@ -1,17 +1,10 @@
 [server]
 bind_addr = "127.0.0.1:8097"
 
-[mysql]
-url = "mysql://username:password@localhost:3306/galois"
-
-[redis]
-url = "redis://localhost:6379/0"
-
 [sequence]
 checkpoint = 100000
-coredump_dir = "/tmp/snapshot"
+data_home = "/tmp/galois"
 batch_size = 1000
-dump_mode = "disk"
 fetch_intervel_ms = 5
 
 [fusotao]

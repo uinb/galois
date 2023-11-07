@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{config::C, db::DB, fusotao::*};
-use mysql::{prelude::*, *};
+use crate::{config::C, fusotao::*};
 use std::{sync::mpsc::Receiver, time::Duration};
 
-pub fn init(rx: Receiver<Proof>, connector: FusoApi, progress: Arc<AtomicU64>) {
-    let mut pending = Vec::with_capacity(100);
+pub fn init(rx: Receiver<Proof>, connector: FusoConnector, progress: Arc<FusoState>) {
+    // let mut pending = Vec::with_capacity(100);
     std::thread::spawn(move || loop {
         let proof = match rx.recv_timeout(Duration::from_millis(10_000)) {
             Ok(p) => Some(p),

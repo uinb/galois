@@ -14,10 +14,7 @@
 
 use crate::{config, core};
 use chrono::{prelude::DateTime, Utc};
-use std::{
-    fs, path, thread,
-    time::{Duration, UNIX_EPOCH},
-};
+use std::time::{Duration, UNIX_EPOCH};
 
 /// dump snapshot at id(executed)
 pub fn dump(id: u64, time: u64, data: &core::Data) {
@@ -28,11 +25,11 @@ pub fn dump(id: u64, time: u64, data: &core::Data) {
     let timestamp = UNIX_EPOCH + Duration::from_secs(time);
     let datetime = DateTime::<Utc>::from(timestamp);
     let format = datetime.format("%Y-%m-%dT%H:%M:%S").to_string();
-    thread::spawn(move || -> anyhow::Result<()> {
-        let f = path::Path::new(&config::C.sequence.coredump_dir)
+    std::thread::spawn(move || -> anyhow::Result<()> {
+        let f = std::path::Path::new(&config::C.sequence.get_coredump_path())
             .join(id.to_string())
             .with_extension(format!("{}.gz", format));
-        let file = fs::OpenOptions::new()
+        let file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(f)?;
@@ -42,8 +39,8 @@ pub fn dump(id: u64, time: u64, data: &core::Data) {
     });
 }
 
-fn get_id(path: &path::Path) -> u64 {
-    let file_stem = path::Path::new(path.file_stem().unwrap())
+fn get_id(path: &std::path::Path) -> u64 {
+    let file_stem = std::path::Path::new(path.file_stem().unwrap())
         .file_stem()
         .unwrap()
         .to_str()
@@ -53,7 +50,7 @@ fn get_id(path: &path::Path) -> u64 {
 
 /// return the id(not executed yet), and the snapshot
 pub fn load() -> anyhow::Result<(u64, core::Data)> {
-    let dir = fs::read_dir(&config::C.sequence.coredump_dir)?;
+    let dir = std::fs::read_dir(&config::C.sequence.get_coredump_path())?;
     let file_path = dir
         .map(|e| e.unwrap())
         .filter(|f| f.file_type().unwrap().is_file())
@@ -68,7 +65,7 @@ pub fn load() -> anyhow::Result<(u64, core::Data)> {
                 event_id,
                 event_id + 1
             );
-            let data = core::Data::from_raw(fs::File::open(f)?)?;
+            let data = core::Data::from_raw(std::fs::File::open(f)?)?;
             print_symbols(&data);
             Ok((event_id + 1, data))
         }
