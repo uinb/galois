@@ -28,7 +28,7 @@ pub struct FusoConnector {
 }
 
 impl FusoConnector {
-    pub fn new(dry_run: bool) -> anyhow::Result<Self> {
+    pub fn new() -> anyhow::Result<Self> {
         let signer = Sr25519Key::from_string(&C.fusotao.key_seed, None)
             .map_err(|e| anyhow!("invalid fusotao config: {:?}", e))?;
         let client = WsRpcClient::new(&C.fusotao.node_url);
@@ -44,9 +44,7 @@ impl FusoConnector {
     }
 
     pub fn sync_progress(&self) -> anyhow::Result<u64> {
-        let state = FusoState::default();
-        let (block_number, hash) = self.get_finalized_block()?;
-        let decoder = RuntimeDecoder::new(self.api.metadata.clone());
+        let (_, hash) = self.get_finalized_block()?;
         let key = self.api.metadata.storage_map_key::<FusoAccountId>(
             "Verifier",
             "Dominators",
@@ -60,25 +58,9 @@ impl FusoConnector {
         Ok(result.sequence.0)
     }
 
-    pub fn fully_sync_chain(&self) -> anyhow::Result<FusoState> {
-        let state = FusoState::default();
-        let (block_number, hash) = self.get_finalized_block()?;
+    pub fn fully_sync_chain(&self, state: Arc<FusoState>) -> anyhow::Result<Vec<Command>> {
+        let (block, hash) = self.get_finalized_block()?;
         let decoder = RuntimeDecoder::new(self.api.metadata.clone());
-
-        // proving progress, map AccountId -> Dominator
-        let key = self.api.metadata.storage_map_key::<FusoAccountId>(
-            "Verifier",
-            "Dominators",
-            self.get_pubkey(),
-        )?;
-        let payload = self
-            .api
-            .get_opaque_storage_by_key_hash(key, Some(hash))?
-            .ok_or(anyhow!(""))?;
-        let result = Dominator::decode(&mut payload.as_slice())?;
-        state
-            .proved_event_id
-            .store(result.sequence.0, Ordering::Relaxed);
 
         // market list, double map AccountId, Symbol -> Market
         let key = self
@@ -101,8 +83,6 @@ impl FusoConnector {
                 &mut k.as_slice(),
             )?;
             let market = OnchainSymbol::decode(&mut v.as_slice())?;
-            // TODO
-            // crate::output::legacy::create_mysql_table(symbol.clone())?;
             state.symbols.insert(symbol, market);
         }
 
@@ -189,11 +169,9 @@ impl FusoConnector {
         if !commands.is_empty() {
             log::info!("pending receipts detected: {:?}", commands);
         }
-        // TODO
-        // sequence::insert_sequences(&commands)?;
-        // state.scanning_progress.store(until + 1, Ordering::Relaxed);
-        // state.chain_height.store(until, Ordering::Relaxed);
-        Ok(state)
+        state.scanning_progress.store(block + 1, Ordering::Relaxed);
+        state.chain_height.store(block, Ordering::Relaxed);
+        Ok(commands)
     }
 
     pub fn get_finalized_block(&self) -> anyhow::Result<(u32, Hash)> {

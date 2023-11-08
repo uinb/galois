@@ -130,7 +130,7 @@ fn do_execute(
                 time,
             );
             let (maker_fee, taker_fee) = (orderbook.maker_fee, orderbook.taker_fee);
-            prover::prove_trade_cmd(
+            let proof = prover::prove_trade_cmd(
                 data,
                 cmd.nonce,
                 cmd.signature.clone(),
@@ -144,6 +144,9 @@ fn do_execute(
                 &out,
                 &mr,
             );
+            prover::save_proof(proof)
+                .inspect_err(|e| log::error!("{}", e))
+                .map_err(|_| EventsError::Interrupted(id))?;
             output.send(out).map_err(|_| EventsError::Interrupted(id))
         }
         Event::Cancel(id, cmd, time, session, req_id) => {
@@ -194,7 +197,7 @@ fn do_execute(
                 &mr,
                 time,
             );
-            prover::prove_trade_cmd(
+            let proof = prover::prove_trade_cmd(
                 data,
                 cmd.nonce,
                 cmd.signature.clone(),
@@ -208,6 +211,9 @@ fn do_execute(
                 &out,
                 &mr,
             );
+            prover::save_proof(proof)
+                .inspect_err(|e| log::error!("{}", e))
+                .map_err(|_| EventsError::Interrupted(id))?;
             output.send(out).map_err(|_| EventsError::Interrupted(id))
         }
         Event::TransferOut(id, cmd) => {
@@ -225,8 +231,11 @@ fn do_execute(
             );
             let before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.currency);
             if data.tvl < cmd.amount {
-                prover::prove_cmd_rejected(&mut data.merkle_tree, id, cmd, &before);
+                let proof = prover::prove_cmd_rejected(&mut data.merkle_tree, id, cmd, &before);
                 log::error!("TVL less than transfer_out amount, event={}", id);
+                prover::save_proof(proof)
+                    .inspect_err(|e| log::error!("{}", e))
+                    .map_err(|_| EventsError::Interrupted(id))?;
                 return Err(EventsError::EventIgnored(id, anyhow!("TVL not enough")));
             }
             match assets::deduct_available(
@@ -237,11 +246,18 @@ fn do_execute(
             ) {
                 Ok(after) => {
                     data.tvl -= cmd.amount;
-                    prover::prove_assets_cmd(&mut data.merkle_tree, id, cmd, &before, &after);
+                    let proof =
+                        prover::prove_assets_cmd(&mut data.merkle_tree, id, cmd, &before, &after);
+                    prover::save_proof(proof)
+                        .inspect_err(|e| log::error!("{}", e))
+                        .map_err(|_| EventsError::Interrupted(id))?;
                     Ok(())
                 }
                 Err(e) => {
-                    prover::prove_cmd_rejected(&mut data.merkle_tree, id, cmd, &before);
+                    let proof = prover::prove_cmd_rejected(&mut data.merkle_tree, id, cmd, &before);
+                    prover::save_proof(proof)
+                        .inspect_err(|e| log::error!("{}", e))
+                        .map_err(|_| EventsError::Interrupted(id))?;
                     Err(EventsError::EventIgnored(id, e))
                 }
             }
@@ -257,7 +273,11 @@ fn do_execute(
             if data.tvl + cmd.amount >= crate::core::max_number() {
                 let before =
                     assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.currency);
-                prover::prove_rejecting_no_reason(&mut data.merkle_tree, id, cmd, &before);
+                let proof =
+                    prover::prove_rejecting_no_reason(&mut data.merkle_tree, id, cmd, &before);
+                prover::save_proof(proof)
+                    .inspect_err(|e| log::error!("{}", e))
+                    .map_err(|_| EventsError::Interrupted(id))?;
                 log::error!("TVL out of limit, event={}", id);
                 return Err(EventsError::EventIgnored(id, anyhow!("TVL out of limit")));
             }
@@ -275,7 +295,10 @@ fn do_execute(
             )
             .map_err(|e| EventsError::EventIgnored(id, e))?;
             data.tvl = data.tvl + cmd.amount;
-            prover::prove_assets_cmd(&mut data.merkle_tree, id, cmd, &before, &after);
+            let proof = prover::prove_assets_cmd(&mut data.merkle_tree, id, cmd, &before, &after);
+            prover::save_proof(proof)
+                .inspect_err(|e| log::error!("{}", e))
+                .map_err(|_| EventsError::Interrupted(id))?;
             Ok(())
         }
         Event::UpdateSymbol(id, cmd) => {

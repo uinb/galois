@@ -42,6 +42,9 @@ type ToBackend = Sender<Input>;
 type FromBackend = Receiver<(u64, Message)>;
 
 pub fn init(receiver: FromBackend, sender: ToBackend, shared: Shared) {
+    if C.dry_run.is_some() {
+        return;
+    }
     let listener = task::block_on(async { TcpListener::bind(&C.server.bind_addr).await }).unwrap();
     let sessions = Arc::new(DashMap::<u64, ToSession>::new());
     let sx = sessions.clone();

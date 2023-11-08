@@ -207,7 +207,7 @@ fn init_config(toml: &str, key: Option<String>) -> anyhow::Result<Config> {
 }
 
 #[test]
-pub fn test_default() {
+pub fn test_config() {
     let toml = r#"
         [server]
         bind_addr = "127.0.0.1:8097"
@@ -225,5 +225,5 @@ pub fn test_default() {
         claim_block = 1
     "#;
     let config = init_config(&toml, None);
-    assert!(config.is_ok())
+    assert!(config.is_ok());
 }

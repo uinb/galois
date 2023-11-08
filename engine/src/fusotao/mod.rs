@@ -52,11 +52,11 @@ const MAX_EXTRINSIC_SIZE: usize = 3 * 1024 * 1024;
 /// 1. from_ss58check() or from_ss58check_with_version()
 /// 2. new or from public
 pub fn sync() -> anyhow::Result<(FusoConnector, Arc<FusoState>)> {
-    let connector = FusoConnector::new(C.dry_run.is_some())?;
+    let connector = FusoConnector::new()?;
     let progress = connector.sync_progress()?;
-    log::info!("proving progress synchronized");
     let state = FusoState::default();
     state.proved_event_id.store(progress, Ordering::Relaxed);
+    log::info!("proving progress synchronized");
     Ok((connector, Arc::new(state)))
 }
 

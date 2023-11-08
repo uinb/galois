@@ -12,15 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::fusotao::ToBlockChainNumeric;
-use crate::{config::C, core::*, input::*};
-use anyhow::{anyhow, ensure};
-use rocksdb::{Direction, IteratorMode, Options, WriteBatchWithTransaction};
-use std::{
-    convert::{TryFrom, TryInto},
-    str::FromStr,
-    sync::{mpsc::*, Arc},
-};
+use crate::{config::C, input::*};
+use rocksdb::{Direction, IteratorMode, WriteBatchWithTransaction};
+use std::{convert::TryInto, sync::mpsc::*};
 
 pub fn init(
     rx: Receiver<Input>,
@@ -29,6 +23,9 @@ pub fn init(
     init_at: u64,
 ) {
     let recovery = ensure_fully_loaded(init_at, to_executor.clone()).unwrap();
+    if C.dry_run.is_some() {
+        return;
+    }
     std::thread::spawn(move || -> anyhow::Result<()> {
         let mut current_id = recovery;
         loop {
@@ -71,7 +68,11 @@ fn ensure_fully_loaded(init_at: u64, tx: Sender<Event>) -> anyhow::Result<u64> {
         let event = input
             .try_into()
             .map_err(|_| anyhow::anyhow!("id {} is invalid", current_id))?;
-        tx.send(event)?;
+        match C.dry_run {
+            Some(n) if n >= current_id => tx.send(event)?,
+            None => tx.send(event)?,
+            _ => break,
+        }
     }
     Ok(current_id + 1)
 }
@@ -150,6 +151,7 @@ mod test {
         let e = serde_json::from_str::<Command>(transfer_in).unwrap();
         let s: anyhow::Result<Event> = Input {
             cmd: e,
+            sequence: 0,
             session: 0,
             req_id: 0,
         }
@@ -157,8 +159,9 @@ mod test {
         assert!(s.is_ok());
         let bid_limit = r#"{"quote":100, "base":101, "cmd":1, "price":"10.0", "amount":"0.5", "order_id":1, "user_id":"5Ccr8Qcp6NBMCvdUHSoqDaQMJHnA5PAC879NbWkzaiUwBdMm","nonce":1,"signature":""}"#;
         let e = serde_json::from_str::<Command>(bid_limit).unwrap();
-        let s: anyhow::Result<Event> = Sequence {
+        let s: anyhow::Result<Event> = Input {
             cmd: e,
+            sequence: 0,
             session: 1,
             req_id: 0,
         }

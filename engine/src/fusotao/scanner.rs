@@ -13,18 +13,21 @@
 // limitations under the License.
 
 use super::*;
-use crate::{config::C, input::Command};
+use crate::input::Command;
 use anyhow::anyhow;
-use chrono::Local;
-use node_api::decoder::{Raw, RuntimeDecoder, StorageHasher};
-use parity_scale_codec::{Decode, Error as CodecError};
-use sp_core::{sr25519::Public, Pair};
+use node_api::decoder::{Raw, RuntimeDecoder};
+use parity_scale_codec::Decode;
 use std::{sync::atomic::Ordering, sync::mpsc::Sender, thread, time::Duration};
-use sub_api::{rpc::WsRpcClient, Hash};
 
 pub fn init(tx: Sender<Input>, connector: FusoConnector, state: Arc<FusoState>) {
+    if C.dry_run.is_some() {
+        return;
+    }
     let decoder = RuntimeDecoder::new(connector.api.metadata.clone());
-    // TODO fully sync
+    let receipts = connector.fully_sync_chain(state.clone()).unwrap();
+    for cmd in receipts.into_iter() {
+        tx.send(Input::new(cmd)).unwrap();
+    }
     thread::spawn(move || loop {
         let at = state.scanning_progress.load(Ordering::Relaxed);
         if let Ok((finalized, _)) = connector.get_finalized_block() {
@@ -84,7 +87,7 @@ fn handle_finalized_block(
                         cmd.user_id = Some(format!("{}", decoded.fund_owner));
                         cmd.block_number = Some(at);
                         cmd.extrinsic_hash = Some(hash.encode_hex());
-                        let _ = to_seq.send(Input::new(cmd));
+                        to_seq.send(Input::new(cmd))?;
                     }
                 }
                 ("Verifier", "TokenRevoked") => {
@@ -97,7 +100,7 @@ fn handle_finalized_block(
                         cmd.user_id = Some(format!("{}", decoded.fund_owner));
                         cmd.block_number = Some(at);
                         cmd.extrinsic_hash = Some(hash.encode_hex());
-                        let _ = to_seq.send(Input::new(cmd));
+                        to_seq.send(Input::new(cmd))?;
                     }
                 }
                 ("Token", "TokenIssued") => {
@@ -140,7 +143,7 @@ fn handle_finalized_block(
                         // useless
                         cmd.min_vol = Some(Decimal::from_str("10").unwrap());
                         cmd.enable_market_order = Some(false);
-                        let _ = to_seq.send(Input::new(cmd));
+                        to_seq.send(Input::new(cmd))?;
                         state.symbols.insert(
                             (decoded.base, decoded.quote),
                             OnchainSymbol {
@@ -180,7 +183,7 @@ fn handle_finalized_block(
                         // useless
                         cmd.min_vol = Some(Decimal::from_str("10").unwrap());
                         cmd.enable_market_order = Some(false);
-                        let _ = to_seq.send(Input::new(cmd));
+                        to_seq.send(Input::new(cmd))?;
                     }
                 }
                 _ => {}
