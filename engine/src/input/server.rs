@@ -30,7 +30,6 @@ use futures::{
 use std::{
     net::Shutdown,
     sync::{
-        atomic::{AtomicBool, Ordering},
         mpsc::{Receiver, Sender},
         Arc,
     },

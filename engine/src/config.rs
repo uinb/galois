@@ -223,8 +223,6 @@ pub fn test_default() {
         x25519_priv = "0xedcff0c69e4c0fa7e9a36e2e6d07f2cc355c8d25907a0ad2ab7e03b24f8e90f3"
         proof_batch_limit = 20
         claim_block = 1
-        compress_proofs = true
-        fee_adjust_threshold = 1000
     "#;
     let config = init_config(&toml, None);
     assert!(config.is_ok())

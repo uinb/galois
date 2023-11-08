@@ -19,24 +19,21 @@ pub mod orderbook;
 
 use crate::{
     core::*,
-    fusotao::{Proof, Prover},
-    input::{Event, Input, Message},
+    input::{Event, Message},
     orderbook::*,
-    output::{self, Output},
-    sequencer, snapshot,
+    output::Output,
+    prover, snapshot,
 };
 use anyhow::anyhow;
 use rust_decimal::{prelude::*, Decimal};
 use std::{
     collections::HashMap,
-    convert::TryInto,
     sync::mpsc::{Receiver, Sender},
 };
 use thiserror::Error;
 
 type OutputChannel = Sender<Vec<Output>>;
 type DriverChannel = Receiver<Event>;
-type ProofChannel = Sender<Proof>;
 type ResponseChannel = Sender<(u64, Message)>;
 
 #[derive(Debug, Error)]
@@ -53,27 +50,13 @@ pub enum EventsError {
 
 pub type ExecutionResult = Result<(), EventsError>;
 
-pub fn init(
-    recv: DriverChannel,
-    output: OutputChannel,
-    proofs: ProofChannel,
-    response: ResponseChannel,
-    mut data: Data,
-) {
+pub fn init(recv: DriverChannel, output: OutputChannel, response: ResponseChannel, mut data: Data) {
     std::thread::spawn(move || {
-        let prover = Prover::new(proofs);
         let mut ephemeral = Ephemeral::new();
         log::info!("executor initialized");
         loop {
             let event = recv.recv().unwrap();
-            match do_execute(
-                event,
-                &mut data,
-                &mut ephemeral,
-                &output,
-                &response,
-                &prover,
-            ) {
+            match do_execute(event, &mut data, &mut ephemeral, &output, &response) {
                 Ok(_) => {}
                 Err(EventsError::EventRejected(id, session, req_id, e)) => {
                     log::debug!("event {} rejected: {}", id, e);
@@ -100,7 +83,6 @@ fn do_execute(
     ephemeral: &mut Ephemeral,
     output: &OutputChannel,
     response: &ResponseChannel,
-    prover: &Prover,
 ) -> ExecutionResult {
     match event {
         Event::Limit(id, cmd, time, session, req_id) => {
@@ -148,7 +130,7 @@ fn do_execute(
                 time,
             );
             let (maker_fee, taker_fee) = (orderbook.maker_fee, orderbook.taker_fee);
-            prover.prove_trade_cmd(
+            prover::prove_trade_cmd(
                 data,
                 cmd.nonce,
                 cmd.signature.clone(),
@@ -212,7 +194,7 @@ fn do_execute(
                 &mr,
                 time,
             );
-            prover.prove_trade_cmd(
+            prover::prove_trade_cmd(
                 data,
                 cmd.nonce,
                 cmd.signature.clone(),
@@ -243,7 +225,7 @@ fn do_execute(
             );
             let before = assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.currency);
             if data.tvl < cmd.amount {
-                prover.prove_cmd_rejected(&mut data.merkle_tree, id, cmd, &before);
+                prover::prove_cmd_rejected(&mut data.merkle_tree, id, cmd, &before);
                 log::error!("TVL less than transfer_out amount, event={}", id);
                 return Err(EventsError::EventIgnored(id, anyhow!("TVL not enough")));
             }
@@ -255,11 +237,11 @@ fn do_execute(
             ) {
                 Ok(after) => {
                     data.tvl -= cmd.amount;
-                    prover.prove_assets_cmd(&mut data.merkle_tree, id, cmd, &before, &after);
+                    prover::prove_assets_cmd(&mut data.merkle_tree, id, cmd, &before, &after);
                     Ok(())
                 }
                 Err(e) => {
-                    prover.prove_cmd_rejected(&mut data.merkle_tree, id, cmd, &before);
+                    prover::prove_cmd_rejected(&mut data.merkle_tree, id, cmd, &before);
                     Err(EventsError::EventIgnored(id, e))
                 }
             }
@@ -275,7 +257,7 @@ fn do_execute(
             if data.tvl + cmd.amount >= crate::core::max_number() {
                 let before =
                     assets::get_balance_to_owned(&data.accounts, &cmd.user_id, cmd.currency);
-                prover.prove_rejecting_no_reason(&mut data.merkle_tree, id, cmd, &before);
+                prover::prove_rejecting_no_reason(&mut data.merkle_tree, id, cmd, &before);
                 log::error!("TVL out of limit, event={}", id);
                 return Err(EventsError::EventIgnored(id, anyhow!("TVL out of limit")));
             }
@@ -293,7 +275,7 @@ fn do_execute(
             )
             .map_err(|e| EventsError::EventIgnored(id, e))?;
             data.tvl = data.tvl + cmd.amount;
-            prover.prove_assets_cmd(&mut data.merkle_tree, id, cmd, &before, &after);
+            prover::prove_assets_cmd(&mut data.merkle_tree, id, cmd, &before, &after);
             Ok(())
         }
         Event::UpdateSymbol(id, cmd) => {

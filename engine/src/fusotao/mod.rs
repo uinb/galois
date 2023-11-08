@@ -23,16 +23,13 @@ use std::{
     convert::TryInto,
     sync::{
         atomic::{AtomicU32, AtomicU64, Ordering},
-        mpsc::{Receiver, RecvTimeoutError},
         Arc,
     },
 };
 
-mod prover;
-pub use prover::Prover;
-
 pub mod committer;
 pub mod connector;
+pub mod prover;
 pub mod scanner;
 
 pub type BlockNumber = u32;
@@ -56,8 +53,10 @@ const MAX_EXTRINSIC_SIZE: usize = 3 * 1024 * 1024;
 /// 2. new or from public
 pub fn sync() -> anyhow::Result<(FusoConnector, Arc<FusoState>)> {
     let connector = FusoConnector::new(C.dry_run.is_some())?;
-    let state = connector.sync_progress()?;
-    log::info!("chain states synchronized");
+    let progress = connector.sync_progress()?;
+    log::info!("proving progress synchronized");
+    let state = FusoState::default();
+    state.proved_event_id.store(progress, Ordering::Relaxed);
     Ok((connector, Arc::new(state)))
 }
 

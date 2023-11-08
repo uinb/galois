@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use super::*;
-use crate::{assets::Balance, input::*, matcher::*, orderbook::AskOrBid, output::Output};
+use crate::{assets::Balance, matcher::*, orderbook::AskOrBid, output::Output};
 use blake2::{Blake2b, Digest};
 use generic_array::typenum::U32;
-use std::{collections::HashMap, sync::mpsc::Sender};
+use rocksdb::{Direction, IteratorMode, WriteBatchWithTransaction};
+use std::collections::HashMap;
 
 pub type BlakeTwo256 = Blake2b<U32>;
 
@@ -25,125 +26,115 @@ const ORDERBOOK_KEY: u8 = 0x01;
 const BESTPRICE_KEY: u8 = 0x02;
 const ORDERPAGE_KEY: u8 = 0x03;
 
-pub struct Prover {
-    pub sender: Sender<Proof>,
-}
-
-impl Prover {
-    pub fn new(tx: Sender<Proof>) -> Self {
-        Self { sender: tx }
-    }
-
-    pub fn prove_trade_cmd(
-        &self,
-        data: &mut Data,
-        _nonce: u32,
-        _signature: Vec<u8>,
-        encoded_cmd: FusoCommand,
-        ask_size_before: Amount,
-        bid_size_before: Amount,
-        best_ask_before: (Price, Amount),
-        best_bid_before: (Price, Amount),
-        taker_base_before: &Balance,
-        taker_quote_before: &Balance,
-        outputs: &[Output],
-        matches: &Match,
-    ) {
-        let mut leaves = vec![];
-        let taker = outputs.last().unwrap();
-        let symbol = taker.symbol.clone();
-        let event_id = taker.event_id;
-        let user_id = taker.user_id;
-        let orderbook = data.orderbooks.get(&symbol).unwrap();
-        let size = orderbook.size();
-        log::debug!(
-            "generating merkle leaf of {:?}: orderbook = ({:?}, {:?}) -> ({:?}, {:?})",
-            taker.event_id,
-            ask_size_before,
-            bid_size_before,
-            size.0,
-            size.1,
-        );
-        let (old_ask_size, old_bid_size, new_ask_size, new_bid_size) = (
-            ask_size_before.to_amount(),
-            bid_size_before.to_amount(),
-            size.0.to_amount(),
-            size.1.to_amount(),
-        );
-        leaves.push(new_orderbook_merkle_leaf(
-            symbol,
-            old_ask_size,
-            old_bid_size,
-            new_ask_size,
-            new_bid_size,
-        ));
-        let mut maker_accounts = HashMap::<UserId, Output>::new();
-        outputs
-            .iter()
-            .take_while(|o| o.role == Role::Maker)
-            .for_each(|r| {
-                maker_accounts
-                    .entry(r.user_id.clone())
-                    .and_modify(|out| {
-                        out.quote_charge += r.quote_charge;
-                        out.quote_delta += r.quote_delta;
-                        out.quote_available = r.quote_available;
-                        out.quote_frozen = r.quote_frozen;
-                        out.base_charge += r.base_charge;
-                        out.base_delta += r.base_delta;
-                        out.base_available = r.base_available;
-                        out.base_frozen = r.base_frozen;
-                    })
-                    .or_insert_with(|| r.clone());
-            });
-        maker_accounts.values().for_each(|r| {
-            log::debug!("{:?}", r);
-            let (ba, bf, qa, qf) = match r.ask_or_bid {
-                // -base_frozen, +quote_available
-                // base_frozen0 + r.base_delta = base_frozen
-                // qa - q0 + abs(r.quote_charge) = abs(quote_delta)
-                AskOrBid::Ask => (
-                    r.base_available,
-                    r.base_frozen + r.base_delta.abs(),
-                    r.quote_available + r.quote_charge.abs() - r.quote_delta.abs(),
-                    r.quote_frozen,
-                ),
-                // +base_available, -quote_frozen
-                // quote_frozen0 + r.quote_delta = quote_frozen
-                // ba0 - ba + abs(r.base_charge) = abs(base_delta)
-                AskOrBid::Bid => (
-                    r.base_available + r.base_charge.abs() - r.base_delta.abs(),
-                    r.base_frozen,
-                    r.quote_available,
-                    r.quote_frozen + r.quote_delta.abs(),
-                ),
-            };
-            let (new_ba, new_bf, old_ba, old_bf) = (
-                r.base_available.to_amount(),
-                r.base_frozen.to_amount(),
-                ba.to_amount(),
-                bf.to_amount(),
-            );
-            leaves.push(new_account_merkle_leaf(
-                &r.user_id, symbol.0, old_ba, old_bf, new_ba, new_bf,
-            ));
-            let (new_qa, new_qf, old_qa, old_qf) = (
-                r.quote_available.to_amount(),
-                r.quote_frozen.to_amount(),
-                qa.to_amount(),
-                qf.to_amount(),
-            );
-            leaves.push(new_account_merkle_leaf(
-                &r.user_id, symbol.1, old_qa, old_qf, new_qa, new_qf,
-            ));
+pub fn prove_trade_cmd(
+    data: &mut Data,
+    _nonce: u32,
+    _signature: Vec<u8>,
+    encoded_cmd: FusoCommand,
+    ask_size_before: Amount,
+    bid_size_before: Amount,
+    best_ask_before: (Price, Amount),
+    best_bid_before: (Price, Amount),
+    taker_base_before: &Balance,
+    taker_quote_before: &Balance,
+    outputs: &[Output],
+    matches: &Match,
+) {
+    let mut leaves = vec![];
+    let taker = outputs.last().unwrap();
+    let symbol = taker.symbol.clone();
+    let event_id = taker.event_id;
+    let user_id = taker.user_id;
+    let orderbook = data.orderbooks.get(&symbol).unwrap();
+    let size = orderbook.size();
+    log::debug!(
+        "generating merkle leaf of {:?}: orderbook = ({:?}, {:?}) -> ({:?}, {:?})",
+        taker.event_id,
+        ask_size_before,
+        bid_size_before,
+        size.0,
+        size.1,
+    );
+    let (old_ask_size, old_bid_size, new_ask_size, new_bid_size) = (
+        ask_size_before.to_amount(),
+        bid_size_before.to_amount(),
+        size.0.to_amount(),
+        size.1.to_amount(),
+    );
+    leaves.push(new_orderbook_merkle_leaf(
+        symbol,
+        old_ask_size,
+        old_bid_size,
+        new_ask_size,
+        new_bid_size,
+    ));
+    let mut maker_accounts = HashMap::<UserId, Output>::new();
+    outputs
+        .iter()
+        .take_while(|o| o.role == Role::Maker)
+        .for_each(|r| {
+            maker_accounts
+                .entry(r.user_id.clone())
+                .and_modify(|out| {
+                    out.quote_charge += r.quote_charge;
+                    out.quote_delta += r.quote_delta;
+                    out.quote_available = r.quote_available;
+                    out.quote_frozen = r.quote_frozen;
+                    out.base_charge += r.base_charge;
+                    out.base_delta += r.base_delta;
+                    out.base_available = r.base_available;
+                    out.base_frozen = r.base_frozen;
+                })
+                .or_insert_with(|| r.clone());
         });
-        let (new_taker_ba, new_taker_bf, old_taker_ba, old_taker_bf) = (
-            taker.base_available.to_amount(),
-            taker.base_frozen.to_amount(),
-            taker_base_before.available.to_amount(),
-            taker_base_before.frozen.to_amount(),
+    maker_accounts.values().for_each(|r| {
+        log::debug!("{:?}", r);
+        let (ba, bf, qa, qf) = match r.ask_or_bid {
+            // -base_frozen, +quote_available
+            // base_frozen0 + r.base_delta = base_frozen
+            // qa - q0 + abs(r.quote_charge) = abs(quote_delta)
+            AskOrBid::Ask => (
+                r.base_available,
+                r.base_frozen + r.base_delta.abs(),
+                r.quote_available + r.quote_charge.abs() - r.quote_delta.abs(),
+                r.quote_frozen,
+            ),
+            // +base_available, -quote_frozen
+            // quote_frozen0 + r.quote_delta = quote_frozen
+            // ba0 - ba + abs(r.base_charge) = abs(base_delta)
+            AskOrBid::Bid => (
+                r.base_available + r.base_charge.abs() - r.base_delta.abs(),
+                r.base_frozen,
+                r.quote_available,
+                r.quote_frozen + r.quote_delta.abs(),
+            ),
+        };
+        let (new_ba, new_bf, old_ba, old_bf) = (
+            r.base_available.to_amount(),
+            r.base_frozen.to_amount(),
+            ba.to_amount(),
+            bf.to_amount(),
         );
-        log::debug!(
+        leaves.push(new_account_merkle_leaf(
+            &r.user_id, symbol.0, old_ba, old_bf, new_ba, new_bf,
+        ));
+        let (new_qa, new_qf, old_qa, old_qf) = (
+            r.quote_available.to_amount(),
+            r.quote_frozen.to_amount(),
+            qa.to_amount(),
+            qf.to_amount(),
+        );
+        leaves.push(new_account_merkle_leaf(
+            &r.user_id, symbol.1, old_qa, old_qf, new_qa, new_qf,
+        ));
+    });
+    let (new_taker_ba, new_taker_bf, old_taker_ba, old_taker_bf) = (
+        taker.base_available.to_amount(),
+        taker.base_frozen.to_amount(),
+        taker_base_before.available.to_amount(),
+        taker_base_before.frozen.to_amount(),
+    );
+    log::debug!(
             "generating merkle leaf of {:?}: taker base = [{:?}({:?}), {:?}({:?})] -> [{:?}({:?}), {:?}({:?})]",
             taker.event_id,
             old_taker_ba,
@@ -155,21 +146,21 @@ impl Prover {
             new_taker_bf,
             taker.base_frozen,
         );
-        leaves.push(new_account_merkle_leaf(
-            &user_id,
-            symbol.0,
-            old_taker_ba,
-            old_taker_bf,
-            new_taker_ba,
-            new_taker_bf,
-        ));
-        let (new_taker_qa, new_taker_qf, old_taker_qa, old_taker_qf) = (
-            taker.quote_available.to_amount(),
-            taker.quote_frozen.to_amount(),
-            taker_quote_before.available.to_amount(),
-            taker_quote_before.frozen.to_amount(),
-        );
-        log::debug!(
+    leaves.push(new_account_merkle_leaf(
+        &user_id,
+        symbol.0,
+        old_taker_ba,
+        old_taker_bf,
+        new_taker_ba,
+        new_taker_bf,
+    ));
+    let (new_taker_qa, new_taker_qf, old_taker_qa, old_taker_qf) = (
+        taker.quote_available.to_amount(),
+        taker.quote_frozen.to_amount(),
+        taker_quote_before.available.to_amount(),
+        taker_quote_before.frozen.to_amount(),
+    );
+    log::debug!(
             "generating merkle leaf of {:?}: taker quote = [{:?}({:?}), {:?}({:?})] -> [{:?}({:?}), {:?}({:?})]",
             taker.event_id,
             old_taker_qa,
@@ -181,152 +172,194 @@ impl Prover {
             new_taker_qf,
             taker.quote_frozen,
         );
-        leaves.push(new_account_merkle_leaf(
-            &user_id,
-            symbol.1,
-            old_taker_qa,
-            old_taker_qf,
-            new_taker_qa,
-            new_taker_qf,
-        ));
-        let (best_ask, best_bid) = orderbook.get_size_of_best();
-        leaves.push(new_bestprice_merkle_leaf(
-            symbol,
-            best_ask_before.0.to_amount(),
-            best_bid_before.0.to_amount(),
-            best_ask.map(|a| a.0).unwrap_or(Amount::zero()).to_amount(),
-            best_bid.map(|b| b.0).unwrap_or(Amount::zero()).to_amount(),
-        ));
-        let mut pages = matches
-            .page_delta
-            .iter()
-            .map(|(k, v)| {
-                new_orderpage_merkle_leaf(symbol, k.to_amount(), v.0.to_amount(), v.1.to_amount())
-            })
-            .collect::<Vec<_>>();
-        if taker.ask_or_bid == AskOrBid::Ask && !pages.is_empty() {
-            pages.reverse();
+    leaves.push(new_account_merkle_leaf(
+        &user_id,
+        symbol.1,
+        old_taker_qa,
+        old_taker_qf,
+        new_taker_qa,
+        new_taker_qf,
+    ));
+    let (best_ask, best_bid) = orderbook.get_size_of_best();
+    leaves.push(new_bestprice_merkle_leaf(
+        symbol,
+        best_ask_before.0.to_amount(),
+        best_bid_before.0.to_amount(),
+        best_ask.map(|a| a.0).unwrap_or(Amount::zero()).to_amount(),
+        best_bid.map(|b| b.0).unwrap_or(Amount::zero()).to_amount(),
+    ));
+    let mut pages = matches
+        .page_delta
+        .iter()
+        .map(|(k, v)| {
+            new_orderpage_merkle_leaf(symbol, k.to_amount(), v.0.to_amount(), v.1.to_amount())
+        })
+        .collect::<Vec<_>>();
+    if taker.ask_or_bid == AskOrBid::Ask && !pages.is_empty() {
+        pages.reverse();
+    }
+    leaves.append(&mut pages);
+    let merkle_proof = gen_proofs(&mut data.merkle_tree, &leaves);
+    save_proof(Proof {
+        event_id,
+        user_id,
+        cmd: encoded_cmd,
+        leaves,
+        maker_page_delta: matches.page_delta.len() as u8,
+        maker_account_delta: maker_accounts.len() as u8 * 2,
+        merkle_proof,
+        root: data.merkle_tree.root().clone().into(),
+    })
+    .unwrap();
+}
+
+pub fn prove_assets_cmd(
+    merkle_tree: &mut GlobalStates,
+    event_id: u64,
+    cmd: AssetsCmd,
+    account_before: &Balance,
+    account_after: &Balance,
+) {
+    let (new_available, new_frozen, old_available, old_frozen) = (
+        account_after.available.to_amount(),
+        account_after.frozen.to_amount(),
+        account_before.available.to_amount(),
+        account_before.frozen.to_amount(),
+    );
+    let leaves = vec![new_account_merkle_leaf(
+        &cmd.user_id,
+        cmd.currency,
+        old_available,
+        old_frozen,
+        new_available,
+        new_frozen,
+    )];
+    let merkle_proof = gen_proofs(merkle_tree, &leaves);
+    save_proof(Proof {
+        event_id,
+        user_id: cmd.user_id,
+        cmd: (cmd, true).into(),
+        leaves,
+        maker_page_delta: 0,
+        maker_account_delta: 0,
+        merkle_proof,
+        root: merkle_tree.root().clone().into(),
+    })
+    .unwrap();
+}
+
+pub fn prove_cmd_rejected(
+    merkle_tree: &mut GlobalStates,
+    event_id: u64,
+    cmd: AssetsCmd,
+    account_before: &Balance,
+) {
+    let (old_available, old_frozen) = (
+        account_before.available.to_amount(),
+        account_before.frozen.to_amount(),
+    );
+    let leaves = vec![new_account_merkle_leaf(
+        &cmd.user_id,
+        cmd.currency,
+        old_available,
+        old_frozen,
+        old_available,
+        old_frozen,
+    )];
+    let merkle_proof = gen_proofs(merkle_tree, &leaves);
+    save_proof(Proof {
+        event_id,
+        user_id: cmd.user_id,
+        cmd: (cmd, false).into(),
+        leaves,
+        maker_page_delta: 0,
+        maker_account_delta: 0,
+        merkle_proof,
+        root: merkle_tree.root().clone().into(),
+    })
+    .unwrap();
+}
+
+pub fn prove_rejecting_no_reason(
+    merkle_tree: &mut GlobalStates,
+    event_id: u64,
+    cmd: AssetsCmd,
+    account_before: &Balance,
+) {
+    let (old_available, old_frozen) = (
+        account_before.available.to_amount(),
+        account_before.frozen.to_amount(),
+    );
+    let leaves = vec![new_account_merkle_leaf(
+        &cmd.user_id,
+        cmd.currency,
+        old_available,
+        old_frozen,
+        old_available,
+        old_frozen,
+    )];
+    let merkle_proof = gen_proofs(merkle_tree, &leaves);
+    save_proof(Proof {
+        event_id,
+        user_id: cmd.user_id,
+        cmd: (cmd, false).into(),
+        leaves: vec![],
+        maker_page_delta: 0,
+        maker_account_delta: 0,
+        merkle_proof,
+        root: merkle_tree.root().clone().into(),
+    })
+    .unwrap();
+}
+
+fn save_proof(proof: Proof) -> anyhow::Result<()> {
+    match C.dry_run {
+        Some(n) if n >= proof.event_id => {
+            log::info!(
+                "dry-run: event-{} => 0x{}",
+                proof.event_id,
+                &hex::encode(proof.root)
+            );
         }
-        leaves.append(&mut pages);
-        let merkle_proof = gen_proofs(&mut data.merkle_tree, &leaves);
-        self.sender
-            .send(Proof {
-                event_id,
-                user_id,
-                cmd: encoded_cmd,
-                leaves,
-                maker_page_delta: matches.page_delta.len() as u8,
-                maker_account_delta: maker_accounts.len() as u8 * 2,
-                merkle_proof,
-                root: data.merkle_tree.root().clone().into(),
-            })
-            .unwrap();
+        _ => {}
     }
+    STORAGE.put(id_to_key(proof.event_id), proof.encode())?;
+    Ok(())
+}
 
-    pub fn prove_assets_cmd(
-        &self,
-        merkle_tree: &mut GlobalStates,
-        event_id: u64,
-        cmd: AssetsCmd,
-        account_before: &Balance,
-        account_after: &Balance,
-    ) {
-        let (new_available, new_frozen, old_available, old_frozen) = (
-            account_after.available.to_amount(),
-            account_after.frozen.to_amount(),
-            account_before.available.to_amount(),
-            account_before.frozen.to_amount(),
-        );
-        let leaves = vec![new_account_merkle_leaf(
-            &cmd.user_id,
-            cmd.currency,
-            old_available,
-            old_frozen,
-            new_available,
-            new_frozen,
-        )];
-        let merkle_proof = gen_proofs(merkle_tree, &leaves);
-        self.sender
-            .send(Proof {
-                event_id,
-                user_id: cmd.user_id,
-                cmd: (cmd, true).into(),
-                leaves,
-                maker_page_delta: 0,
-                maker_account_delta: 0,
-                merkle_proof,
-                root: merkle_tree.root().clone().into(),
-            })
-            .unwrap();
-    }
+pub fn remove_before(id: u64) -> anyhow::Result<()> {
+    let mut batch = WriteBatchWithTransaction::<false>::default();
+    batch.delete_range(id_to_key(1), id_to_key(id));
+    STORAGE.write(batch)?;
+    Ok(())
+}
 
-    pub fn prove_cmd_rejected(
-        &self,
-        merkle_tree: &mut GlobalStates,
-        event_id: u64,
-        cmd: AssetsCmd,
-        account_before: &Balance,
-    ) {
-        let (old_available, old_frozen) = (
-            account_before.available.to_amount(),
-            account_before.frozen.to_amount(),
-        );
-        let leaves = vec![new_account_merkle_leaf(
-            &cmd.user_id,
-            cmd.currency,
-            old_available,
-            old_frozen,
-            old_available,
-            old_frozen,
-        )];
-        let merkle_proof = gen_proofs(merkle_tree, &leaves);
-        self.sender
-            .send(Proof {
-                event_id,
-                user_id: cmd.user_id,
-                cmd: (cmd, false).into(),
-                leaves,
-                maker_page_delta: 0,
-                maker_account_delta: 0,
-                merkle_proof,
-                root: merkle_tree.root().clone().into(),
-            })
-            .unwrap();
+pub fn fetch_raw_ge(id: u64) -> Vec<(u64, RawParameter)> {
+    if C.dry_run.is_some() {
+        return vec![];
     }
+    let mut ret = vec![];
+    let mut total_size = 0usize;
+    let iter = STORAGE.iterator(IteratorMode::From(&id_to_key(id), Direction::Forward));
+    for item in iter {
+        let (key, value) = item.unwrap();
+        total_size += value.len();
+        ret.push((key_to_id(&key), RawParameter(value.to_vec())));
+        if ret.len() >= C.fusotao.proof_batch_limit || total_size >= MAX_EXTRINSIC_SIZE {
+            break;
+        }
+    }
+    ret
+}
 
-    pub fn prove_rejecting_no_reason(
-        &self,
-        merkle_tree: &mut GlobalStates,
-        event_id: u64,
-        cmd: AssetsCmd,
-        account_before: &Balance,
-    ) {
-        let (old_available, old_frozen) = (
-            account_before.available.to_amount(),
-            account_before.frozen.to_amount(),
-        );
-        let leaves = vec![new_account_merkle_leaf(
-            &cmd.user_id,
-            cmd.currency,
-            old_available,
-            old_frozen,
-            old_available,
-            old_frozen,
-        )];
-        let merkle_proof = gen_proofs(merkle_tree, &leaves);
-        self.sender
-            .send(Proof {
-                event_id,
-                user_id: cmd.user_id,
-                cmd: (cmd, false).into(),
-                leaves: vec![],
-                maker_page_delta: 0,
-                maker_account_delta: 0,
-                merkle_proof,
-                root: merkle_tree.root().clone().into(),
-            })
-            .unwrap();
-    }
+fn id_to_key(id: u64) -> [u8; 16] {
+    unsafe { std::mem::transmute::<[[u8; 8]; 2], [u8; 16]>([*b"rawproof", id.to_be_bytes()]) }
+}
+
+fn key_to_id(key: &[u8]) -> u64 {
+    let mut id = [0u8; 8];
+    id.copy_from_slice(&key[8..]);
+    u64::from_be_bytes(id)
 }
 
 fn gen_proofs(merkle_tree: &mut GlobalStates, leaves: &Vec<MerkleLeaf>) -> Vec<u8> {

@@ -16,16 +16,10 @@ use crate::fusotao::ToBlockChainNumeric;
 use crate::{config::C, core::*, input::*};
 use anyhow::{anyhow, ensure};
 use rocksdb::{Direction, IteratorMode, Options, WriteBatchWithTransaction};
-use serde::{Deserialize, Serialize};
 use std::{
     convert::{TryFrom, TryInto},
     str::FromStr,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        mpsc::*,
-        Arc,
-    },
-    time::{Duration, SystemTime},
+    sync::{mpsc::*, Arc},
 };
 
 pub fn init(
@@ -89,17 +83,17 @@ pub fn remove_before(id: u64) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn id_to_key(id: u64) -> [u8; 16] {
+fn id_to_key(id: u64) -> [u8; 16] {
     unsafe { std::mem::transmute::<[[u8; 8]; 2], [u8; 16]>([*b"sequence", id.to_be_bytes()]) }
 }
 
-pub fn key_to_id(key: &[u8]) -> u64 {
+fn key_to_id(key: &[u8]) -> u64 {
     let mut id = [0u8; 8];
     id.copy_from_slice(&key[8..]);
     u64::from_be_bytes(id)
 }
 
-pub fn value_to_cmd(value: &[u8]) -> anyhow::Result<Command> {
+fn value_to_cmd(value: &[u8]) -> anyhow::Result<Command> {
     let cmd = serde_json::from_slice(value)?;
     Ok(cmd)
 }

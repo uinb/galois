@@ -13,105 +13,102 @@
 // limitations under the License.
 
 use crate::{config::C, fusotao::*};
-use std::{sync::mpsc::Receiver, time::Duration};
+use sp_core::Pair;
+use std::time::Duration;
 
-pub fn init(rx: Receiver<Proof>, connector: FusoConnector, progress: Arc<FusoState>) {
-    let mut pending: Vec<RawParameter> = Vec::with_capacity(C.fusotao.proof_batch_limit);
-    std::thread::spawn(move || loop {
-        let proof = match rx.recv_timeout(Duration::from_millis(10_000)) {
-            Ok(p) => Some(p),
-            Err(RecvTimeoutError::Timeout) => None,
-            Err(RecvTimeoutError::Disconnected) => {
-                log::error!("Proof committer interrupted!");
-                break;
+/// since we won't wait for the proofs to be `Finalized`, we must add a watchdog to revert `proved_event_id`
+pub fn init(connector: FusoConnector, progress: Arc<FusoState>) {
+    if C.dry_run.is_some() {
+        return;
+    }
+    let progress = progress.proved_event_id.clone();
+    loop {
+        let proved_id = progress.load(Ordering::Relaxed);
+        let v = prover::fetch_raw_ge(proved_id + 1);
+        if v.is_empty() {
+            break;
+        }
+        match submit(&connector, v, true) {
+            Ok(n) if n > proved_id => {
+                progress.store(n, Ordering::Relaxed);
             }
-        };
-        // if C.dry_run.is_some() {
-        //     if let Some(p) = proof {
-        //         log::info!("{}(dry-run) => 0x{}", p.event_id, &hex::encode(p.root));
-        //     }
-        //     continue;
-        // } else {
-        //     append(proof, &mut pending);
-        // }
+            Ok(n) => {
+                log::error!("expecting proof {} to be verified but failed", n);
+                panic!("initializing committer failed");
+            }
+            Err(e) => {
+                log::error!("submitting proofs failed due to {}, retrying...", e);
+            }
+        }
+    }
+    let local = progress.clone();
+    let conn = connector.clone();
+    std::thread::spawn(move || -> anyhow::Result<()> {
+        loop {
+            let id = local.load(Ordering::Relaxed);
+            let v = prover::fetch_raw_ge(id + 1);
+            if v.is_empty() {
+                std::thread::sleep(Duration::from_millis(3000));
+                continue;
+            }
+            match submit(&conn, v, false) {
+                Ok(n) => local.store(n, Ordering::Relaxed),
+                Err(e) => {
+                    log::error!("submitting proofs failed due to {}, retrying...", e);
+                }
+            }
+        }
+    });
+    std::thread::spawn(move || -> anyhow::Result<()> {
+        loop {
+            std::thread::sleep(Duration::from_secs(60));
+            if let Ok(remote) = connector.sync_progress() {
+                let local = progress.load(Ordering::Relaxed);
+                if remote < local {
+                    progress.store(remote, Ordering::Relaxed);
+                }
+                let _ = prover::remove_before(remote);
+            }
+        }
     });
 }
 
-// fn start_submitting(api: FusoApi, proving_progress: Arc<AtomicU64>) {
-//     let api = api.clone();
-//     log::info!(
-//         "submitting proofs from {}",
-//         proving_progress.load(Ordering::Relaxed)
-//     );
-//     std::thread::spawn(move || loop {
-//         let start_from = proving_progress.load(Ordering::Relaxed);
-//         let new_max_submitted = std::panic::catch_unwind(|| -> u64 {
-//             let (end_to, truncated) = Self::fetch_proofs(start_from);
-//             if start_from == end_to {
-//                 return end_to;
-//             }
-//             log::info!("[+] unsubmitted proofs [{}:{}] found", start_from, end_to);
-//             let submit_result = Self::submit_batch(&api, truncated);
-//             Self::handle_submit_result(submit_result, (start_from, end_to))
-//         })
-//         .unwrap_or(start_from);
-//         if start_from == new_max_submitted {
-//             std::thread::sleep(Duration::from_millis(1000));
-//             continue;
-//         }
-//         proving_progress.store(new_max_submitted, Ordering::Relaxed);
-//     });
-// }
+fn compress_proofs(raws: Vec<RawParameter>) -> Vec<u8> {
+    let r = raws.encode();
+    let origin_size = r.len();
+    let compressed_proofs = lz4_flex::compress_prepend_size(r.as_ref());
+    let compressed_size = compressed_proofs.len();
+    log::info!(
+        "compressing proofs: origin size = {}, compressed size = {}",
+        origin_size,
+        compressed_size
+    );
+    compressed_proofs
+}
 
-// fn compress_proofs(raws: Vec<RawParameter>) -> Vec<u8> {
-//     let r = raws.encode();
-//     let uncompress_size = r.len();
-//     let compressed_proofs = lz4_flex::compress_prepend_size(r.as_ref());
-//     let compressed_size = compressed_proofs.len();
-//     log::info!(
-//         "proof compress: uncompress size = {}, compressed size = {}",
-//         uncompress_size,
-//         compressed_size
-//     );
-//     compressed_proofs
-// }
-
-// fn submit_batch(api: &FusoApi, batch: Vec<RawParameter>) -> anyhow::Result<()> {
-//     if batch.is_empty() {
-//         return Ok(());
-//     }
-//     log::info!(
-//         "[+] starting to submit_proofs at {}",
-//         Local::now().timestamp_millis()
-//     );
-//     let hash = if C.fusotao.compress_proofs {
-//         let xt: sub_api::UncheckedExtrinsicV4<_> = sub_api::compose_extrinsic!(
-//             api,
-//             "Verifier",
-//             "verify_compress_v2",
-//             Self::compress_proofs(batch)
-//         );
-//         api.send_extrinsic(xt.hex_encode(), sub_api::XtStatus::InBlock)
-//             .map_err(|e| anyhow!("[-] submitting proofs failed, {:?}", e))?
-//     } else {
-//         let xt: sub_api::UncheckedExtrinsicV4<_> =
-//             sub_api::compose_extrinsic!(api, "Verifier", "verify_v2", batch);
-//         api.send_extrinsic(xt.hex_encode(), sub_api::XtStatus::InBlock)
-//             .map_err(|e| anyhow!("[-] submitting proofs failed, {:?}", e))?
-//     };
-//     log::info!(
-//         "[+] ending submit_proofs at {}",
-//         Local::now().timestamp_millis()
-//     );
-//     if hash.is_none() {
-//         Err(anyhow!(
-//             "[-] verify extrinsic executed failed, no extrinsic returns"
-//         ))
-//     } else {
-//         log::info!(
-//             "[+] submitting proofs ok, extrinsic hash: {:?}",
-//             hex::encode(hash.unwrap())
-//         );
-//         Ok(())
-//     }
-// }
+fn submit(
+    connector: &FusoConnector,
+    batch: Vec<(u64, RawParameter)>,
+    finalized: bool,
+) -> anyhow::Result<u64> {
+    anyhow::ensure!(!batch.is_empty(), "empty batch is not allowed");
+    let (id, proofs): (Vec<u64>, Vec<RawParameter>) = batch.into_iter().unzip();
+    log::debug!("submitting proofs at {}", chrono::Local::now());
+    let payload: sub_api::UncheckedExtrinsicV4<_> = sub_api::compose_extrinsic!(
+        connector.api,
+        "Verifier",
+        "verify_compress_v2",
+        compress_proofs(proofs)
+    );
+    if finalized {
+        connector
+            .api
+            .send_extrinsic(payload.hex_encode(), sub_api::XtStatus::Finalized)?;
+        connector.sync_progress()
+    } else {
+        connector
+            .api
+            .send_extrinsic(payload.hex_encode(), sub_api::XtStatus::InBlock)?;
+        Ok(id.last().copied().unwrap_or_default())
+    }
+}

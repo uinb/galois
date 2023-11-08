@@ -13,13 +13,12 @@
 // limitations under the License.
 
 use super::*;
-use crate::{config::C, input::*};
+use crate::config::C;
 use anyhow::anyhow;
-use chrono::Local;
-use node_api::decoder::{Raw, RuntimeDecoder, StorageHasher};
+use node_api::decoder::{RuntimeDecoder, StorageHasher};
 use parity_scale_codec::{Decode, Error as CodecError};
 use sp_core::{sr25519::Public, Pair};
-use std::{sync::atomic::Ordering, time::Duration};
+use std::sync::atomic::Ordering;
 use sub_api::{rpc::WsRpcClient, Hash};
 
 #[derive(Clone)]
@@ -44,7 +43,7 @@ impl FusoConnector {
         self.signer.public().clone()
     }
 
-    pub fn sync_progress(&self) -> anyhow::Result<FusoState> {
+    pub fn sync_progress(&self) -> anyhow::Result<u64> {
         let state = FusoState::default();
         let (block_number, hash) = self.get_finalized_block()?;
         let decoder = RuntimeDecoder::new(self.api.metadata.clone());
@@ -58,10 +57,7 @@ impl FusoConnector {
             .get_opaque_storage_by_key_hash(key, Some(hash))?
             .ok_or(anyhow!("{} isn't the prover", self.get_pubkey()))?;
         let result = Dominator::decode(&mut payload.as_slice())?;
-        state
-            .proved_event_id
-            .store(result.sequence.0, Ordering::Relaxed);
-        Ok(state)
+        Ok(result.sequence.0)
     }
 
     pub fn fully_sync_chain(&self) -> anyhow::Result<FusoState> {
@@ -198,35 +194,6 @@ impl FusoConnector {
         // state.scanning_progress.store(until + 1, Ordering::Relaxed);
         // state.chain_height.store(until, Ordering::Relaxed);
         Ok(state)
-    }
-
-    fn handle_submit_result(result: anyhow::Result<()>, (start_from, end_to): (u64, u64)) -> u64 {
-        match result {
-            Ok(()) => {
-                log::info!("[+] rotating proved event to {}", end_to);
-                end_to
-            }
-            Err(e) => {
-                log::error!("[-] error occured while submitting proofs, {:?}", e);
-                start_from
-            }
-        }
-    }
-
-    fn fetch_proofs(start_from: u64) -> (u64, Vec<RawParameter>) {
-        let proofs = Vec::<(u64, RawParameter)>::new();
-        let mut total_size = 0usize;
-        let mut last_submit = start_from;
-        let mut truncated = vec![];
-        for (event_id, proof) in proofs.into_iter() {
-            if total_size + proof.0.len() >= super::MAX_EXTRINSIC_SIZE {
-                break;
-            }
-            total_size += proof.0.len();
-            last_submit = event_id;
-            truncated.push(proof);
-        }
-        (last_submit, truncated)
     }
 
     pub fn get_finalized_block(&self) -> anyhow::Result<(u32, Hash)> {
