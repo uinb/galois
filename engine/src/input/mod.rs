@@ -12,50 +12,310 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::core::*;
+use crate::{core::*, fusotao::ToBlockChainNumeric};
+use anyhow::{anyhow, ensure};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
-pub mod sequence;
+pub mod sequencer;
 pub mod server;
-pub mod whistle;
 
-pub use sequence::*;
-pub use whistle::*;
-
-/// Input
-///     sequence = command + database_header -> event
-///     whistle = command + network_header -> inspection
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
-pub enum Input {
-    Modifier(Sequence),
-    NonModifier(Whistle),
+pub struct Input {
+    pub session: u64,
+    pub req_id: u64,
+    pub sequence: u64,
+    pub cmd: Command,
+}
+
+impl Input {
+    pub fn new_with_req(cmd: Command, session: u64, req_id: u64) -> Self {
+        Self {
+            session,
+            req_id,
+            sequence: 0,
+            cmd,
+        }
+    }
+
+    pub fn new(cmd: Command) -> Self {
+        Self {
+            session: 0,
+            req_id: 0,
+            sequence: 0,
+            cmd,
+        }
+    }
+}
+
+impl TryInto<Event> for Input {
+    type Error = anyhow::Error;
+
+    fn try_into(self) -> anyhow::Result<Event> {
+        match self.cmd.cmd {
+            ASK_LIMIT | BID_LIMIT => {
+                let amount = self.cmd.amount.ok_or(anyhow!(""))?;
+                let price = self.cmd.price.ok_or(anyhow!(""))?;
+                ensure!(
+                    price.is_sign_positive() && price.scale() <= 7,
+                    "invalid price numeric"
+                );
+                ensure!(
+                    amount.is_sign_positive() && amount.scale() <= 7,
+                    "invalid amount numeric"
+                );
+                let vol = amount.checked_mul(price).ok_or(anyhow!(""))?;
+                ensure!(vol.validate(), "overflow");
+                let cmd = LimitCmd {
+                    symbol: self.cmd.symbol().ok_or(anyhow!(""))?,
+                    user_id: UserId::from_str(self.cmd.user_id.as_ref().ok_or(anyhow!(""))?)?,
+                    order_id: self.cmd.order_id.ok_or(anyhow!(""))?,
+                    price,
+                    amount,
+                    ask_or_bid: AskOrBid::try_from(self.cmd.cmd)?,
+                    nonce: self.cmd.nonce.ok_or(anyhow!(""))?,
+                    signature: hex::decode(self.cmd.signature.ok_or(anyhow!(""))?)?,
+                    broker: self
+                        .cmd
+                        .broker
+                        .map(|b| UserId::from_str(b.as_ref()))
+                        .transpose()?,
+                };
+                Ok(Event::Limit(
+                    self.sequence,
+                    cmd,
+                    self.cmd.timestamp.unwrap_or_default(),
+                    self.session,
+                    self.req_id,
+                ))
+            }
+            CANCEL => Ok(Event::Cancel(
+                self.sequence,
+                CancelCmd {
+                    symbol: self.cmd.symbol().ok_or(anyhow!(""))?,
+                    user_id: UserId::from_str(self.cmd.user_id.as_ref().ok_or(anyhow!(""))?)?,
+                    order_id: self.cmd.order_id.ok_or(anyhow!(""))?,
+                    nonce: self.cmd.nonce.ok_or(anyhow!(""))?,
+                    signature: hex::decode(self.cmd.signature.ok_or(anyhow!(""))?)?,
+                },
+                self.cmd.timestamp.unwrap_or_default(),
+                self.session,
+                self.req_id,
+            )),
+            TRANSFER_OUT => Ok(Event::TransferOut(
+                self.sequence,
+                AssetsCmd {
+                    user_id: UserId::from_str(self.cmd.user_id.as_ref().ok_or(anyhow!(""))?)?,
+                    in_or_out: InOrOut::Out,
+                    currency: self.cmd.currency.ok_or(anyhow!(""))?,
+                    amount: self
+                        .cmd
+                        .amount
+                        .filter(|a| a.is_sign_positive())
+                        .ok_or(anyhow!(""))?,
+                    block_number: self.cmd.block_number.ok_or(anyhow!(""))?,
+                    extrinsic_hash: hex::decode(self.cmd.extrinsic_hash.ok_or(anyhow!(""))?)?,
+                },
+            )),
+            TRANSFER_IN => Ok(Event::TransferIn(
+                self.sequence,
+                AssetsCmd {
+                    user_id: UserId::from_str(self.cmd.user_id.as_ref().ok_or(anyhow!(""))?)?,
+                    in_or_out: InOrOut::In,
+                    currency: self.cmd.currency.ok_or(anyhow!(""))?,
+                    amount: self
+                        .cmd
+                        .amount
+                        .filter(|a| a.is_sign_positive())
+                        .ok_or(anyhow!(""))?,
+                    block_number: self.cmd.block_number.ok_or(anyhow!(""))?,
+                    extrinsic_hash: hex::decode(self.cmd.extrinsic_hash.ok_or(anyhow!(""))?)?,
+                },
+            )),
+            UPDATE_SYMBOL => Ok(Event::UpdateSymbol(
+                self.sequence,
+                SymbolCmd {
+                    symbol: self.cmd.symbol().ok_or(anyhow!(""))?,
+                    open: self.cmd.open.ok_or(anyhow!(""))?,
+                    base_scale: self.cmd.base_scale.filter(|b| *b <= 7).ok_or(anyhow!(""))?,
+                    quote_scale: self
+                        .cmd
+                        .quote_scale
+                        .filter(|q| *q <= 7)
+                        .ok_or(anyhow!(""))?,
+                    taker_fee: self
+                        .cmd
+                        .taker_fee
+                        .filter(|f| f.is_sign_positive())
+                        .ok_or(anyhow!(""))?,
+                    maker_fee: self
+                        .cmd
+                        .maker_fee
+                        .filter(|f| f.is_sign_positive())
+                        .ok_or(anyhow!(""))?,
+                    base_maker_fee: self
+                        .cmd
+                        .base_maker_fee
+                        .filter(|f| f.is_sign_positive())
+                        .or(self.cmd.maker_fee)
+                        .filter(|f| f.is_sign_positive())
+                        .ok_or(anyhow!(""))?,
+                    base_taker_fee: self
+                        .cmd
+                        .base_taker_fee
+                        .filter(|f| f.is_sign_positive())
+                        .or(self.cmd.taker_fee)
+                        .filter(|f| f.is_sign_positive())
+                        .ok_or(anyhow!(""))?,
+                    fee_times: self.cmd.fee_times.unwrap_or(1),
+                    min_amount: self
+                        .cmd
+                        .min_amount
+                        .filter(|f| f.is_sign_positive())
+                        .ok_or(anyhow!(""))?,
+                    min_vol: self
+                        .cmd
+                        .min_vol
+                        .filter(|f| f.is_sign_positive())
+                        .ok_or(anyhow!(""))?,
+                    enable_market_order: self.cmd.enable_market_order.ok_or(anyhow!(""))?,
+                },
+            )),
+            QUERY_ORDER => Ok(Event::QueryOrder(
+                self.cmd.symbol().ok_or(anyhow!(""))?,
+                self.cmd.order_id.ok_or(anyhow!(""))?,
+                self.session,
+                self.req_id,
+            )),
+            QUERY_BALANCE => Ok(Event::QueryBalance(
+                UserId::from_str(self.cmd.user_id.as_ref().ok_or(anyhow!(""))?)?,
+                self.cmd.currency.ok_or(anyhow!(""))?,
+                self.session,
+                self.req_id,
+            )),
+            QUERY_ACCOUNTS => Ok(Event::QueryAccounts(
+                UserId::from_str(self.cmd.user_id.as_ref().ok_or(anyhow!(""))?)?,
+                self.session,
+                self.req_id,
+            )),
+            QUERY_EXCHANGE_FEE => Ok(Event::QueryExchangeFee(
+                self.cmd.symbol().ok_or(anyhow!(""))?,
+                self.session,
+                self.req_id,
+            )),
+            DUMP => Ok(Event::Dump(self.cmd.event_id.ok_or(anyhow!(""))?)),
+            _ => Err(anyhow!("Unsupported Command")),
+        }
+    }
 }
 
 unsafe impl Send for Input {}
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub enum Event {
+    // write
+    Limit(EventId, LimitCmd, Timestamp, u64, u64),
+    Cancel(EventId, CancelCmd, Timestamp, u64, u64),
+    TransferOut(EventId, AssetsCmd),
+    TransferIn(EventId, AssetsCmd),
+    UpdateSymbol(EventId, SymbolCmd),
+    // read
+    QueryOrder(Symbol, OrderId, u64, u64),
+    QueryBalance(UserId, Currency, u64, u64),
+    QueryAccounts(UserId, u64, u64),
+    QueryExchangeFee(Symbol, u64, u64),
+    // the `EventId` has been executed
+    Dump(EventId),
+}
+
+impl Event {}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LimitCmd {
+    pub symbol: Symbol,
+    pub user_id: UserId,
+    // TODO this field is deprecated
+    pub order_id: OrderId,
+    pub price: Price,
+    pub amount: Amount,
+    pub ask_or_bid: AskOrBid,
+    pub nonce: u32,
+    pub signature: Vec<u8>,
+    pub broker: Option<UserId>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CancelCmd {
+    pub symbol: Symbol,
+    pub user_id: UserId,
+    pub order_id: OrderId,
+    pub nonce: u32,
+    pub signature: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum InOrOut {
+    In,
+    Out,
+}
+
+impl std::convert::TryFrom<u32> for InOrOut {
+    type Error = anyhow::Error;
+
+    fn try_from(x: u32) -> anyhow::Result<Self> {
+        match x {
+            cmd::TRANSFER_IN => Ok(InOrOut::In),
+            cmd::TRANSFER_OUT => Ok(InOrOut::Out),
+            _ => Err(anyhow::anyhow!("")),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AssetsCmd {
+    pub user_id: UserId,
+    pub in_or_out: InOrOut,
+    pub currency: Currency,
+    pub amount: Amount,
+    pub block_number: u32,
+    pub extrinsic_hash: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SymbolCmd {
+    pub symbol: Symbol,
+    pub open: bool,
+    pub base_scale: Scale,
+    pub quote_scale: Scale,
+    pub taker_fee: Fee,
+    pub maker_fee: Fee,
+    pub base_maker_fee: Fee,
+    pub base_taker_fee: Fee,
+    pub fee_times: u32,
+    pub min_amount: Amount,
+    pub min_vol: Vol,
+    pub enable_market_order: bool,
+}
+
 pub mod cmd {
-    // from db to core
     pub const ASK_LIMIT: u32 = 0;
     pub const BID_LIMIT: u32 = 1;
     pub const CANCEL: u32 = 4;
-    pub const CANCEL_ALL: u32 = 5;
+    pub const CANCEL_ALL: u32 = 5; /* DEPRECATED */
     pub const TRANSFER_OUT: u32 = 10;
     pub const TRANSFER_IN: u32 = 11;
     pub const UPDATE_SYMBOL: u32 = 13;
 
-    // from tcp to core
     pub const QUERY_ORDER: u32 = 14;
     pub const QUERY_BALANCE: u32 = 15;
     pub const QUERY_ACCOUNTS: u32 = 16;
     pub const QUERY_EXCHANGE_FEE: u32 = 21;
 
-    // from timer to core
     pub const DUMP: u32 = 17;
-    pub const UPDATE_DEPTH: u32 = 18;
-    pub const CONFIRM_ALL: u32 = 19;
+    pub const UPDATE_DEPTH: u32 = 18; /* DEPRECATED */
+    pub const CONFIRM_ALL: u32 = 19; /* DEPRECATED */
 
-    // from tcp to shared
     pub const QUERY_PROVING_PERF_INDEX: u32 = 22; /* DEPRECATED  */
     pub const QUERY_SCAN_HEIGHT: u32 = 23; /* DEPRECATED */
     pub const QUERY_OPEN_MARKETS: u32 = 24;
@@ -134,7 +394,6 @@ impl Command {
         Some((self.base?, self.quote?))
     }
 
-    #[must_use]
     pub const fn is_querying_core_data(&self) -> bool {
         matches!(
             self.cmd,
@@ -142,7 +401,6 @@ impl Command {
         )
     }
 
-    #[must_use]
     pub const fn is_querying_share_data(&self) -> bool {
         matches!(
             self.cmd,
@@ -155,7 +413,6 @@ impl Command {
         )
     }
 
-    #[must_use]
     pub const fn is_internally_generated(&self) -> bool {
         matches!(self.cmd, UPDATE_DEPTH | CONFIRM_ALL | DUMP)
     }
@@ -172,8 +429,9 @@ const _PAYLOAD_MASK: u64 = 0x0000_ffff_0000_0000;
 const _CHK_SUM_MASK: u64 = 0x0000_0000_ffff_0000;
 const _ERR_RSP_MASK: u64 = 0x0000_0000_0000_0001;
 const _NXT_FRM_MASK: u64 = 0x0000_0000_0000_0002;
-pub const MAX_FRAME_SIZE: usize = 64 * 1024;
+
 /// header = 0x0316<2bytes payload len><2bytes cheskcum><2bytes flag>
+pub const MAX_FRAME_SIZE: usize = 64 * 1024;
 
 impl Message {
     pub fn new(req_id: u64, payload: Vec<u8>) -> Self {

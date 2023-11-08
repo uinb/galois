@@ -1,6 +1,6 @@
 [package]
 name = "galois-engine"
-version = "0.5.0-dev"
+version = "0.7.0-dev"
 authors = ["UINB Technologies"]
 edition = "2021"
 license = "Apache-2.0"
@@ -14,13 +14,14 @@ serde = { version = "1.0", features = ["derive"] }
 hashbrown = "0.13.2"
 async-trait = "0.1.63"
 serde_json = "1.0"
+rocksdb = "0.21"
 flate2 = { version = "1.0", features = ["zlib"], default-features = false }
-mysql = "23.0"
-redis = { version = "0.17", features = ["tls", "tokio-rt-core", "tokio-tls-comp", "native-tls","async-native-tls", "async-std-tls-comp"] }
+# mysql = "23.0"
+# redis = { version = "0.17", features = ["tls", "tokio-rt-core", "tokio-tls-comp", "native-tls","async-native-tls", "async-std-tls-comp"] }
 toml = "0.5"
 lazy_static = "1.4"
 linked-hash-map = { version = "0.5.3", features = ["serde_impl"] }
-async-std = { version = "1.12", default-features = false, features = ["std", "attributes", "tokio1"] }
+async-std = { version = "1.12", default-features = false, features = ["std", "attributes", "tokio1", "default"] }
 futures = "0.3"
 chashmap = "2.2"
 syn = "1.0.107"
@@ -44,8 +45,6 @@ rand = "0.8.5"
 smt = { git = "https://github.com/uinb/sparse-merkle-tree", tag = "v0.1.8", package = "sparse-merkle-tree", features = ["serde-rs", "blake2b"] }
 sub-api = { package = "substrate-api-client", git = "https://github.com/uinb/fusotao-rust-client.git", branch = "master" }
 node-api = { package = "ac-node-api", git = "https://github.com/uinb/fusotao-rust-client.git", branch = "master" }
-#sub-api = { path = "../fusotao-rust-client", package = "substrate-api-client" }
-#node-api = { path = "../fusotao-rust-client/node-api", package = "ac-node-api" }
 parity-scale-codec = { version = "3", features = ["derive"] }
 sp-core = { git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.30", package = "sp-core" }
 sp-runtime = { git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.30", package = "sp-runtime" }

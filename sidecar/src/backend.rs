@@ -12,15 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::endpoint::TradingCommand;
 use dashmap::DashMap;
 use galois_engine::{
     core::*,
     fusotao::OffchainSymbol,
-    input::{cmd, Message},
+    input::{cmd::*, Command, Message},
     orderbook::Order as CoreOrder,
 };
+use rust_decimal::Decimal;
 use serde_json::{json, to_vec, Value as JsonValue};
 use std::collections::BTreeMap;
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{
@@ -153,9 +156,68 @@ impl BackendConnection {
             .ok_or(anyhow::anyhow!("fail to read from backend"))
     }
 
+    pub async fn submit_trading_command(
+        &self,
+        user_id: impl ToString,
+        cmd: TradingCommand,
+        relayer: impl ToString,
+    ) -> anyhow::Result<u64> {
+        // TODO we may require user to sign the payload
+        let fix_cmd_signature = "169d796416023558ef5c2580ef38c1c4f43f3c06f76ceab2412e6fc5d486a36eb0a9cb808dd4eb72f6264b4113c1a722479be205edc84d6ac5403d33d09b0087";
+        let fix_cmd_nonce = 40020u32;
+        let direction = cmd.get_direction_if_trade();
+        let payload = match cmd {
+            TradingCommand::Cancel {
+                base,
+                quote,
+                order_id,
+            } => {
+                let mut cancel = Command::default();
+                cancel.order_id = Some(order_id);
+                cancel.base = Some(base);
+                cancel.cmd = CANCEL;
+                cancel.quote = Some(quote);
+                cancel.user_id = Some(user_id.to_string());
+                cancel.signature = Some(fix_cmd_signature.to_string());
+                cancel.nonce = Some(fix_cmd_nonce);
+                cancel
+            }
+            TradingCommand::Ask {
+                base,
+                quote,
+                amount,
+                price,
+            }
+            | TradingCommand::Bid {
+                base,
+                quote,
+                amount,
+                price,
+            } => {
+                let mut place = Command::default();
+                place.cmd = direction.expect("ask_or_bid;qed").into();
+                place.base = Some(base);
+                place.quote = Some(quote);
+                place.signature = Some(fix_cmd_signature.to_string());
+                place.user_id = Some(user_id.to_string());
+                place.price = Decimal::from_str(&price).ok();
+                place.amount = Decimal::from_str(&amount).ok();
+                place.nonce = Some(fix_cmd_nonce);
+                place.broker = Some(relayer.to_string());
+                place
+            }
+        };
+        let r = self
+            .request(to_vec(&payload)?)
+            .await
+            .inspect_err(|e| log::debug!("{:?}", e))?;
+        // TODO
+        Ok(0)
+    }
+
     pub async fn get_nonce(&self, broker: &str) -> Option<u32> {
         let r = self
-            .request(to_vec(&json!({ "cmd": cmd::GET_NONCE_FOR_BROKER, "user_id": broker })).ok()?)
+            .request(to_vec(&json!({ "cmd": GET_NONCE_FOR_BROKER, "user_id": broker })).ok()?)
             .await
             .inspect_err(|e| log::debug!("{:?}", e))
             .ok()?;
@@ -171,7 +233,7 @@ impl BackendConnection {
     ) -> anyhow::Result<BTreeMap<u32, Balance>> {
         let r = self
             .request(
-                to_vec(&json!({"cmd": cmd::QUERY_ACCOUNTS, "user_id": user_id.as_ref()}))
+                to_vec(&json!({"cmd": QUERY_ACCOUNTS, "user_id": user_id.as_ref()}))
                     .expect("jsonser;qed"),
             )
             .await
@@ -188,7 +250,7 @@ impl BackendConnection {
         let r = self
             .request(
                 to_vec(&json!({
-                    "cmd": cmd::QUERY_ORDER,
+                    "cmd": QUERY_ORDER,
                     "base": symbol.0,
                     "quote": symbol.1,
                     "order_id": order_id,
@@ -203,7 +265,7 @@ impl BackendConnection {
 
     pub async fn get_markets(&self) -> anyhow::Result<Vec<OffchainSymbol>> {
         let r = self
-            .request(to_vec(&json!({ "cmd": cmd::QUERY_OPEN_MARKETS })).expect("jsonser;qed"))
+            .request(to_vec(&json!({ "cmd": QUERY_OPEN_MARKETS })).expect("jsonser;qed"))
             .await
             .inspect_err(|e| log::debug!("{:?}", e))
             .map_err(|_| anyhow::anyhow!("Galois not available"))?;
@@ -212,7 +274,7 @@ impl BackendConnection {
 
     pub async fn get_x25519(&self) -> anyhow::Result<StaticSecret> {
         let r = self
-            .request(to_vec(&json!({ "cmd": cmd::GET_X25519_KEY })).expect("jsonser;qed"))
+            .request(to_vec(&json!({ "cmd": GET_X25519_KEY })).expect("jsonser;qed"))
             .await
             .inspect_err(|e| log::debug!("{:?}", e))
             .map_err(|_| anyhow::anyhow!("Galois not available"))?;

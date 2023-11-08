@@ -12,16 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod legacy;
-
 use crate::{
     core::*,
-    db::{DB, REDIS},
     matcher::*,
     orderbook::{AskOrBid, Depth},
 };
-use mysql::{prelude::*, *};
-use redis::Commands;
 use std::{
     collections::HashMap,
     convert::Into,
@@ -50,28 +45,28 @@ pub struct Output {
     pub timestamp: u64,
 }
 
-pub fn write_depth(depth: Vec<Depth>) {
-    if crate::config::C.dry_run.is_some() {
-        return;
-    }
-    let redis = REDIS.get_connection();
-    match redis {
-        Ok(mut conn) => {
-            depth.iter().for_each(|d| {
-                let r: redis::RedisResult<()> = conn.set(
-                    format!("V2_DEPTH_L{}_{}_{}", d.depth, d.symbol.0, d.symbol.1),
-                    serde_json::to_string(d).unwrap(),
-                );
-                if r.is_err() {
-                    log::error!("{:?}", r);
-                }
-            });
-        }
-        Err(_) => {
-            log::error!("connect redis failed");
-        }
-    }
-}
+// pub fn write_depth(depth: Vec<Depth>) {
+//     if crate::config::C.dry_run.is_some() {
+//         return;
+//     }
+//     let redis = REDIS.get_connection();
+//     match redis {
+//         Ok(mut conn) => {
+//             depth.iter().for_each(|d| {
+//                 let r: redis::RedisResult<()> = conn.set(
+//                     format!("V2_DEPTH_L{}_{}_{}", d.depth, d.symbol.0, d.symbol.1),
+//                     serde_json::to_string(d).unwrap(),
+//                 );
+//                 if r.is_err() {
+//                     log::error!("{:?}", r);
+//                 }
+//             });
+//         }
+//         Err(_) => {
+//             log::error!("connect redis failed");
+//         }
+//     }
+// }
 
 pub fn init(rx: Receiver<Vec<Output>>) {
     let mut buf = HashMap::<Symbol, (u64, Vec<Output>)>::new();
@@ -84,101 +79,13 @@ pub fn init(rx: Receiver<Vec<Output>>) {
                 break;
             }
         };
-        if crate::config::C.dry_run.is_none() {
-            if cr.is_empty() {
-                flush_all(&mut buf);
-            } else {
-                write(cr, &mut buf);
-            }
-        }
+        // if crate::config::C.dry_run.is_none() {
+        //     if cr.is_empty() {
+        //         flush_all(&mut buf);
+        //     } else {
+        //         write(cr, &mut buf);
+        //     }
+        // }
     });
     log::info!("dumper initialized");
-}
-
-fn get_max_record(symbol: Symbol) -> u64 {
-    let sql = format!(
-        "SELECT coalesce(MAX(f_event_id), 0) from t_clearing_result_{}_{}",
-        symbol.0, symbol.1
-    );
-    let conn = DB.get_conn();
-    if conn.is_err() {
-        log::error!("Error: acquire mysql connection failed, {:?}", conn);
-        return 0;
-    }
-    let mut conn = conn.unwrap();
-    let id = conn.query_first(sql).unwrap();
-    id.or(Some(0)).unwrap()
-}
-
-fn flush(symbol: Symbol, pending: &mut Vec<Output>) {
-    if pending.is_empty() {
-        return;
-    }
-    let sql = format!(
-        r#"INSERT IGNORE INTO t_clearing_result_{}_{}
-(f_event_id,f_order_id,f_user_id,f_status,f_role,f_ask_or_bid,f_price,f_quote_delta,f_base_delta,f_quote_charge,f_base_charge,f_quote_available,f_base_available,f_quote_frozen,f_base_frozen,f_timestamp)
-VALUES
-(:event_id,:order_id,:user_id,:state,:role,:ask_or_bid,:price,:quote_delta,:base_delta,:quote_charge,:base_charge,:quote_available,:base_available,:quote_frozen,:base_frozen,FROM_UNIXTIME(:timestamp))"#,
-        symbol.0, symbol.1
-    );
-    let conn = DB.get_conn();
-    if conn.is_err() {
-        log::error!("Error: acquire mysql connection failed, {:?}", conn);
-        return;
-    }
-    let mut conn = conn.unwrap();
-    let r = conn.exec_batch(
-        sql,
-        pending.iter().map(|p| {
-            params! {
-                "event_id" => p.event_id,
-                "order_id" => p.order_id,
-                "user_id" => format!("{:?}", p.user_id),
-                "state" => p.state.into(): u32,
-                "role" => p.role.into(): u32,
-                "ask_or_bid" => p.ask_or_bid.into(): u32,
-                "price" => p.price,
-                "quote_delta" => p.quote_delta,
-                "base_delta" => p.base_delta,
-                "quote_charge" => p.quote_charge,
-                "base_charge" => p.base_charge,
-                "quote_available" => p.quote_available,
-                "base_available" => p.base_available,
-                "quote_frozen" => p.quote_frozen,
-                "base_frozen" => p.base_frozen,
-                "timestamp" => p.timestamp,
-            }
-        }),
-    );
-    match r {
-        Ok(_) => pending.clear(),
-        Err(err) => {
-            log::error!("Error: writing clearing result to mysql failed, {:?}", err);
-        }
-    }
-}
-
-fn flush_all(buf: &mut HashMap<Symbol, (u64, Vec<Output>)>) {
-    for (symbol, pending) in buf.iter_mut() {
-        flush(*symbol, &mut pending.1);
-    }
-}
-
-fn write(mut cr: Vec<Output>, buf: &mut HashMap<Symbol, (u64, Vec<Output>)>) {
-    let symbol = cr.first().unwrap().symbol;
-    let pending = buf.get_mut(&symbol);
-    if pending.is_none() {
-        buf.insert(symbol, (get_max_record(symbol), cr));
-        return;
-    }
-    let pending = pending.unwrap();
-    let prepare_write_event_id = cr.last().unwrap().event_id;
-    if prepare_write_event_id < pending.0 {
-        return;
-    }
-    pending.0 = prepare_write_event_id;
-    pending.1.append(&mut cr);
-    if pending.1.len() >= 100 {
-        flush(symbol, &mut pending.1);
-    }
 }

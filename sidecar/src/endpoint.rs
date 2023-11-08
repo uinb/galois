@@ -84,7 +84,8 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
             ctx.validate_cmd(&user_id, &cmd)
                 .await
                 .map_err(handle_error)?;
-            db::save_trading_command(&ctx.db, user_id, cmd, relayer)
+            ctx.backend
+                .submit_trading_command(user_id, cmd, relayer)
                 .await
                 .map(|id| crate::to_hexstr(id))
                 .map_err(handle_error)
@@ -140,11 +141,7 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
             );
             let user_id = crate::try_into_account(user_id)?;
             let bot_id = crate::try_into_account(bot_id)?;
-            let sub_id = crate::derive_sub_account(
-                &user_id,
-                &bot_id,
-                token,
-            );
+            let sub_id = crate::derive_sub_account(&user_id, &bot_id, token);
             let bot_x25519_pub_vec = crate::hexstr_to_vec(&bot_x25519_pub)?;
             let raw_sig = crate::hexstr_to_vec(&sig)?;
             let message = format!("<Bytes>{}</Bytes>", bot_x25519_pub);

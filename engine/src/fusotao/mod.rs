@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{config::C, core::*, sequence::*};
+use crate::{config::C, core::*, input::*};
 use connector::FusoConnector;
 use dashmap::DashMap;
 use parity_scale_codec::{Compact, Decode, Encode, WrapperTypeDecode, WrapperTypeEncode};
-pub use prover::Prover;
 use rust_decimal::{prelude::*, Decimal};
 use serde::{Deserialize, Serialize};
 use smt::{blake2b::Blake2bHasher, default_store::DefaultStore, SparseMerkleTree, H256};
@@ -24,21 +23,21 @@ use std::{
     convert::TryInto,
     sync::{
         atomic::{AtomicU32, AtomicU64, Ordering},
-        mpsc::{Receiver, RecvTimeoutError},
         Arc,
     },
 };
 
-mod connector;
-mod persistence;
-mod prover;
+pub mod committer;
+pub mod connector;
+pub mod prover;
+pub mod scanner;
 
+pub type BlockNumber = u32;
 pub type GlobalStates = SparseMerkleTree<Blake2bHasher, H256, DefaultStore<H256>>;
 pub type Sr25519Key = sp_core::sr25519::Pair;
 pub type FusoAccountId = <Sr25519Key as sp_core::Pair>::Public;
 pub type FusoAddress = sp_runtime::MultiAddress<FusoAccountId, ()>;
 pub type FusoHash = sp_runtime::traits::BlakeTwo256;
-pub type BlockNumber = u32;
 pub type FusoHeader = sp_runtime::generic::Header<BlockNumber, FusoHash>;
 pub type FusoExtrinsic = sp_runtime::OpaqueExtrinsic;
 pub type FusoBlock = sp_runtime::generic::Block<FusoHeader, FusoExtrinsic>;
@@ -52,11 +51,13 @@ const MAX_EXTRINSIC_SIZE: usize = 3 * 1024 * 1024;
 /// AccountId of chain = MultiAddress<sp_runtime::AccountId32, ()>::Id = GenericAddress::Id
 /// 1. from_ss58check() or from_ss58check_with_version()
 /// 2. new or from public
-pub fn init(rx: Receiver<Proof>) -> FusoConnector {
-    persistence::init(rx);
-    let connector = FusoConnector::new(C.dry_run.is_some()).unwrap();
-    log::info!("prover initialized");
-    connector
+pub fn sync() -> anyhow::Result<(FusoConnector, Arc<FusoState>)> {
+    let connector = FusoConnector::new()?;
+    let progress = connector.sync_progress()?;
+    let state = FusoState::default();
+    state.proved_event_id.store(progress, Ordering::Relaxed);
+    log::info!("proving progress synchronized");
+    Ok((connector, Arc::new(state)))
 }
 
 /// tracking essential onchain states
@@ -66,7 +67,6 @@ pub struct FusoState {
     pub proved_event_id: Arc<AtomicU64>,
     pub scanning_progress: Arc<AtomicU32>,
     pub symbols: DashMap<Symbol, OnchainSymbol>,
-    // TODO transform OnchainCurrency to offchain currency
     pub currencies: DashMap<Currency, OnchainToken>,
     pub brokers: DashMap<UserId, u32>,
 }

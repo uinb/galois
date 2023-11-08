@@ -1,6 +1,6 @@
 [package]
 name = "galois-bin"
-version = "0.5.0-dev"
+version = "0.7.0-dev"
 authors = ["UINB Technologies"]
 edition = "2021"
 license = "Apache-2.0"
@@ -15,8 +15,8 @@ name = "sidecar"
 path = "src/sidecar.rs"
 
 [dependencies]
-galois-engine = { path = "../engine" }
-galois-sidecar = { path = "../sidecar" }
+engine = { path = "../engine", package = "galois-engine" }
+sidecar = { path = "../sidecar", package = "galois-sidecar" }
 jsonrpsee = { version = "0.16.2", features = ["full"] }
 tokio = { version = "1.16", features = ["full"] }
 tower = "0.4.13"

@@ -13,21 +13,10 @@
 // limitations under the License.
 
 use clap::Parser;
-use log4rs::config::{Logger, RawConfig as LogConfig};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Parser)]
-#[command(author, version, about = r#"
-                 **       **
-   *******     ******     **               **    ******
-  ***               **    **     *****     **   **    *
- **              *****    **   ***   ***       **
- **            *******    **   **     **   **   **
- **    *****  **    **    **   *       *   **     *****
-  **     ***  **    **    **   **     **   **         **
-   *********   **  ****   **    *******    **    **   **
-      *    *    ****  *   **      ***      **     ****"#,
-long_about = None)]
+#[command(author, version)]
 pub struct GaloisCli {
     #[arg(short('c'), long("config"), required = true, value_name = "FILE")]
     pub file: std::path::PathBuf,
@@ -60,11 +49,7 @@ pub struct RunCmd {
 pub struct Config {
     pub server: ServerConfig,
     pub sequence: SequenceConfig,
-    pub mysql: MysqlConfig,
-    pub redis: RedisConfig,
     pub fusotao: FusotaoConfig,
-    #[serde(skip_serializing)]
-    pub log: LogConfig,
     #[serde(skip_serializing)]
     pub dry_run: Option<u64>,
 }
@@ -77,15 +62,22 @@ pub trait EncryptedConfig {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ServerConfig {
     pub bind_addr: String,
+    pub data_home: String,
+}
+
+impl ServerConfig {
+    pub fn get_coredump_path(&self) -> String {
+        format!("{}/coredump/", self.data_home)
+    }
+
+    pub fn get_storage_path(&self) -> String {
+        format!("{}/storage/", self.data_home)
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SequenceConfig {
-    pub coredump_dir: String,
-    pub checkpoint: usize,
-    pub batch_size: usize,
-    pub dump_mode: String,
-    pub fetch_intervel_ms: u64,
+    pub checkpoint: u64,
     pub enable_from_genesis: bool,
 }
 
@@ -118,13 +110,12 @@ pub struct FusotaoConfig {
     pub key_seed: String,
     pub claim_block: u32,
     pub proof_batch_limit: usize,
-    pub compress_proofs: bool,
     pub x25519_priv: String,
 }
 
 impl FusotaoConfig {
-    pub fn get_x25519_prikey(&self) -> anyhow::Result<String> {
-        Ok(self.x25519_priv.clone())
+    pub fn get_x25519(&self) -> String {
+        self.x25519_priv.clone()
     }
 }
 
@@ -202,8 +193,6 @@ pub fn print_config(f: &std::path::PathBuf) -> anyhow::Result<()> {
         .ok_or(anyhow::anyhow!("env MAGIC_KEY not set"))?;
     let toml = std::fs::read_to_string(f)?;
     let mut cfg: Config = toml::from_str(&toml)?;
-    cfg.mysql.encrypt(&key)?;
-    cfg.redis.encrypt(&key)?;
     cfg.fusotao.encrypt(&key)?;
     println!("{}", toml::to_string(&cfg)?);
     Ok(())
@@ -212,68 +201,29 @@ pub fn print_config(f: &std::path::PathBuf) -> anyhow::Result<()> {
 fn init_config(toml: &str, key: Option<String>) -> anyhow::Result<Config> {
     let mut cfg: Config = toml::from_str(toml)?;
     if let Some(key) = key {
-        cfg.mysql.decrypt(&key)?;
-        cfg.redis.decrypt(&key)?;
         cfg.fusotao.decrypt(&key)?;
     }
-    // TODO replace with env_log
-    let mut loggers = cfg
-        .log
-        .loggers()
-        .iter()
-        .map(|l| (l.name().to_string(), l.clone()))
-        .collect::<std::collections::HashMap<String, _>>();
-    loggers
-        .entry("ws".to_string())
-        .or_insert_with(|| Logger::builder().build("ws".to_string(), log::LevelFilter::Error));
-    loggers.entry("ac_node_api".to_string()).or_insert_with(|| {
-        Logger::builder().build("ac_node_api".to_string(), log::LevelFilter::Error)
-    });
-    loggers
-        .entry("fusotao_rust_client".to_string())
-        .or_insert_with(|| {
-            Logger::builder().build("fusotao_rust_client".to_string(), log::LevelFilter::Error)
-        });
-    let log = log4rs::Config::builder()
-        .loggers::<Vec<_>>(loggers.into_values().collect())
-        .appenders(cfg.log.appenders_lossy(&Default::default()).0)
-        .build(cfg.log.root())?;
-    log4rs::init_config(log)?;
     Ok(cfg)
 }
 
 #[test]
-pub fn test_default() {
+pub fn test_config() {
     let toml = r#"
         [server]
         bind_addr = "127.0.0.1:8097"
-        [mysql]
-        url = "mysql://username:password@localhost:3306/galois"
-        [redis]
-        url = "redis://localhost:6379/0"
+        data_home = "/tmp/galois"
+
         [sequence]
         checkpoint = 100000
-        coredump_dir = "/tmp/snapshot"
-        batch_size = 1000
-        dump_mode = "disk"
-        fetch_intervel_ms = 5
         enable_from_genesis = true
-        [log]
-        [log.appenders.console]
-        kind = "console"
-        [log.root]
-        level = "info"
-        appenders = ["console"]
+
         [fusotao]
         node_url = "ws://localhost:9944"
         key_seed = "//Alice"
         x25519_priv = "0xedcff0c69e4c0fa7e9a36e2e6d07f2cc355c8d25907a0ad2ab7e03b24f8e90f3"
         proof_batch_limit = 20
         claim_block = 1
-        compress_proofs = true
-        fee_adjust_threshold = 1000
     "#;
-    let config = init_config(&toml, None).unwrap();
-    let mysql_opts = mysql::Opts::from_url(&config.mysql.url).unwrap();
-    assert_eq!("password", mysql_opts.get_pass().unwrap());
+    let config = init_config(&toml, None);
+    assert!(config.is_ok());
 }

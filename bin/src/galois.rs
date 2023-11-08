@@ -13,32 +13,74 @@
 // limitations under the License.
 
 use clap::Parser;
-use galois_engine::{
-    config, executor, fusotao, output, sequence, server, shared::Shared, snapshot,
-};
-use std::sync::{atomic, mpsc, Arc};
+use engine::*;
 
+fn print_banner() {
+    println!(
+        r#"
+        **       **
+   *******     ******     **               **    ******
+  ***               **    **     *****     **   **    *
+ **              *****    **   ***   ***       **
+ **            *******    **   **     **   **   **
+ **    *****  **    **    **   *       *   **     *****
+  **     ***  **    **    **   **     **   **         **
+   *********   **  ****   **    *******    **    **   **
+      *    *    ****  *   **      ***      **     ****"#
+    );
+}
+
+/// Overview:
+///
+///           sidecar   chain <-+
+///             |         |      \
+///             |         |       \
+///             v         v        \
+///   +---->  server   scanner      +
+///   |          \       /          |
+///   |\          \     /           |
+///   | \          \   /            |
+///   |  +--     sequencer          |
+///   +              |              |
+///   |\             |              |
+///   | \            v              |
+///   |  +--      executor          |
+///   |              |              |
+///   |              |              |
+///   |              v              |
+///   +           storage           |
+///    \           /   \            +
+///     \         /     \          /
+///      \       /       \        /
+///       +-- replyer committer -+
+///
 fn start() {
     let (id, coredump) = snapshot::load().unwrap();
-    let (output_tx, output_rx) = mpsc::channel();
-    let (event_tx, event_rx) = mpsc::channel();
-    let (proof_tx, proof_rx) = mpsc::channel();
-    let (msg_tx, msg_rx) = mpsc::channel();
+    let (connector, state) = fusotao::sync().unwrap();
+    let shared = Shared::new(state.clone(), C.fusotao.get_x25519());
+    let (output_tx, output_rx) = std::sync::mpsc::channel();
+    let (event_tx, event_rx) = std::sync::mpsc::channel();
+    let (input_tx, input_rx) = std::sync::mpsc::channel();
+    let (reply_tx, reply_rx) = std::sync::mpsc::channel();
     output::init(output_rx);
-    let fuso = fusotao::init(proof_rx);
-    let shared = Shared::new(fuso.state, config::C.fusotao.get_x25519_prikey().unwrap());
-    executor::init(event_rx, output_tx, proof_tx, msg_tx, coredump);
-    let ready = Arc::new(atomic::AtomicBool::new(false));
-    sequence::init(event_tx.clone(), id, ready.clone());
-    server::init(event_tx, msg_rx, shared, ready);
+    committer::init(connector.clone(), state.clone());
+    executor::init(event_rx, output_tx, reply_tx.clone(), coredump);
+    sequencer::init(input_rx, event_tx, reply_tx, id);
+    scanner::init(input_tx.clone(), connector, state);
+    server::init(reply_rx, input_tx, shared);
 }
 
 fn main() {
+    env_logger::init();
     let opts = config::GaloisCli::parse();
     match opts.sub {
         Some(config::SubCmd::EncryptConfig) => config::print_config(&opts.file).unwrap(),
         None => {
-            lazy_static::initialize(&config::C);
+            print_banner();
+            lazy_static::initialize(&C);
+            if C.dry_run.is_some() {
+                log::info!("running in dry-run mode");
+            }
             start();
         }
     }

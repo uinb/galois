@@ -16,7 +16,6 @@ use crate::{
     config::C,
     input::{Command, Input, Message},
     shared::Shared,
-    whistle::Whistle,
 };
 use async_std::{
     net::{TcpListener, TcpStream},
@@ -31,7 +30,6 @@ use futures::{
 use std::{
     net::Shutdown,
     sync::{
-        atomic::{AtomicBool, Ordering},
         mpsc::{Receiver, Sender},
         Arc,
     },
@@ -43,7 +41,10 @@ type FromSession = UnboundedReceiver<Message>;
 type ToBackend = Sender<Input>;
 type FromBackend = Receiver<(u64, Message)>;
 
-pub fn init(sender: ToBackend, receiver: FromBackend, shared: Shared, ready: Arc<AtomicBool>) {
+pub fn init(receiver: FromBackend, sender: ToBackend, shared: Shared) {
+    if C.dry_run.is_some() {
+        return;
+    }
     let listener = task::block_on(async { TcpListener::bind(&C.server.bind_addr).await }).unwrap();
     let sessions = Arc::new(DashMap::<u64, ToSession>::new());
     let sx = sessions.clone();
@@ -51,7 +52,7 @@ pub fn init(sender: ToBackend, receiver: FromBackend, shared: Shared, ready: Arc
         log::error!("session relayer interrupted, {:?}", relay(receiver, sx));
     });
     log::info!("server initialized");
-    let future = accept(listener, sender, shared, sessions, ready);
+    let future = accept(listener, sender, shared, sessions);
     let _ = task::block_on(future);
     log::info!("bye!");
 }
@@ -63,7 +64,7 @@ fn relay(receiver: FromBackend, sessions: Arc<DashMap<u64, ToSession>>) -> Resul
         // relay the messages from backend to session, need to switch the runtime using async
         if let Some(mut session) = sessions.get_mut(&session_id) {
             let _ = task::block_on(session.send(msg));
-        } else {
+        } else if session_id != 0 {
             log::error!(
                 "received reply from executor, but session {} not found",
                 session_id
@@ -77,22 +78,20 @@ async fn accept(
     to_backend: ToBackend,
     shared: Shared,
     sessions: Arc<DashMap<u64, ToSession>>,
-    ready: Arc<AtomicBool>,
 ) -> Result<()> {
     let mut incoming = listener.incoming();
-    let mut session_id = 0_u64;
+    // NOTICE: session id must be started from 1
+    let mut session_id = 1_u64;
     while let Some(stream) = incoming.next().await {
-        if ready.load(Ordering::Relaxed) {
-            let stream = stream?;
-            register(
-                session_id,
-                stream,
-                to_backend.clone(),
-                shared.clone(),
-                &sessions,
-            );
-            session_id += 1;
-        }
+        let stream = stream?;
+        register(
+            session_id,
+            stream,
+            to_backend.clone(),
+            shared.clone(),
+            sessions.clone(),
+        );
+        session_id += 1;
     }
     Ok(())
 }
@@ -102,7 +101,7 @@ fn register(
     stream: TcpStream,
     to_backend: ToBackend,
     shared: Shared,
-    sessions: &Arc<DashMap<u64, ToSession>>,
+    sessions: Arc<DashMap<u64, ToSession>>,
 ) {
     match stream.set_nodelay(true) {
         Ok(_) => {}
@@ -117,7 +116,7 @@ fn register(
         shared,
         session_id,
         stream,
-        sessions.clone(),
+        sessions,
     ));
 }
 
@@ -198,23 +197,18 @@ async fn handle_req(
     to_back: &mut ToBackend,
     to_session: &mut ToSession,
     shared: &Shared,
-    session_id: u64,
+    session: u64,
     req_id: u64,
-    json: String,
+    body: String,
 ) -> Result<()> {
-    let cmd: Command = serde_json::from_str(&json)
+    let mut cmd: Command = serde_json::from_str(&body)
         .map_err(|e| anyhow::anyhow!("deser command failed, {:?}", e))?;
-    if cmd.is_querying_core_data() {
-        let w = Input::NonModifier(Whistle {
-            session: session_id,
-            req_id,
-            cmd,
-        });
-        to_back
-            .send(w)
-            .map_err(|e| anyhow::anyhow!("read loop -> executor -> {:?}", e))?;
-        Ok(())
-    } else if cmd.is_querying_share_data() {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    cmd.timestamp = Some(timestamp);
+    if cmd.is_querying_share_data() {
         let w = shared.handle_req(&cmd)?;
         to_session
             .send(Message::new(req_id, w))
@@ -222,6 +216,10 @@ async fn handle_req(
             .map_err(|e| anyhow::anyhow!("read loop -> write loop -> {:?}", e))?;
         Ok(())
     } else {
-        Err(anyhow::anyhow!("unsupported command {} from sidecar", cmd.cmd).into())
+        let input = Input::new_with_req(cmd, session, req_id);
+        to_back
+            .send(input)
+            .map_err(|e| anyhow::anyhow!("read loop -> executor -> {:?}", e))?;
+        Ok(())
     }
 }

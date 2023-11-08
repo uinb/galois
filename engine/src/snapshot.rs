@@ -12,40 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{
-    fs, path, thread,
-    time::{Duration, UNIX_EPOCH},
-};
-
-use chrono::{prelude::DateTime, Utc};
-
-use crate::{config, core};
+use crate::{config, core, sequencer};
 
 /// dump snapshot at id(executed)
-pub fn dump(id: u64, time: u64, data: &core::Data) {
+pub fn dump(id: u64, data: &core::Data) {
     if config::C.dry_run.is_some() {
         return;
     }
     let data = data.clone();
-    let timestamp = UNIX_EPOCH + Duration::from_secs(time);
-    let datetime = DateTime::<Utc>::from(timestamp);
-    let format = datetime.format("%Y-%m-%dT%H:%M:%S").to_string();
-    thread::spawn(move || -> anyhow::Result<()> {
-        let f = path::Path::new(&config::C.sequence.coredump_dir)
+    std::thread::spawn(move || -> anyhow::Result<()> {
+        let f = std::path::Path::new(&config::C.server.get_coredump_path())
             .join(id.to_string())
-            .with_extension(format!("{}.gz", format));
-        let file = fs::OpenOptions::new()
+            .with_extension("gz");
+        let file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(f)?;
         data.into_raw(file)?;
+        sequencer::remove_before(id)?;
         log::info!("snapshot dumped at sequence {}", id);
         Ok(())
     });
 }
 
-fn get_id(path: &path::Path) -> u64 {
-    let file_stem = path::Path::new(path.file_stem().unwrap())
+fn get_id(path: &std::path::Path) -> u64 {
+    let file_stem = std::path::Path::new(path.file_stem().unwrap())
         .file_stem()
         .unwrap()
         .to_str()
@@ -55,7 +46,7 @@ fn get_id(path: &path::Path) -> u64 {
 
 /// return the id(not executed yet), and the snapshot
 pub fn load() -> anyhow::Result<(u64, core::Data)> {
-    let dir = fs::read_dir(&config::C.sequence.coredump_dir)?;
+    let dir = std::fs::read_dir(&config::C.server.get_coredump_path())?;
     let file_path = dir
         .map(|e| e.unwrap())
         .filter(|f| f.file_type().unwrap().is_file())
@@ -70,7 +61,7 @@ pub fn load() -> anyhow::Result<(u64, core::Data)> {
                 event_id,
                 event_id + 1
             );
-            let data = core::Data::from_raw(fs::File::open(f)?)?;
+            let data = core::Data::from_raw(std::fs::File::open(f)?)?;
             print_symbols(&data);
             Ok((event_id + 1, data))
         }
@@ -99,21 +90,12 @@ fn print_symbols(data: &core::Data) {
 
 #[cfg(test)]
 mod test {
-    use std::{
-        path::Path,
-        time::{Duration, UNIX_EPOCH},
-    };
-
-    use chrono::{prelude::DateTime, Utc};
+    use std::path::Path;
 
     #[test]
     pub fn test_syspath() {
-        let timestamp = UNIX_EPOCH + Duration::from_secs(1524885322);
-        let datetime = DateTime::<Utc>::from(timestamp);
-        let format = datetime.format("%Y-%m-%dT%H:%M:%S").to_string();
         let f = Path::new("/tmp/snapshot/")
             .join("2980")
-            .with_extension(format)
             .with_extension("gz");
         assert_eq!("gz", f.extension().unwrap());
         let filename = Path::new(f.file_stem().unwrap()).file_stem().unwrap();
@@ -123,17 +105,10 @@ mod test {
 
     #[test]
     pub fn test_max_seq() {
-        let timestamp = UNIX_EPOCH + Duration::from_secs(1524885322);
-        let datetime = DateTime::<Utc>::from(timestamp);
-        let format = datetime.format("%Y-%m-%dT%H:%M:%S").to_string();
         let f0 = Path::new("/tmp/snapshot/")
             .join("2980")
-            .with_extension(&format)
             .with_extension("gz");
-        let f1 = Path::new("/tmp/snapshot/")
-            .join("310")
-            .with_extension(&format)
-            .with_extension("gz");
+        let f1 = Path::new("/tmp/snapshot/").join("310").with_extension("gz");
         assert_eq!(
             std::cmp::Ordering::Greater,
             super::get_id(&f0).cmp(&super::get_id(&f1))
