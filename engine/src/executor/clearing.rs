@@ -543,7 +543,6 @@ pub mod test {
         assert_eq!(dec!(0.5), b2_101.available);
         let mr = Match {
             maker: vec![],
-            // TODO tag here
             // taker: Taker::taker_placed(
             taker: Taker::cancel(
                 UserId::from_low_u64_be(2),

@@ -115,11 +115,23 @@ fn do_execute(
             let mr = matcher::execute_limit(
                 orderbook,
                 cmd.user_id,
-                cmd.order_id,
                 cmd.price,
                 cmd.amount,
                 cmd.ask_or_bid,
             );
+            // compatiable with old version since we don't use mysql auto increment id anymore
+            response
+                .send((
+                    session,
+                    Message::new(
+                        req_id,
+                        serde_json::to_vec(&serde_json::json!({
+                            "id": mr.taker.order_id
+                        }))
+                        .expect("qed;"),
+                    ),
+                ))
+                .map_err(|_| EventsError::Interrupted(id))?;
             let out = clearing::clear(
                 &mut data.accounts,
                 id,
@@ -188,6 +200,18 @@ fn do_execute(
                 req_id,
                 anyhow!("order doesn't exist"),
             ))?;
+            response
+                .send((
+                    session,
+                    Message::new(
+                        req_id,
+                        serde_json::to_vec(&serde_json::json!({
+                            "id": cmd.order_id
+                        }))
+                        .expect("qed;"),
+                    ),
+                ))
+                .map_err(|_| EventsError::Interrupted(id))?;
             let out = clearing::clear(
                 &mut data.accounts,
                 id,
@@ -374,7 +398,6 @@ fn do_execute(
             Ok(())
         }
         Event::Dump(id) => {
-            // TODO erase some old events after dump
             snapshot::dump(id, data);
             Ok(())
         }

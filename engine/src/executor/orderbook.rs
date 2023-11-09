@@ -204,12 +204,14 @@ impl OrderBook {
             min_vol,
             enable_market_order,
             open,
+            // has executed
             max_id: 0,
         }
     }
 
-    pub fn update_executed_order_id(&mut self, id: OrderId) {
-        self.max_id = id;
+    pub fn incr_then_fetch_order_id(&mut self) -> OrderId {
+        self.max_id += 1;
+        self.max_id
     }
 
     pub fn size(&self) -> (Amount, Amount) {

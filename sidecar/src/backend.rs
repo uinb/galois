@@ -150,10 +150,10 @@ impl BackendConnection {
         self.to_backend
             .send(Some(Req { payload, notifier }))
             .await?;
-        feedback
-            .recv()
-            .await
-            .ok_or(anyhow::anyhow!("fail to read from backend"))
+        tokio::select! {
+            v = feedback.recv() => v.ok_or(anyhow::anyhow!("fail to read from backend")),
+            _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => Err(anyhow::anyhow!("timeout")),
+        }
     }
 
     pub async fn submit_trading_command(
@@ -211,8 +211,10 @@ impl BackendConnection {
             .request(to_vec(&payload)?)
             .await
             .inspect_err(|e| log::debug!("{:?}", e))?;
-        // TODO
-        Ok(0)
+        r.get("id")
+            .ok_or(anyhow::anyhow!("error while placing orders"))?
+            .as_u64()
+            .ok_or(anyhow::anyhow!("error while placing orders"))
     }
 
     pub async fn get_nonce(&self, broker: &str) -> Option<u32> {

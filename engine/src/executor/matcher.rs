@@ -177,13 +177,12 @@ pub struct Match {
 pub fn execute_limit(
     book: &mut OrderBook,
     user_id: UserId,
-    order_id: OrderId,
     price: Price,
     amount: Amount,
     ask_or_bid: AskOrBid,
 ) -> Match {
-    book.update_executed_order_id(order_id);
     use rust_decimal::prelude::Zero;
+    let order_id = book.incr_then_fetch_order_id();
     // TODO move to config
     let mut max_makers = 20u32;
     let mut page_delta = std::collections::BTreeMap::<Price, (Amount, Amount)>::new();

@@ -235,7 +235,7 @@ impl Event {}
 pub struct LimitCmd {
     pub symbol: Symbol,
     pub user_id: UserId,
-    // TODO this field is deprecated
+    // NOTICE this field is deprecated
     pub order_id: OrderId,
     pub price: Price,
     pub amount: Amount,
