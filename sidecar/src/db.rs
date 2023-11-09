@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::endpoint::TradingCommand;
 use galois_engine::{cmd::CANCEL, core::*, input::Command};
 use parity_scale_codec::Encode;
 use rust_decimal::{prelude::ToPrimitive, Decimal};
 use serde::{Deserialize, Serialize};
 use sqlx::types::chrono::{DateTime, Local, NaiveDateTime};
 use sqlx::{MySql, Pool, Row};
-use std::str::FromStr;
 
 #[derive(Clone, Debug, Eq, PartialEq, sqlx::FromRow)]
 pub struct DbOrder {

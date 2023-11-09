@@ -53,6 +53,18 @@ impl Into<u32> for State {
     }
 }
 
+impl Into<u8> for State {
+    fn into(self) -> u8 {
+        match self {
+            State::Placed => 0,
+            State::Canceled => 1,
+            State::Filled => 2,
+            State::PartiallyFilled => 3,
+            State::ConditionallyCanceled => 4,
+        }
+    }
+}
+
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Taker {
     pub user_id: UserId,

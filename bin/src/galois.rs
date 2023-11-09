@@ -48,21 +48,22 @@ fn print_banner() {
 ///   |              |              |
 ///   |              |              |
 ///   |              v              |
-///   +           storage           |
+///   +           rocksdb           |
 ///    \           /   \            +
 ///     \         /     \          /
 ///      \       /       \        /
-///       +-- replyer committer -+
+///       +-- market  committer -+
 ///
 fn start() {
     let (id, coredump) = snapshot::load().unwrap();
     let (connector, state) = fusotao::sync().unwrap();
+    let orders = output::restore().unwrap();
     let shared = Shared::new(state.clone(), C.fusotao.get_x25519());
     let (output_tx, output_rx) = std::sync::mpsc::channel();
     let (event_tx, event_rx) = std::sync::mpsc::channel();
     let (input_tx, input_rx) = std::sync::mpsc::channel();
     let (reply_tx, reply_rx) = std::sync::mpsc::channel();
-    output::init(output_rx);
+    market::init(output_rx, reply_tx.clone(), orders);
     committer::init(connector.clone(), state.clone());
     executor::init(event_rx, output_tx, reply_tx.clone(), coredump);
     sequencer::init(input_rx, event_tx, reply_tx, id);

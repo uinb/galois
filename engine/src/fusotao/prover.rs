@@ -319,14 +319,14 @@ pub fn save_proof(proof: Proof) -> anyhow::Result<()> {
         }
         _ => {}
     }
-    STORAGE.put(id_to_key(proof.event_id), proof.encode())?;
+    PROOF_STORE.put(id_to_key(proof.event_id), proof.encode())?;
     Ok(())
 }
 
 pub fn remove_before(id: u64) -> anyhow::Result<()> {
     let mut batch = WriteBatchWithTransaction::<false>::default();
     batch.delete_range(id_to_key(1), id_to_key(id));
-    STORAGE.write(batch)?;
+    PROOF_STORE.write(batch)?;
     Ok(())
 }
 
@@ -336,7 +336,7 @@ pub fn fetch_raw_ge(id: u64) -> Vec<(u64, RawParameter)> {
     }
     let mut ret = vec![];
     let mut total_size = 0usize;
-    let iter = STORAGE.iterator(IteratorMode::From(&id_to_key(id), Direction::Forward));
+    let iter = PROOF_STORE.iterator(IteratorMode::From(&id_to_key(id), Direction::Forward));
     for item in iter {
         let (key, value) = item.unwrap();
         total_size += value.len();

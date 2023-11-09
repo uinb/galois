@@ -12,17 +12,49 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{
-    core::*,
-    matcher::*,
-    orderbook::{AskOrBid, Depth},
-};
-use std::{
-    collections::HashMap,
-    convert::Into,
-    sync::mpsc::{Receiver, RecvTimeoutError},
-    time::Duration,
-};
+use crate::{core::*, matcher::*, orderbook::*};
+use rocksdb::{Direction, IteratorMode, WriteBatchWithTransaction};
+use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+pub mod market;
+
+pub type PendingOrders = HashMap<(UserId, Symbol), HashMap<OrderId, PendingOrder>>;
+
+pub fn restore() -> anyhow::Result<PendingOrders> {
+    let mut pending_orders = PendingOrders::new();
+    let iter = OUTPUT_STORE.iterator(IteratorMode::From(&lower_key(), Direction::Forward));
+    for item in iter {
+        let (key, value) = item?;
+        let id = key_to_id(&key);
+        let order = value_to_order(&value)?;
+        pending_orders
+            .entry(id)
+            .or_insert(HashMap::new())
+            .insert(order.order_id, order);
+    }
+    Ok(pending_orders)
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PendingOrder {
+    order_id: u64,
+    symbol: Symbol,
+    direction: u8,
+    create_timestamp: u64,
+    amount: Decimal,
+    price: Decimal,
+    status: u8,
+    matched_quote_amount: Decimal,
+    matched_base_amount: Decimal,
+    base_fee: Decimal,
+    quote_fee: Decimal,
+}
+
+impl PendingOrder {
+    pub fn reduce(&mut self, output: &Output) {}
+}
 
 #[derive(Debug, Clone)]
 pub struct Output {
@@ -45,47 +77,40 @@ pub struct Output {
     pub timestamp: u64,
 }
 
-// pub fn write_depth(depth: Vec<Depth>) {
-//     if crate::config::C.dry_run.is_some() {
-//         return;
-//     }
-//     let redis = REDIS.get_connection();
-//     match redis {
-//         Ok(mut conn) => {
-//             depth.iter().for_each(|d| {
-//                 let r: redis::RedisResult<()> = conn.set(
-//                     format!("V2_DEPTH_L{}_{}_{}", d.depth, d.symbol.0, d.symbol.1),
-//                     serde_json::to_string(d).unwrap(),
-//                 );
-//                 if r.is_err() {
-//                     log::error!("{:?}", r);
-//                 }
-//             });
-//         }
-//         Err(_) => {
-//             log::error!("connect redis failed");
-//         }
-//     }
-// }
+/// 24 + 32 + 4 + 4 => prefix + user_id + symbol
+pub(crate) fn id_to_key(user_id: &UserId, symbol: &Symbol) -> [u8; 64] {
+    let mut key = [0xaf; 64];
+    key[24..].copy_from_slice(&user_id.0[..]);
+    key[56..].copy_from_slice(&symbol.0.to_be_bytes());
+    key[60..].copy_from_slice(&symbol.1.to_be_bytes());
+    key
+}
 
-pub fn init(rx: Receiver<Vec<Output>>) {
-    let mut buf = HashMap::<Symbol, (u64, Vec<Output>)>::new();
-    std::thread::spawn(move || loop {
-        let cr = match rx.recv_timeout(Duration::from_millis(50)) {
-            Ok(p) => p,
-            Err(RecvTimeoutError::Timeout) => vec![],
-            Err(RecvTimeoutError::Disconnected) => {
-                log::error!("Output persistence thread interrupted!");
-                break;
-            }
-        };
-        // if crate::config::C.dry_run.is_none() {
-        //     if cr.is_empty() {
-        //         flush_all(&mut buf);
-        //     } else {
-        //         write(cr, &mut buf);
-        //     }
-        // }
-    });
-    log::info!("dumper initialized");
+pub(crate) fn lower_key() -> [u8; 64] {
+    let mut key = [0xaf; 64];
+    key[24..].copy_from_slice(&[0x00; 40]);
+    key
+}
+
+pub(crate) fn key_to_id(key: &[u8]) -> (UserId, Symbol) {
+    let mut user_id = [0u8; 32];
+    let mut base = [0u8; 4];
+    let mut quote = [0u8; 4];
+    user_id.copy_from_slice(&key[24..56]);
+    base.copy_from_slice(&key[56..60]);
+    quote.copy_from_slice(&key[60..]);
+    (
+        B256::new(user_id),
+        (u32::from_be_bytes(base), u32::from_be_bytes(quote)),
+    )
+}
+
+pub(crate) fn value_to_order(value: &[u8]) -> anyhow::Result<PendingOrder> {
+    let order = bincode::deserialize(value)?;
+    Ok(order)
+}
+
+pub(crate) fn order_to_value(order: &PendingOrder) -> anyhow::Result<Vec<u8>> {
+    let b = bincode::serialize(order)?;
+    Ok(b)
 }
