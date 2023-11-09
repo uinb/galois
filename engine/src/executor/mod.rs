@@ -90,8 +90,7 @@ fn do_execute(
             let orderbook = data
                 .orderbooks
                 .get_mut(&cmd.symbol)
-                .filter(|b| b.should_accept(cmd.price, cmd.amount, cmd.order_id))
-                .filter(|b| b.find_order(cmd.order_id).is_none())
+                .filter(|b| b.should_accept(cmd.price, cmd.amount))
                 .ok_or(EventsError::EventRejected(
                     id,
                     session,

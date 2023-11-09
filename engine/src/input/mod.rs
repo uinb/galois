@@ -84,6 +84,7 @@ impl TryInto<Event> for Input {
                 Ok(Event::Limit(
                     self.sequence,
                     cmd,
+                    // compatiable with old version
                     self.cmd.timestamp.unwrap_or_default(),
                     self.session,
                     self.req_id,
@@ -98,6 +99,7 @@ impl TryInto<Event> for Input {
                     nonce: self.cmd.nonce.ok_or(anyhow!(""))?,
                     signature: hex::decode(self.cmd.signature.ok_or(anyhow!(""))?)?,
                 },
+                // compatiable with old version
                 self.cmd.timestamp.unwrap_or_default(),
                 self.session,
                 self.req_id,

@@ -317,7 +317,6 @@ mod test {
         let mr = execute_limit(
             &mut book,
             UserId::from_low_u64_be(1),
-            1001,
             price,
             amount,
             AskOrBid::Bid,
@@ -342,7 +341,7 @@ mod test {
                 .get()
                 .amount
         );
-        assert!(book.indices.contains_key(&1001));
+        assert!(book.indices.contains_key(&1));
     }
 
     #[test]
@@ -372,11 +371,11 @@ mod test {
         let mr = execute_limit(
             &mut book,
             UserId::from_low_u64_be(1),
-            1001,
             price,
             amount,
             AskOrBid::Bid,
         );
+        assert_eq!(1, mr.taker.order_id);
         assert_eq!(State::Placed, mr.taker.state);
         assert!(mr.maker.is_empty());
 
@@ -385,11 +384,11 @@ mod test {
         let mr = execute_limit(
             &mut book,
             UserId::from_low_u64_be(1),
-            1002,
             price,
             amount,
             AskOrBid::Bid,
         );
+        assert_eq!(2, mr.taker.order_id);
         assert_eq!(State::Placed, mr.taker.state);
         assert!(mr.maker.is_empty());
         let price = dec!(0.08);
@@ -397,26 +396,26 @@ mod test {
         let mr = execute_limit(
             &mut book,
             UserId::from_low_u64_be(2),
-            1003,
             price,
             amount,
             AskOrBid::Ask,
         );
+        assert_eq!(3, mr.taker.order_id);
         assert_eq!(State::Filled, mr.taker.state);
         assert!(!mr.maker.is_empty());
-        assert!(!book.indices.contains_key(&1001));
-        assert!(book.indices.contains_key(&1002));
-        assert!(!book.indices.contains_key(&1003));
+        assert!(!book.indices.contains_key(&1));
+        assert!(book.indices.contains_key(&2));
+        assert!(!book.indices.contains_key(&3));
         assert_eq!(
-            &Maker::maker_filled(UserId::from_low_u64_be(1), 1001, dec!(0.1), dec!(100)),
+            &Maker::maker_filled(UserId::from_low_u64_be(1), 1, dec!(0.1), dec!(100)),
             mr.maker.first().unwrap()
         );
         assert_eq!(
-            &Maker::maker_so_far(UserId::from_low_u64_be(1), 1002, dec!(0.1), dec!(100)),
+            &Maker::maker_so_far(UserId::from_low_u64_be(1), 2, dec!(0.1), dec!(100)),
             mr.maker.get(1).unwrap()
         );
         assert_eq!(
-            Taker::taker_filled(UserId::from_low_u64_be(2), 1003, price, AskOrBid::Ask),
+            Taker::taker_filled(UserId::from_low_u64_be(2), 3, price, AskOrBid::Ask),
             mr.taker
         );
         assert_eq!(
@@ -439,11 +438,11 @@ mod test {
         let mr = execute_limit(
             &mut book,
             UserId::from_low_u64_be(2),
-            1004,
             price,
             amount,
             AskOrBid::Ask,
         );
+        assert_eq!(4, mr.taker.order_id);
         assert_eq!(State::Placed, mr.taker.state);
         assert!(book.get_best_if_match(AskOrBid::Bid, &dec!(0.11)).is_none());
         assert_eq!(
@@ -460,15 +459,15 @@ mod test {
                 .get()
                 .amount
         );
-        assert!(book.indices.contains_key(&1004));
+        assert!(book.indices.contains_key(&4));
 
-        let mr = cancel(&mut book, 1002);
+        let mr = cancel(&mut book, 2);
         let price = dec!(0.1);
         let unfilled = dec!(900);
         assert_eq!(
             Taker::cancel(
                 UserId::from_low_u64_be(1),
-                1002,
+                2,
                 price,
                 unfilled,
                 AskOrBid::Bid,
@@ -480,29 +479,29 @@ mod test {
 
         let price = dec!(0.12);
         let unfilled = dec!(100);
-        let mr = cancel(&mut book, 1004);
+        let mr = cancel(&mut book, 4);
         assert!(mr.is_some());
         assert_eq!(
             Taker::cancel(
                 UserId::from_low_u64_be(2),
-                1004,
+                4,
                 price,
                 unfilled,
                 AskOrBid::Ask,
             ),
             mr.unwrap().taker
         );
-        assert!(!book.indices.contains_key(&1004));
+        assert!(!book.indices.contains_key(&4));
         assert!(book.asks.is_empty());
 
-        let mr = cancel(&mut book, 1004);
+        let mr = cancel(&mut book, 4);
         assert!(mr.is_none());
-        assert!(!book.indices.contains_key(&1004));
+        assert!(!book.indices.contains_key(&4));
         assert!(book.asks.is_empty());
 
-        let mr = cancel(&mut book, 1004);
+        let mr = cancel(&mut book, 4);
         assert!(mr.is_none());
-        assert!(!book.indices.contains_key(&1004));
+        assert!(!book.indices.contains_key(&4));
         assert!(book.asks.is_empty());
     }
 
@@ -533,7 +532,6 @@ mod test {
         execute_limit(
             &mut book,
             UserId::from_low_u64_be(1),
-            1001,
             price,
             amount,
             AskOrBid::Bid,
@@ -541,15 +539,15 @@ mod test {
         let mr = execute_limit(
             &mut book,
             UserId::from_low_u64_be(1),
-            1002,
             price,
             amount,
             AskOrBid::Ask,
         );
+        assert_eq!(2, mr.taker.order_id);
         assert_eq!(mr.taker.state, State::ConditionallyCanceled);
         assert!(mr.maker.is_empty());
-        assert!(book.find_order(1001).is_some());
-        assert!(book.find_order(1002).is_none());
+        assert!(book.find_order(1).is_some());
+        assert!(book.find_order(2).is_none());
     }
 
     #[test]
@@ -579,7 +577,6 @@ mod test {
         execute_limit(
             &mut book,
             UserId::from_low_u64_be(2),
-            1001,
             price,
             amount,
             AskOrBid::Bid,
@@ -587,7 +584,6 @@ mod test {
         execute_limit(
             &mut book,
             UserId::from_low_u64_be(1),
-            1002,
             price,
             amount,
             AskOrBid::Bid,
@@ -595,18 +591,18 @@ mod test {
         let mr = execute_limit(
             &mut book,
             UserId::from_low_u64_be(1),
-            1003,
             price,
             amount * dec!(2),
             AskOrBid::Ask,
         );
+        assert_eq!(3, mr.taker.order_id);
         assert_eq!(mr.taker.state, State::ConditionallyCanceled);
         assert_eq!(mr.taker.unfilled, amount);
         assert_eq!(mr.maker.len(), 1);
         assert_eq!(mr.maker[0].filled, amount);
-        assert!(book.find_order(1001).is_none());
-        assert!(book.find_order(1002).is_some());
-        assert!(book.find_order(1003).is_none());
+        assert!(book.find_order(1).is_none());
+        assert!(book.find_order(2).is_some());
+        assert!(book.find_order(3).is_none());
     }
 
     #[test]
@@ -637,7 +633,6 @@ mod test {
             execute_limit(
                 &mut book,
                 UserId::from_low_u64_be(2),
-                i as u64,
                 price,
                 amount,
                 AskOrBid::Bid,
@@ -647,11 +642,11 @@ mod test {
         let mr = execute_limit(
             &mut book,
             UserId::from_low_u64_be(1),
-            100,
             price,
             amount * dec!(100),
             AskOrBid::Ask,
         );
+        assert_eq!(30, mr.taker.order_id);
         assert_eq!(mr.taker.state, State::ConditionallyCanceled);
         assert_eq!(mr.taker.unfilled, amount * dec!(80));
         assert_eq!(mr.maker.len(), 20);
@@ -689,12 +684,11 @@ mod test {
         let mr = execute_limit(
             &mut book,
             UserId::from_low_u64_be(1),
-            1001,
             price,
             amount,
             AskOrBid::Bid,
         );
-        assert!(book.find_order(1001).is_some());
+        assert!(book.find_order(1).is_some());
         assert_eq!(State::Placed, mr.taker.state);
         assert!(mr.maker.is_empty());
     }
