@@ -51,11 +51,11 @@ pub enum EventsError {
 pub type ExecutionResult = Result<(), EventsError>;
 
 pub fn init(recv: DriverChannel, output: OutputChannel, response: ResponseChannel, mut data: Data) {
-    std::thread::spawn(move || {
+    std::thread::spawn(move || -> anyhow::Result<()> {
         let mut ephemeral = Ephemeral::new();
         log::info!("executor initialized");
         loop {
-            let event = recv.recv().unwrap();
+            let event = recv.recv()?;
             match do_execute(event, &mut data, &mut ephemeral, &output, &response) {
                 Ok(_) => {}
                 Err(EventsError::EventRejected(id, session, req_id, e)) => {
@@ -73,6 +73,7 @@ pub fn init(recv: DriverChannel, output: OutputChannel, response: ResponseChanne
                 }
             }
         }
+        Err(anyhow!("executor thread exited"))
     });
 }
 

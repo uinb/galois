@@ -33,7 +33,7 @@ fn print_banner() {
 /// Overview:
 ///
 ///           sidecar   chain <-+
-///             |         |      \
+///             ^         |      \
 ///             |         |       \
 ///             v         v        \
 ///   +---->  server   scanner      +

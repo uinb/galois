@@ -413,7 +413,7 @@ impl Command {
     }
 
     pub const fn is_internally_generated(&self) -> bool {
-        matches!(self.cmd, UPDATE_DEPTH | CONFIRM_ALL | DUMP)
+        matches!(self.cmd, DUMP)
     }
 }
 
