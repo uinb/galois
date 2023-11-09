@@ -1542,13 +1542,13 @@ mod test {
                 &mr,
             );
         }
-        // alice cancel 1
+        // alice cancel 2
         {
             let size = data.orderbooks.get(&(0, 1)).unwrap().size();
             let cmd2 = CancelCmd {
                 symbol: (0, 1),
                 user_id: UserId::from_low_u64_be(1),
-                order_id: 1,
+                order_id: 2,
                 nonce: 1,
                 signature: vec![0],
             };

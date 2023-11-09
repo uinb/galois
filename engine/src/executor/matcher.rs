@@ -629,7 +629,7 @@ mod test {
 
         let price = dec!(0.1);
         let amount = dec!(1);
-        for i in 1..30 {
+        for _i in 1..30 {
             execute_limit(
                 &mut book,
                 UserId::from_low_u64_be(2),
