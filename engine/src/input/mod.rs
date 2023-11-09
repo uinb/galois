@@ -70,7 +70,6 @@ impl TryInto<Event> for Input {
                 let cmd = LimitCmd {
                     symbol: self.cmd.symbol().ok_or(anyhow!(""))?,
                     user_id: UserId::from_str(self.cmd.user_id.as_ref().ok_or(anyhow!(""))?)?,
-                    order_id: self.cmd.order_id.ok_or(anyhow!(""))?,
                     price,
                     amount,
                     ask_or_bid: AskOrBid::try_from(self.cmd.cmd)?,
@@ -235,8 +234,6 @@ impl Event {}
 pub struct LimitCmd {
     pub symbol: Symbol,
     pub user_id: UserId,
-    // NOTICE this field is deprecated
-    pub order_id: OrderId,
     pub price: Price,
     pub amount: Amount,
     pub ask_or_bid: AskOrBid,
