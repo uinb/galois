@@ -20,42 +20,6 @@ use std::collections::HashMap;
 
 pub mod market;
 
-pub type PendingOrders = HashMap<(UserId, Symbol), HashMap<OrderId, PendingOrder>>;
-
-pub fn restore() -> anyhow::Result<PendingOrders> {
-    let mut pending_orders = PendingOrders::new();
-    let iter = OUTPUT_STORE.iterator(IteratorMode::From(&lower_key(), Direction::Forward));
-    for item in iter {
-        let (key, value) = item?;
-        let id = key_to_id(&key);
-        let order = value_to_order(&value)?;
-        pending_orders
-            .entry(id)
-            .or_insert(HashMap::new())
-            .insert(order.order_id, order);
-    }
-    Ok(pending_orders)
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct PendingOrder {
-    order_id: u64,
-    symbol: Symbol,
-    direction: u8,
-    create_timestamp: u64,
-    amount: Decimal,
-    price: Decimal,
-    status: u8,
-    matched_quote_amount: Decimal,
-    matched_base_amount: Decimal,
-    base_fee: Decimal,
-    quote_fee: Decimal,
-}
-
-impl PendingOrder {
-    pub fn reduce(&mut self, output: &Output) {}
-}
-
 #[derive(Debug, Clone)]
 pub struct Output {
     pub event_id: u64,
@@ -77,40 +41,40 @@ pub struct Output {
     pub timestamp: u64,
 }
 
-/// 24 + 32 + 4 + 4 => prefix + user_id + symbol
-pub(crate) fn id_to_key(user_id: &UserId, symbol: &Symbol) -> [u8; 64] {
-    let mut key = [0xaf; 64];
-    key[24..].copy_from_slice(&user_id.0[..]);
-    key[56..].copy_from_slice(&symbol.0.to_be_bytes());
-    key[60..].copy_from_slice(&symbol.1.to_be_bytes());
-    key
-}
+// 24 + 32 + 4 + 4 => prefix + user_id + symbol
+// pub(crate) fn id_to_key(user_id: &UserId, symbol: &Symbol) -> [u8; 64] {
+//     let mut key = [0xaf; 64];
+//     key[24..].copy_from_slice(&user_id.0[..]);
+//     key[56..].copy_from_slice(&symbol.0.to_be_bytes());
+//     key[60..].copy_from_slice(&symbol.1.to_be_bytes());
+//     key
+// }
 
-pub(crate) fn lower_key() -> [u8; 64] {
-    let mut key = [0xaf; 64];
-    key[24..].copy_from_slice(&[0x00; 40]);
-    key
-}
+// pub(crate) fn lower_key() -> [u8; 64] {
+//     let mut key = [0xaf; 64];
+//     key[24..].copy_from_slice(&[0x00; 40]);
+//     key
+// }
 
-pub(crate) fn key_to_id(key: &[u8]) -> (UserId, Symbol) {
-    let mut user_id = [0u8; 32];
-    let mut base = [0u8; 4];
-    let mut quote = [0u8; 4];
-    user_id.copy_from_slice(&key[24..56]);
-    base.copy_from_slice(&key[56..60]);
-    quote.copy_from_slice(&key[60..]);
-    (
-        B256::new(user_id),
-        (u32::from_be_bytes(base), u32::from_be_bytes(quote)),
-    )
-}
+// pub(crate) fn key_to_id(key: &[u8]) -> (UserId, Symbol) {
+//     let mut user_id = [0u8; 32];
+//     let mut base = [0u8; 4];
+//     let mut quote = [0u8; 4];
+//     user_id.copy_from_slice(&key[24..56]);
+//     base.copy_from_slice(&key[56..60]);
+//     quote.copy_from_slice(&key[60..]);
+//     (
+//         B256::new(user_id),
+//         (u32::from_be_bytes(base), u32::from_be_bytes(quote)),
+//     )
+// }
 
-pub(crate) fn value_to_order(value: &[u8]) -> anyhow::Result<PendingOrder> {
-    let order = bincode::deserialize(value)?;
-    Ok(order)
-}
+// pub(crate) fn value_to_order(value: &[u8]) -> anyhow::Result<PendingOrder> {
+//     let order = bincode::deserialize(value)?;
+//     Ok(order)
+// }
 
-pub(crate) fn order_to_value(order: &PendingOrder) -> anyhow::Result<Vec<u8>> {
-    let b = bincode::serialize(order)?;
-    Ok(b)
-}
+// pub(crate) fn order_to_value(order: &PendingOrder) -> anyhow::Result<Vec<u8>> {
+//     let b = bincode::serialize(order)?;
+//     Ok(b)
+// }

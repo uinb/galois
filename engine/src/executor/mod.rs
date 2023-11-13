@@ -16,6 +16,7 @@ pub mod assets;
 pub mod clearing;
 pub mod matcher;
 pub mod orderbook;
+pub mod orders;
 
 use crate::{
     core::*,
