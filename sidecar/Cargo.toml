@@ -23,7 +23,8 @@ toml = "0.5"
 tower = "0.4.13"
 clap = { version = "4.1.7", features = ["derive"] }
 parity-scale-codec = { version = "3", features = ["derive"] }
-env_logger = "0.10"
+env_logger = "0.10.1"
+log = { version = "0.4", features = ["serde"] }
 x25519-dalek = "1.1.1"
 sqlx = { version = "0.6.2", features = ["runtime-tokio-rustls", "mysql", "decimal", "chrono"] }
 hex = "0.4"
@@ -35,10 +36,10 @@ dashmap = "5.4.0"
 magic-crypt = "3.1"
 anyhow =  "1"
 thiserror = "1"
-log = { version = "0.4", features = ["serde"] }
 sp-core = { git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.30", package = "sp-core" }
 sp-io = { git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.30", package = "sp-io" }
 galois-engine = { path = "../engine" }
 hex-literal = "0.4.1"
+
 [dev-dependencies]
 sp-keyring = { git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v0.9.30" }

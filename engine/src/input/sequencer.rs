@@ -52,7 +52,7 @@ pub fn init(
     });
 }
 
-fn save(id: u64, cmd: Vec<u8>) -> anyhow::Result<()> {
+pub fn save(id: u64, cmd: Vec<u8>) -> anyhow::Result<()> {
     SEQ_STORE.put(id_to_key(id), cmd)?;
     Ok(())
 }

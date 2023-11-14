@@ -70,7 +70,10 @@ impl Context {
             Pool::connect_with(option).await
         })
         .unwrap();
-        let subscribers = Arc::new(DashMap::default());
+        let subscribers = Arc::new(DashMap::<
+            String,
+            UnboundedSender<(String, PendingOrderWrapper)>,
+        >::default());
         let conn = backend.clone();
         let markets = futures::executor::block_on(async move {
             conn.get_markets().await.map(|markets| {
@@ -85,20 +88,26 @@ impl Context {
         tokio::spawn(async move {
             loop {
                 let v = dispatcher.recv().await;
+                if v.is_none() {
+                    continue;
+                }
+                let v = v.unwrap();
                 // TODO support multi-types broadcasting messages from engine
-
-                // let r = if let Some(u) = sub.get(&user_id) {
-                //     u.value().send((user_id.clone(), (symbol, order).into()))
-                // } else {
-                //     Ok(())
-                // };
-                // match r {
-                //     Err(e) => {
-                //         log::debug!("sending order to channel error: {}", e);
-                //         sub.remove(&user_id);
-                //     }
-                //     Ok(_) => {}
-                // }
+                if let Ok(o) = serde_json::from_value::<PendingOrder>(v) {
+                    let user_id = o.user_id.to_string();
+                    let r = if let Some(u) = sub.get(&user_id) {
+                        u.value().send((user_id.clone(), o.into()))
+                    } else {
+                        Ok(())
+                    };
+                    match r {
+                        Err(e) => {
+                            log::debug!("sending order to channel error: {}", e);
+                            sub.remove(&user_id);
+                        }
+                        Ok(_) => {}
+                    }
+                }
             }
         });
         Self {
@@ -296,9 +305,6 @@ where
                 .ok_or(anyhow::anyhow!(""))
                 .map(|v| v.to_str().map_err(|_| anyhow::anyhow!("")))
                 .flatten()?;
-            log::debug!("address: {}", ss58);
-            log::debug!("nonce: {}", nonce);
-            log::debug!("signature: {}", signature);
             let from_galois = conn.get_nonce(ss58).await.ok_or(anyhow::anyhow!(""))?;
             let nonce = nonce
                 .parse::<u32>()

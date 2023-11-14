@@ -13,16 +13,16 @@
 // limitations under the License.
 
 use crate::{config::C, input::*, output::*};
-use rust_decimal::{prelude::Zero, Decimal};
 use std::sync::mpsc::{Receiver, Sender};
 
 type MarketChannel = Receiver<Vec<Output>>;
 type ResponseChannel = Sender<(u64, Message)>;
 
-pub fn init(rx: MarketChannel, tx: ResponseChannel) {
+// TODO build kline
+pub fn init(rx: MarketChannel, _tx: ResponseChannel) {
     std::thread::spawn(move || -> anyhow::Result<()> {
         loop {
-            let crs = rx.recv()?;
+            let _crs = rx.recv()?;
             if C.dry_run.is_none() {}
         }
     });

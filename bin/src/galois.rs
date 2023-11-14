@@ -74,7 +74,8 @@ fn main() {
     env_logger::init();
     let opts = config::GaloisCli::parse();
     match opts.sub {
-        Some(config::SubCmd::EncryptConfig) => config::print_config(&opts.file).unwrap(),
+        Some(config::SubCmd::Encrypt) => config::print_config(&opts.file).unwrap(),
+        Some(config::SubCmd::Migrate(c)) => migration::migrate(c),
         None => {
             print_banner();
             lazy_static::initialize(&C);

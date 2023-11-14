@@ -25,6 +25,7 @@ pub mod core;
 pub mod executor;
 pub mod fusotao;
 pub mod input;
+pub mod migration;
 pub mod output;
 pub mod shared;
 pub mod snapshot;

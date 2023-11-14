@@ -4,3 +4,4 @@ members = [
     "sidecar",
     "bin",
 ]
+resolver = "2"

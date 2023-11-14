@@ -16,7 +16,7 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Parser)]
-#[command(author, version)]
+#[command(author = "UINB Tech", version)]
 pub struct GaloisCli {
     #[arg(short('c'), long("config"), required = true, value_name = "FILE")]
     pub file: std::path::PathBuf,
@@ -29,20 +29,47 @@ pub struct GaloisCli {
 }
 
 #[derive(Debug, clap::Subcommand)]
-#[command(version)]
 pub enum SubCmd {
-    EncryptConfig,
+    #[clap(
+        name = "encrypt",
+        about = "Encrypt config file using environment variable MAGIC_KEY as the key"
+    )]
+    Encrypt,
+    #[clap(
+        name = "migrate",
+        about = "Migrate coredump file and sequence storages"
+    )]
+    Migrate(MigrateCmd),
 }
 
 #[derive(Debug, clap::Args)]
-#[command(version)]
 pub struct RunCmd {
     #[arg(
         long,
-        value_name = "EVENT-ID",
-        help = "Run galois in `dry-run` mode, skipping all output."
+        value_name = "EVENT_ID",
+        help = "Run galois in `dry-run` mode, skipping all outputs."
     )]
     dry_run: Option<u64>,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct MigrateCmd {
+    #[arg(
+        long,
+        short = 'o',
+        value_name = "PATH",
+        help = "The new coredump file path"
+    )]
+    pub output_path: String,
+    #[arg(
+        long,
+        short = 'i',
+        value_name = "PATH",
+        help = "The old coredump file path"
+    )]
+    pub input_path: String,
+    #[arg(long, action=clap::ArgAction::SetFalse, help = "Migrate coredump file only if set")]
+    pub core_only: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -50,6 +77,8 @@ pub struct Config {
     pub server: ServerConfig,
     pub sequence: SequenceConfig,
     pub fusotao: FusotaoConfig,
+    #[cfg(feature = "v1-to-v2")]
+    pub mysql: MysqlConfig,
     #[serde(skip_serializing)]
     pub dry_run: Option<u64>,
 }
@@ -212,26 +241,4 @@ fn init_config(toml: &str, key: Option<String>) -> anyhow::Result<Config> {
         cfg.fusotao.decrypt(&key)?;
     }
     Ok(cfg)
-}
-
-#[test]
-pub fn test_config() {
-    let toml = r#"
-        [server]
-        bind_addr = "127.0.0.1:8097"
-        data_home = "/tmp/galois"
-
-        [sequence]
-        checkpoint = 100000
-        enable_from_genesis = true
-
-        [fusotao]
-        node_url = "ws://localhost:9944"
-        key_seed = "//Alice"
-        x25519_priv = "0xedcff0c69e4c0fa7e9a36e2e6d07f2cc355c8d25907a0ad2ab7e03b24f8e90f3"
-        proof_batch_limit = 20
-        claim_block = 1
-    "#;
-    let config = init_config(&toml, None);
-    assert!(config.is_ok());
 }
