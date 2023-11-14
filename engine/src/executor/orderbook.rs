@@ -164,7 +164,7 @@ pub struct OrderBook {
     pub min_vol: Amount,
     pub enable_market_order: bool,
     pub open: bool,
-    max_id: OrderId,
+    pub max_id: OrderId,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
