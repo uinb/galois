@@ -57,18 +57,21 @@ pub fn init(receiver: FromBackend, sender: ToBackend, shared: Shared) {
     log::info!("bye!");
 }
 
+/// relay the messages from backend to session, need to switch the runtime using async
 fn relay(receiver: FromBackend, sessions: Arc<DashMap<u64, ToSession>>) -> Result<()> {
     loop {
         let (session_id, msg) = receiver.recv()?;
-        log::debug!("session relayer received msg: {:?}", msg);
-        // relay the messages from backend to session, need to switch the runtime using async
-        if let Some(mut session) = sessions.get_mut(&session_id) {
-            let _ = task::block_on(session.send(msg));
-        } else if session_id != 0 {
-            log::error!(
-                "received reply from executor, but session {} not found",
-                session_id
-            );
+        if session_id == 0 {
+            sessions.iter_mut().for_each(|mut s| {
+                let _ = task::block_on(s.send(msg.clone()));
+            });
+        } else {
+            log::debug!("session relayer received msg: {:?}", msg);
+            if let Some(mut session) = sessions.get_mut(&session_id) {
+                let _ = task::block_on(session.send(msg));
+            } else {
+                log::info!("received reply, but session {} not found", session_id);
+            }
         }
     }
 }

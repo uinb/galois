@@ -16,7 +16,7 @@ use crate::{config::C, fusotao::*};
 use sp_core::Pair;
 use std::time::Duration;
 
-/// since we won't wait for the proofs to be `Finalized`, we must add a watchdog to revert `proved_event_id`
+/// since we won't wait for the proofs to be `Finalized`, we must add a watchdog to revert `proved_event_id` in case of fork
 pub fn init(connector: FusoConnector, progress: Arc<FusoState>) {
     if C.dry_run.is_some() {
         return;

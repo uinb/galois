@@ -18,14 +18,15 @@
 pub mod backend;
 pub mod config;
 pub mod context;
-mod db;
 pub mod endpoint;
+
+mod db;
 mod errors;
-mod legacy_clearing;
 
 use crate::errors::CustomRpcError;
 use anyhow::anyhow;
 use parity_scale_codec::{Decode, Encode};
+
 pub use sp_core::crypto::AccountId32;
 pub use sp_core::ecdsa::{Pair as EcdsaPair, Public as EcdsaPublic, Signature as EcdsaSignature};
 pub use sp_core::sr25519::{
@@ -98,7 +99,11 @@ pub fn try_into_account(addr: String) -> anyhow::Result<AccountId32> {
     }
 }
 
-pub fn derive_sub_account(user_addr: &AccountId32, bot_addr: &AccountId32, token: u32) -> AccountId32 {
+pub fn derive_sub_account(
+    user_addr: &AccountId32,
+    bot_addr: &AccountId32,
+    token: u32,
+) -> AccountId32 {
     let h = (b"-*-#fusotao-proxy#-*-", token, user_addr, bot_addr)
         .using_encoded(sp_core::hashing::blake2_256);
     Decode::decode(&mut h.as_ref()).expect("32 bytes; qed")

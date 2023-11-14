@@ -204,12 +204,14 @@ impl OrderBook {
             min_vol,
             enable_market_order,
             open,
+            // since we always use incr then fetch, so the first order is 1
             max_id: 0,
         }
     }
 
-    pub fn update_executed_order_id(&mut self, id: OrderId) {
-        self.max_id = id;
+    pub fn incr_then_fetch_order_id(&mut self) -> OrderId {
+        self.max_id += 1;
+        self.max_id
     }
 
     pub fn size(&self) -> (Amount, Amount) {
@@ -353,9 +355,8 @@ impl OrderBook {
         }
     }
 
-    pub fn should_accept(&self, price: Price, amount: Amount, id: OrderId) -> bool {
+    pub fn should_accept(&self, price: Price, amount: Amount) -> bool {
         self.open
-            && id > self.max_id
             && amount >= self.min_amount
             && price.scale() <= self.quote_scale
             && amount.scale() <= self.base_scale

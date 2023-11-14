@@ -70,7 +70,6 @@ impl TryInto<Event> for Input {
                 let cmd = LimitCmd {
                     symbol: self.cmd.symbol().ok_or(anyhow!(""))?,
                     user_id: UserId::from_str(self.cmd.user_id.as_ref().ok_or(anyhow!(""))?)?,
-                    order_id: self.cmd.order_id.ok_or(anyhow!(""))?,
                     price,
                     amount,
                     ask_or_bid: AskOrBid::try_from(self.cmd.cmd)?,
@@ -85,6 +84,7 @@ impl TryInto<Event> for Input {
                 Ok(Event::Limit(
                     self.sequence,
                     cmd,
+                    // compatiable with old version
                     self.cmd.timestamp.unwrap_or_default(),
                     self.session,
                     self.req_id,
@@ -99,6 +99,7 @@ impl TryInto<Event> for Input {
                     nonce: self.cmd.nonce.ok_or(anyhow!(""))?,
                     signature: hex::decode(self.cmd.signature.ok_or(anyhow!(""))?)?,
                 },
+                // compatiable with old version
                 self.cmd.timestamp.unwrap_or_default(),
                 self.session,
                 self.req_id,
@@ -188,6 +189,12 @@ impl TryInto<Event> for Input {
                 self.session,
                 self.req_id,
             )),
+            QUERY_USER_ORDERS => Ok(Event::QueryUserOrders(
+                self.cmd.symbol().ok_or(anyhow!(""))?,
+                UserId::from_str(self.cmd.user_id.as_ref().ok_or(anyhow!(""))?)?,
+                self.session,
+                self.req_id,
+            )),
             QUERY_BALANCE => Ok(Event::QueryBalance(
                 UserId::from_str(self.cmd.user_id.as_ref().ok_or(anyhow!(""))?)?,
                 self.cmd.currency.ok_or(anyhow!(""))?,
@@ -225,6 +232,7 @@ pub enum Event {
     QueryBalance(UserId, Currency, u64, u64),
     QueryAccounts(UserId, u64, u64),
     QueryExchangeFee(Symbol, u64, u64),
+    QueryUserOrders(Symbol, UserId, u64, u64),
     // the `EventId` has been executed
     Dump(EventId),
 }
@@ -235,8 +243,6 @@ impl Event {}
 pub struct LimitCmd {
     pub symbol: Symbol,
     pub user_id: UserId,
-    // TODO this field is deprecated
-    pub order_id: OrderId,
     pub price: Price,
     pub amount: Amount,
     pub ask_or_bid: AskOrBid,
@@ -322,6 +328,7 @@ pub mod cmd {
     pub const GET_X25519_KEY: u32 = 25;
     pub const GET_NONCE_FOR_BROKER: u32 = 26;
     pub const QUERY_FUSOTAO_PROGRESS: u32 = 27;
+    pub const QUERY_USER_ORDERS: u32 = 28;
 }
 
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone, Default)]
@@ -414,11 +421,11 @@ impl Command {
     }
 
     pub const fn is_internally_generated(&self) -> bool {
-        matches!(self.cmd, UPDATE_DEPTH | CONFIRM_ALL | DUMP)
+        matches!(self.cmd, DUMP)
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Message {
     pub req_id: u64,
     pub payload: Vec<u8>,

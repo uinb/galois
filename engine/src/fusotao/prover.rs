@@ -319,14 +319,14 @@ pub fn save_proof(proof: Proof) -> anyhow::Result<()> {
         }
         _ => {}
     }
-    STORAGE.put(id_to_key(proof.event_id), proof.encode())?;
+    PROOF_STORE.put(id_to_key(proof.event_id), proof.encode())?;
     Ok(())
 }
 
 pub fn remove_before(id: u64) -> anyhow::Result<()> {
     let mut batch = WriteBatchWithTransaction::<false>::default();
     batch.delete_range(id_to_key(1), id_to_key(id));
-    STORAGE.write(batch)?;
+    PROOF_STORE.write(batch)?;
     Ok(())
 }
 
@@ -336,7 +336,7 @@ pub fn fetch_raw_ge(id: u64) -> Vec<(u64, RawParameter)> {
     }
     let mut ret = vec![];
     let mut total_size = 0usize;
-    let iter = STORAGE.iterator(IteratorMode::From(&id_to_key(id), Direction::Forward));
+    let iter = PROOF_STORE.iterator(IteratorMode::From(&id_to_key(id), Direction::Forward));
     for item in iter {
         let (key, value) = item.unwrap();
         total_size += value.len();
@@ -657,6 +657,7 @@ mod test {
             merkle_tree,
             current_event_id: 0,
             tvl: Amount::zero(),
+            orders: Default::default(),
         };
         let cmd0 = AssetsCmd {
             user_id: UserId::from_low_u64_be(1),
@@ -703,7 +704,6 @@ mod test {
         let cmd2 = LimitCmd {
             symbol: (1, 0),
             user_id: UserId::from_low_u64_be(1),
-            order_id: 1,
             price: dec!(100),
             amount: dec!(0.11),
             ask_or_bid: AskOrBid::Ask,
@@ -722,7 +722,6 @@ mod test {
         let mr = matcher::execute_limit(
             data.orderbooks.get_mut(&(1, 0)).unwrap(),
             cmd2.user_id,
-            cmd2.order_id,
             cmd2.price,
             cmd2.amount,
             cmd2.ask_or_bid,
@@ -782,7 +781,6 @@ mod test {
         let cmd2 = LimitCmd {
             symbol: (1, 0),
             user_id: UserId::from_low_u64_be(2),
-            order_id: 3,
             price: dec!(90),
             amount: dec!(0.01),
             ask_or_bid: AskOrBid::Bid,
@@ -801,7 +799,6 @@ mod test {
         let mr = matcher::execute_limit(
             data.orderbooks.get_mut(&(1, 0)).unwrap(),
             cmd2.user_id,
-            cmd2.order_id,
             cmd2.price,
             cmd2.amount,
             cmd2.ask_or_bid,
@@ -850,7 +847,6 @@ mod test {
         let cmd2 = LimitCmd {
             symbol: (1, 0),
             user_id: UserId::from_low_u64_be(1),
-            order_id: 4,
             price: dec!(100),
             amount: dec!(0.11),
             ask_or_bid: AskOrBid::Ask,
@@ -869,7 +865,6 @@ mod test {
         let mr = matcher::execute_limit(
             data.orderbooks.get_mut(&(1, 0)).unwrap(),
             cmd2.user_id,
-            cmd2.order_id,
             cmd2.price,
             cmd2.amount,
             cmd2.ask_or_bid,
@@ -918,7 +913,6 @@ mod test {
         let cmd2 = LimitCmd {
             symbol: (1, 0),
             user_id: UserId::from_low_u64_be(2),
-            order_id: 5,
             price: dec!(110),
             amount: dec!(0.5),
             ask_or_bid: AskOrBid::Bid,
@@ -937,7 +931,6 @@ mod test {
         let mr = matcher::execute_limit(
             data.orderbooks.get_mut(&(1, 0)).unwrap(),
             cmd2.user_id,
-            cmd2.order_id,
             cmd2.price,
             cmd2.amount,
             cmd2.ask_or_bid,
@@ -1003,7 +996,6 @@ mod test {
         let cmd2 = LimitCmd {
             symbol: (1, 0),
             user_id: UserId::from_low_u64_be(1),
-            order_id: 6,
             price: dec!(88),
             amount: dec!(0.3),
             ask_or_bid: AskOrBid::Ask,
@@ -1022,7 +1014,6 @@ mod test {
         let mr = matcher::execute_limit(
             data.orderbooks.get_mut(&(1, 0)).unwrap(),
             cmd2.user_id,
-            cmd2.order_id,
             cmd2.price,
             cmd2.amount,
             cmd2.ask_or_bid,
@@ -1122,6 +1113,7 @@ mod test {
             merkle_tree,
             current_event_id: 0,
             tvl: Amount::zero(),
+            orders: Default::default(),
         };
 
         // alice ask p=10, a=0.5
@@ -1130,7 +1122,6 @@ mod test {
             let cmd2 = LimitCmd {
                 symbol: (0, 1),
                 user_id: UserId::from_low_u64_be(1),
-                order_id: 1,
                 price: dec!(10),
                 amount: dec!(0.5),
                 ask_or_bid: AskOrBid::Ask,
@@ -1150,7 +1141,6 @@ mod test {
             let mr = matcher::execute_limit(
                 data.orderbooks.get_mut(&(0, 1)).unwrap(),
                 cmd2.user_id,
-                cmd2.order_id,
                 cmd2.price,
                 cmd2.amount,
                 cmd2.ask_or_bid,
@@ -1177,7 +1167,6 @@ mod test {
             let cmd2 = LimitCmd {
                 symbol: (0, 1),
                 user_id: UserId::from_low_u64_be(1),
-                order_id: 2,
                 price: dec!(10),
                 amount: dec!(0.6),
                 ask_or_bid: AskOrBid::Ask,
@@ -1197,7 +1186,6 @@ mod test {
             let mr = matcher::execute_limit(
                 data.orderbooks.get_mut(&(0, 1)).unwrap(),
                 cmd2.user_id,
-                cmd2.order_id,
                 cmd2.price,
                 cmd2.amount,
                 cmd2.ask_or_bid,
@@ -1224,7 +1212,6 @@ mod test {
             let cmd2 = LimitCmd {
                 symbol: (0, 1),
                 user_id: UserId::from_low_u64_be(1),
-                order_id: 3,
                 price: dec!(9.9),
                 amount: dec!(0.1),
                 ask_or_bid: AskOrBid::Ask,
@@ -1244,7 +1231,6 @@ mod test {
             let mr = matcher::execute_limit(
                 data.orderbooks.get_mut(&(0, 1)).unwrap(),
                 cmd2.user_id,
-                cmd2.order_id,
                 cmd2.price,
                 cmd2.amount,
                 cmd2.ask_or_bid,
@@ -1271,7 +1257,6 @@ mod test {
             let cmd2 = LimitCmd {
                 symbol: (0, 1),
                 user_id: UserId::from_low_u64_be(2),
-                order_id: 4,
                 price: dec!(9.9),
                 amount: dec!(0.5),
                 ask_or_bid: AskOrBid::Bid,
@@ -1291,7 +1276,6 @@ mod test {
             let mr = matcher::execute_limit(
                 data.orderbooks.get_mut(&(0, 1)).unwrap(),
                 cmd2.user_id,
-                cmd2.order_id,
                 cmd2.price,
                 cmd2.amount,
                 cmd2.ask_or_bid,
@@ -1468,6 +1452,7 @@ mod test {
             merkle_tree,
             current_event_id: 0,
             tvl: Amount::zero(),
+            orders: Default::default(),
         };
 
         // alice ask p=10, a=1.1
@@ -1476,7 +1461,6 @@ mod test {
             let cmd2 = LimitCmd {
                 symbol: (0, 1),
                 user_id: UserId::from_low_u64_be(1),
-                order_id: 1,
                 price: dec!(10),
                 amount: dec!(1.1),
                 ask_or_bid: AskOrBid::Ask,
@@ -1496,7 +1480,6 @@ mod test {
             let mr = matcher::execute_limit(
                 data.orderbooks.get_mut(&(0, 1)).unwrap(),
                 cmd2.user_id,
-                cmd2.order_id,
                 cmd2.price,
                 cmd2.amount,
                 cmd2.ask_or_bid,
@@ -1523,7 +1506,6 @@ mod test {
             let cmd2 = LimitCmd {
                 symbol: (0, 1),
                 user_id: UserId::from_low_u64_be(1),
-                order_id: 2,
                 price: dec!(5),
                 amount: dec!(7.6),
                 ask_or_bid: AskOrBid::Ask,
@@ -1543,7 +1525,6 @@ mod test {
             let mr = matcher::execute_limit(
                 data.orderbooks.get_mut(&(0, 1)).unwrap(),
                 cmd2.user_id,
-                cmd2.order_id,
                 cmd2.price,
                 cmd2.amount,
                 cmd2.ask_or_bid,

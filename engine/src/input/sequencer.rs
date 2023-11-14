@@ -23,6 +23,11 @@ pub fn init(
     init_at: u64,
 ) {
     let recovery = ensure_fully_loaded(init_at, to_executor.clone()).unwrap();
+    log::info!(
+        "historic events {}-{} have been executed",
+        init_at,
+        recovery
+    );
     if C.dry_run.is_some() {
         return;
     }
@@ -48,13 +53,13 @@ pub fn init(
 }
 
 fn save(id: u64, cmd: Vec<u8>) -> anyhow::Result<()> {
-    STORAGE.put(id_to_key(id), cmd)?;
+    SEQ_STORE.put(id_to_key(id), cmd)?;
     Ok(())
 }
 
 fn ensure_fully_loaded(init_at: u64, tx: Sender<Event>) -> anyhow::Result<u64> {
     let mut current_id = init_at;
-    let iter = STORAGE.iterator(IteratorMode::From(&id_to_key(init_at), Direction::Forward));
+    let iter = SEQ_STORE.iterator(IteratorMode::From(&id_to_key(init_at), Direction::Forward));
     for item in iter {
         let (key, value) = item?;
         current_id = key_to_id(&key);
@@ -68,6 +73,7 @@ fn ensure_fully_loaded(init_at: u64, tx: Sender<Event>) -> anyhow::Result<u64> {
         let event = input
             .try_into()
             .map_err(|_| anyhow::anyhow!("id {} is invalid", current_id))?;
+        // LIMIT|CANCEL(session=0, req_id=0) represent historic events, shouldn't reply
         match C.dry_run {
             Some(n) if n >= current_id => tx.send(event)?,
             None => tx.send(event)?,
@@ -80,7 +86,7 @@ fn ensure_fully_loaded(init_at: u64, tx: Sender<Event>) -> anyhow::Result<u64> {
 pub fn remove_before(id: u64) -> anyhow::Result<()> {
     let mut batch = WriteBatchWithTransaction::<false>::default();
     batch.delete_range(id_to_key(1), id_to_key(id));
-    STORAGE.write(batch)?;
+    SEQ_STORE.write(batch)?;
     Ok(())
 }
 

@@ -16,6 +16,7 @@ pub mod assets;
 pub mod clearing;
 pub mod matcher;
 pub mod orderbook;
+pub mod orders;
 
 use crate::{
     core::*,
@@ -26,14 +27,15 @@ use crate::{
 };
 use anyhow::anyhow;
 use rust_decimal::{prelude::*, Decimal};
+use serde_json::{json, to_vec};
 use std::{
     collections::HashMap,
     sync::mpsc::{Receiver, Sender},
 };
 use thiserror::Error;
 
-type OutputChannel = Sender<Vec<Output>>;
 type DriverChannel = Receiver<Event>;
+type MarketChannel = Sender<Vec<Output>>;
 type ResponseChannel = Sender<(u64, Message)>;
 
 #[derive(Debug, Error)]
@@ -50,18 +52,18 @@ pub enum EventsError {
 
 pub type ExecutionResult = Result<(), EventsError>;
 
-pub fn init(recv: DriverChannel, output: OutputChannel, response: ResponseChannel, mut data: Data) {
-    std::thread::spawn(move || {
+pub fn init(recv: DriverChannel, market: MarketChannel, response: ResponseChannel, mut data: Data) {
+    std::thread::spawn(move || -> anyhow::Result<()> {
         let mut ephemeral = Ephemeral::new();
         log::info!("executor initialized");
         loop {
-            let event = recv.recv().unwrap();
-            match do_execute(event, &mut data, &mut ephemeral, &output, &response) {
+            let event = recv.recv()?;
+            match do_execute(event, &mut data, &mut ephemeral, &market, &response) {
                 Ok(_) => {}
                 Err(EventsError::EventRejected(id, session, req_id, e)) => {
                     log::debug!("event {} rejected: {}", id, e);
-                    let msg = serde_json::json!({"error": e.to_string()});
-                    let v = serde_json::to_vec(&msg).unwrap_or_default();
+                    let msg = json!({"error": e.to_string()});
+                    let v = to_vec(&msg).unwrap_or_default();
                     let _ = response.send((session, Message::new(req_id, v)));
                 }
                 Err(EventsError::EventIgnored(id, e)) => {
@@ -73,15 +75,15 @@ pub fn init(recv: DriverChannel, output: OutputChannel, response: ResponseChanne
                 }
             }
         }
+        Err(anyhow!("executor thread exited"))
     });
 }
 
-// TODO update pending orders
 fn do_execute(
     event: Event,
     data: &mut Data,
     ephemeral: &mut Ephemeral,
-    output: &OutputChannel,
+    market: &MarketChannel,
     response: &ResponseChannel,
 ) -> ExecutionResult {
     match event {
@@ -90,8 +92,7 @@ fn do_execute(
             let orderbook = data
                 .orderbooks
                 .get_mut(&cmd.symbol)
-                .filter(|b| b.should_accept(cmd.price, cmd.amount, cmd.order_id))
-                .filter(|b| b.find_order(cmd.order_id).is_none())
+                .filter(|b| b.should_accept(cmd.price, cmd.amount))
                 .ok_or(EventsError::EventRejected(
                     id,
                     session,
@@ -115,11 +116,39 @@ fn do_execute(
             let mr = matcher::execute_limit(
                 orderbook,
                 cmd.user_id,
-                cmd.order_id,
                 cmd.price,
                 cmd.amount,
                 cmd.ask_or_bid,
             );
+            data.orders.insert(PendingOrder {
+                order_id: mr.taker.order_id,
+                user_id: cmd.user_id,
+                symbol: cmd.symbol,
+                direction: mr.taker.ask_or_bid.into(),
+                create_timestamp: time,
+                amount: cmd.amount,
+                price: cmd.price,
+                status: OrderState::Placed.into(),
+                matched_quote_amount: Decimal::zero(),
+                matched_base_amount: Decimal::zero(),
+                base_fee: Decimal::zero(),
+                quote_fee: Decimal::zero(),
+            });
+            // compatiable with old version since we don't use mysql auto increment id anymore
+            if session != 0 {
+                response
+                    .send((
+                        session,
+                        Message::new(
+                            req_id,
+                            to_vec(&json!({
+                                "id": mr.taker.order_id
+                            }))
+                            .expect("qed;"),
+                        ),
+                    ))
+                    .map_err(|_| EventsError::Interrupted(id))?;
+            }
             let out = clearing::clear(
                 &mut data.accounts,
                 id,
@@ -129,6 +158,15 @@ fn do_execute(
                 &mr,
                 time,
             );
+            for cr in out.iter() {
+                let o = data.orders.merge(&cr);
+                if session != 0 {
+                    // broadcast to all sessions
+                    response
+                        .send((0, Message::new(0, to_vec(&o).unwrap_or_default())))
+                        .map_err(|_| EventsError::Interrupted(id))?;
+                }
+            }
             let (maker_fee, taker_fee) = (orderbook.maker_fee, orderbook.taker_fee);
             let proof = prover::prove_trade_cmd(
                 data,
@@ -147,7 +185,8 @@ fn do_execute(
             prover::save_proof(proof)
                 .inspect_err(|e| log::error!("{}", e))
                 .map_err(|_| EventsError::Interrupted(id))?;
-            output.send(out).map_err(|_| EventsError::Interrupted(id))
+            market.send(out).map_err(|_| EventsError::Interrupted(id))?;
+            Ok(())
         }
         Event::Cancel(id, cmd, time, session, req_id) => {
             data.current_event_id = id;
@@ -188,6 +227,20 @@ fn do_execute(
                 req_id,
                 anyhow!("order doesn't exist"),
             ))?;
+            if session != 0 {
+                response
+                    .send((
+                        session,
+                        Message::new(
+                            req_id,
+                            to_vec(&json!({
+                                "id": cmd.order_id
+                            }))
+                            .expect("qed;"),
+                        ),
+                    ))
+                    .map_err(|_| EventsError::Interrupted(id))?;
+            }
             let out = clearing::clear(
                 &mut data.accounts,
                 id,
@@ -197,6 +250,9 @@ fn do_execute(
                 &mr,
                 time,
             );
+            for cr in out.iter() {
+                data.orders.merge(&cr);
+            }
             let proof = prover::prove_trade_cmd(
                 data,
                 cmd.nonce,
@@ -214,7 +270,8 @@ fn do_execute(
             prover::save_proof(proof)
                 .inspect_err(|e| log::error!("{}", e))
                 .map_err(|_| EventsError::Interrupted(id))?;
-            output.send(out).map_err(|_| EventsError::Interrupted(id))
+            market.send(out).map_err(|_| EventsError::Interrupted(id))?;
+            Ok(())
         }
         Event::TransferOut(id, cmd) => {
             data.current_event_id = id;
@@ -336,23 +393,29 @@ fn do_execute(
         }
         Event::QueryOrder(symbol, order_id, session, req_id) => {
             let v = match data.orderbooks.get(&symbol) {
-                Some(orderbook) => orderbook.find_order(order_id).map_or(vec![], |order| {
-                    serde_json::to_vec(order).unwrap_or_default()
-                }),
+                Some(orderbook) => orderbook
+                    .find_order(order_id)
+                    .map_or(vec![], |order| to_vec(order).unwrap_or_default()),
                 None => vec![],
             };
             let _ = response.send((session, Message::new(req_id, v)));
             Ok(())
         }
+        Event::QueryUserOrders(symbol, user_id, session, req_id) => {
+            let o = data.orders.list(user_id, symbol);
+            let v = to_vec(&o).unwrap_or_default();
+            let _ = response.send((session, Message::new(req_id, v)));
+            Ok(())
+        }
         Event::QueryBalance(user_id, currency, session, req_id) => {
             let a = assets::get_balance_to_owned(&data.accounts, &user_id, currency);
-            let v = serde_json::to_vec(&a).unwrap_or_default();
+            let v = to_vec(&a).unwrap_or_default();
             let _ = response.send((session, Message::new(req_id, v)));
             Ok(())
         }
         Event::QueryAccounts(user_id, session, req_id) => {
             let a = assets::get_account_to_owned(&data.accounts, &user_id);
-            let v = serde_json::to_vec(&a).unwrap_or_default();
+            let v = to_vec(&a).unwrap_or_default();
             let _ = response.send((session, Message::new(req_id, v)));
             Ok(())
         }
@@ -369,12 +432,11 @@ fn do_execute(
                     v.insert(String::from("taker_fee"), Decimal::new(0, 0));
                 }
             }
-            let v = serde_json::to_vec(&v).unwrap_or_default();
+            let v = to_vec(&v).unwrap_or_default();
             let _ = response.send((session, Message::new(req_id, v)));
             Ok(())
         }
         Event::Dump(id) => {
-            // TODO erase some old events after dump
             snapshot::dump(id, data);
             Ok(())
         }

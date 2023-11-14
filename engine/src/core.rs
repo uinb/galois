@@ -17,8 +17,8 @@ pub use crate::{
     fusotao::GlobalStates,
     input::InOrOut,
     matcher::{Role, State as OrderState},
-    orderbook::AskOrBid,
-    orderbook::OrderBook,
+    orderbook::{AskOrBid, OrderBook},
+    orders::{PendingOrder, UserOrders},
 };
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use indexmap::IndexSet;
@@ -32,7 +32,9 @@ use std::{
 };
 
 lazy_static::lazy_static! {
-    pub static ref STORAGE: rocksdb::DB = rocksdb::DB::open_default(&crate::C.server.get_storage_path()).unwrap();
+    pub static ref SEQ_STORE: rocksdb::DB = rocksdb::DB::open_default(&crate::C.server.get_sequence_path()).unwrap();
+    pub static ref PROOF_STORE: rocksdb::DB = rocksdb::DB::open_default(&crate::C.server.get_proof_path()).unwrap();
+    pub static ref OUTPUT_STORE: rocksdb::DB = rocksdb::DB::open_default(&crate::C.server.get_output_path()).unwrap();
 }
 
 pub type Base = u32;
@@ -161,36 +163,20 @@ pub fn max_number() -> Amount {
     u64::MAX.into()
 }
 
+pub const MAX_PENDING_ORDERS_PER_USER: usize = 100;
+
 // we only keep the last 1000 transfer_in/out receipts to remove duplicates
 const RECEIPTS_RECORDS_CAPACITY: usize = 1000;
-const MAX_OPEN_ORDERS_PER_SYMBOL: usize = 100;
-
-#[derive(Clone, Debug)]
-pub struct PendingOrder {
-    order_id: u64,
-    symbol: Symbol,
-    direction: u8,
-    create_timestamp: u64,
-    amount: String,
-    price: String,
-    status: u8,
-    matched_quote_amount: String,
-    matched_base_amount: String,
-    base_fee: Decimal,
-    quote_fee: Decimal,
-}
 
 #[derive(Clone, Debug)]
 pub struct Ephemeral {
     onchain_receipt_records: IndexSet<(u32, UserId)>,
-    user_pending_orders: HashMap<(Symbol, UserId), HashMap<OrderId, PendingOrder>>,
 }
 
 impl Ephemeral {
     pub fn new() -> Self {
         Self {
             onchain_receipt_records: IndexSet::with_capacity(RECEIPTS_RECORDS_CAPACITY),
-            user_pending_orders: HashMap::new(),
         }
     }
 
@@ -209,6 +195,7 @@ pub struct Data {
     pub merkle_tree: GlobalStates,
     pub current_event_id: u64,
     pub tvl: Amount,
+    pub orders: UserOrders,
 }
 
 impl Data {
@@ -219,6 +206,7 @@ impl Data {
             merkle_tree: GlobalStates::default(),
             current_event_id: 0,
             tvl: Amount::zero(),
+            orders: UserOrders::new(),
         }
     }
 
@@ -233,6 +221,65 @@ impl Data {
         let mut compress = ZlibEncoder::new(writer, Compression::best());
         bincode::serialize_into(&mut compress, &self)?;
         Ok(())
+    }
+}
+
+#[cfg(feature = "v1-to-v2")]
+pub mod v1 {
+    use super::*;
+
+    #[derive(Clone, Serialize, Deserialize)]
+    pub struct DataV1 {
+        pub orderbooks: HashMap<Symbol, OrderBook>,
+        pub accounts: Accounts,
+        pub merkle_tree: GlobalStates,
+        pub current_event_id: u64,
+        pub tvl: Amount,
+    }
+
+    impl DataV1 {
+        pub fn new() -> Self {
+            Self {
+                orderbooks: HashMap::new(),
+                accounts: HashMap::new(),
+                merkle_tree: GlobalStates::default(),
+                current_event_id: 0,
+                tvl: Amount::zero(),
+            }
+        }
+
+        pub fn from_raw(file: File) -> anyhow::Result<Self> {
+            let reader = BufReader::new(file);
+            let mut decompress = ZlibDecoder::new(reader);
+            Ok(bincode::deserialize_from(&mut decompress)?)
+        }
+
+        pub fn into_raw(&self, file: File) -> anyhow::Result<()> {
+            let writer = BufWriter::new(file);
+            let mut compress = ZlibEncoder::new(writer, Compression::best());
+            bincode::serialize_into(&mut compress, &self)?;
+            Ok(())
+        }
+    }
+
+    impl TryInto<Data> for (DataV1, Vec<PendingOrder>) {
+        type Error = anyhow::Error;
+
+        fn try_into(self) -> Result<Data, Self::Error> {
+            let (data, pending_orders) = self;
+            let mut orders = UserOrders::new();
+            pending_orders.into_iter().for_each(|order| {
+                orders.insert(order);
+            });
+            Ok(Data {
+                orderbooks: data.orderbooks,
+                accounts: data.accounts,
+                merkle_tree: data.merkle_tree,
+                current_event_id: data.current_event_id,
+                tvl: data.tvl,
+                orders,
+            })
+        }
     }
 }
 

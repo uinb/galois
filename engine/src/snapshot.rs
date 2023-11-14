@@ -21,7 +21,7 @@ pub fn dump(id: u64, data: &core::Data) {
     }
     let data = data.clone();
     std::thread::spawn(move || -> anyhow::Result<()> {
-        let f = std::path::Path::new(&config::C.server.get_coredump_path())
+        let f = std::path::Path::new(&config::C.server.get_checkpoint_path())
             .join(id.to_string())
             .with_extension("gz");
         let file = std::fs::OpenOptions::new()
@@ -46,7 +46,7 @@ fn get_id(path: &std::path::Path) -> u64 {
 
 /// return the id(not executed yet), and the snapshot
 pub fn load() -> anyhow::Result<(u64, core::Data)> {
-    let dir = std::fs::read_dir(&config::C.server.get_coredump_path())?;
+    let dir = std::fs::read_dir(&config::C.server.get_checkpoint_path())?;
     let file_path = dir
         .map(|e| e.unwrap())
         .filter(|f| f.file_type().unwrap().is_file())

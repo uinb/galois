@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::endpoint::TradingCommand;
+use crate::endpoint::{PendingOrderWrapper, TradingCommand};
 use dashmap::DashMap;
 use galois_engine::{
     core::*,
     fusotao::OffchainSymbol,
     input::{cmd::*, Command, Message},
-    orderbook::Order as CoreOrder,
+    orderbook::Order,
+    orders::PendingOrder,
 };
 use rust_decimal::Decimal;
 use serde_json::{json, to_vec, Value as JsonValue};
@@ -30,12 +31,13 @@ use tokio::net::{
     tcp::{OwnedReadHalf, OwnedWriteHalf},
     TcpStream, ToSocketAddrs,
 };
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedSender};
 use x25519_dalek::StaticSecret;
 
 type ToBackend = Sender<Option<Req>>;
 type FromFrontend = Receiver<Option<Req>>;
 type Notifier = Sender<JsonValue>;
+type Broadcast = UnboundedSender<JsonValue>;
 
 #[derive(Clone, Debug)]
 pub struct BackendConnection {
@@ -49,15 +51,19 @@ struct Req {
 }
 
 impl BackendConnection {
-    pub fn new(addr: impl ToSocketAddrs + Send + Sync + Clone + 'static) -> Self {
+    pub fn new(
+        addr: impl ToSocketAddrs + Send + Sync + Clone + 'static,
+        broadcast: Broadcast,
+    ) -> Self {
         let (to_backend, from_frontend) = mpsc::channel(3000);
-        Self::start_inner(to_backend.clone(), from_frontend, addr);
+        Self::start_inner(to_backend.clone(), from_frontend, broadcast, addr);
         Self { to_backend }
     }
 
     fn start_inner(
         to_back: ToBackend,
         from_front: FromFrontend,
+        broadcast: Broadcast,
         addr: impl ToSocketAddrs + Send + Sync + Clone + 'static,
     ) {
         tokio::spawn(async move {
@@ -67,17 +73,22 @@ impl BackendConnection {
                 if let Ok(stream) = TcpStream::connect(addr.clone()).await {
                     let (r, w) = stream.into_split();
                     let join = tokio::spawn(Self::write_loop(w, sink.clone(), from_front));
-                    Self::read_loop(r, sink.clone()).await;
+                    Self::read_loop(r, sink.clone(), broadcast.clone()).await;
                     let _ = to_back.send(None).await;
                     from_front = join.await.unwrap();
                 } else {
+                    log::error!("connect to galois failed, will retry in 1s.");
                     tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
                 }
             }
         });
     }
 
-    async fn read_loop(mut stream: OwnedReadHalf, sink: Arc<DashMap<u64, Notifier>>) {
+    async fn read_loop(
+        mut stream: OwnedReadHalf,
+        req: Arc<DashMap<u64, Notifier>>,
+        broadcast: Broadcast,
+    ) {
         log::debug!("starting background read loop.");
         let mut buf = Vec::<u8>::with_capacity(4096);
         loop {
@@ -109,13 +120,15 @@ impl BackendConnection {
                         Err(_) => break,
                     }
                 };
-                if let Some((_, noti)) = sink.remove(&req_id) {
+                if req_id == 0 {
+                    let _ = broadcast.send(json);
+                } else if let Some((_, noti)) = req.remove(&req_id) {
                     let _ = noti.send(json).await;
                 }
                 buf.clear();
             }
         }
-        sink.clear();
+        req.clear();
         log::debug!("read loop interrupted, will restart.");
     }
 
@@ -150,10 +163,10 @@ impl BackendConnection {
         self.to_backend
             .send(Some(Req { payload, notifier }))
             .await?;
-        feedback
-            .recv()
-            .await
-            .ok_or(anyhow::anyhow!("fail to read from backend"))
+        tokio::select! {
+            v = feedback.recv() => v.ok_or(anyhow::anyhow!("fail to read from backend")),
+            _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => Err(anyhow::anyhow!("timeout")),
+        }
     }
 
     pub async fn submit_trading_command(
@@ -162,7 +175,7 @@ impl BackendConnection {
         cmd: TradingCommand,
         relayer: impl ToString,
     ) -> anyhow::Result<u64> {
-        // TODO we may require user to sign the payload
+        // TODO we may require user to sign the payload in the future
         let fix_cmd_signature = "169d796416023558ef5c2580ef38c1c4f43f3c06f76ceab2412e6fc5d486a36eb0a9cb808dd4eb72f6264b4113c1a722479be205edc84d6ac5403d33d09b0087";
         let fix_cmd_nonce = 40020u32;
         let direction = cmd.get_direction_if_trade();
@@ -211,8 +224,10 @@ impl BackendConnection {
             .request(to_vec(&payload)?)
             .await
             .inspect_err(|e| log::debug!("{:?}", e))?;
-        // TODO
-        Ok(0)
+        r.get("id")
+            .ok_or(anyhow::anyhow!("error while placing orders"))?
+            .as_u64()
+            .ok_or(anyhow::anyhow!("error while placing orders"))
     }
 
     pub async fn get_nonce(&self, broker: &str) -> Option<u32> {
@@ -242,11 +257,8 @@ impl BackendConnection {
         serde_json::from_value::<BTreeMap<u32, Balance>>(r).map_err(|_| anyhow::anyhow!("galois?"))
     }
 
-    pub async fn get_order(
-        &self,
-        symbol: Symbol,
-        order_id: u64,
-    ) -> anyhow::Result<Option<CoreOrder>> {
+    // this should be deprected
+    pub async fn get_order(&self, symbol: Symbol, order_id: u64) -> anyhow::Result<Option<Order>> {
         let r = self
             .request(
                 to_vec(&json!({
@@ -260,7 +272,30 @@ impl BackendConnection {
             .await
             .inspect_err(|e| log::debug!("fetching order failed: {:?}", e))
             .map_err(|_| anyhow::anyhow!("Galois not available"))?;
-        serde_json::from_value::<Option<CoreOrder>>(r).map_err(|_| anyhow::anyhow!("galois?"))
+        serde_json::from_value::<Option<Order>>(r).map_err(|_| anyhow::anyhow!("galois?"))
+    }
+
+    pub async fn query_pending_orders(
+        &self,
+        symbol: Symbol,
+        user_id: impl AsRef<str>,
+    ) -> anyhow::Result<Vec<PendingOrderWrapper>> {
+        let r = self
+            .request(
+                to_vec(&json!({
+                    "cmd": QUERY_USER_ORDERS,
+                    "base": symbol.0,
+                    "quote": symbol.1,
+                    "user_id": user_id.as_ref(),
+                }))
+                .expect("jsonser;qed"),
+            )
+            .await
+            .inspect_err(|e| log::debug!("fetching order failed: {:?}", e))
+            .map_err(|_| anyhow::anyhow!("Galois not available"))?;
+        serde_json::from_value::<Vec<PendingOrder>>(r)
+            .map_err(|_| anyhow::anyhow!("galois?"))
+            .map(|v| v.into_iter().map(|o| o.into()).collect())
     }
 
     pub async fn get_markets(&self) -> anyhow::Result<Vec<OffchainSymbol>> {

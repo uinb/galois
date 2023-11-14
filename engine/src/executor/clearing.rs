@@ -543,7 +543,6 @@ pub mod test {
         assert_eq!(dec!(0.5), b2_101.available);
         let mr = Match {
             maker: vec![],
-            // TODO tag here
             // taker: Taker::taker_placed(
             taker: Taker::cancel(
                 UserId::from_low_u64_be(2),
@@ -640,7 +639,6 @@ pub mod test {
         execute_limit(
             &mut book,
             UserId::from_low_u64_be(1),
-            1,
             price,
             amount,
             AskOrBid::Ask,
@@ -661,7 +659,6 @@ pub mod test {
         let mr = execute_limit(
             &mut book,
             UserId::from_low_u64_be(1),
-            2,
             price,
             amount,
             AskOrBid::Bid,
@@ -718,7 +715,6 @@ pub mod test {
         execute_limit(
             &mut book,
             UserId::from_low_u64_be(1),
-            1,
             price,
             amount,
             AskOrBid::Ask,
@@ -736,7 +732,6 @@ pub mod test {
         let mr = execute_limit(
             &mut book,
             UserId::from_low_u64_be(2),
-            2,
             price,
             amount,
             AskOrBid::Bid,
@@ -809,7 +804,6 @@ pub mod test {
         execute_limit(
             &mut book,
             UserId::from_low_u64_be(2),
-            1,
             price,
             amount,
             AskOrBid::Bid,
@@ -821,7 +815,6 @@ pub mod test {
         let mr = execute_limit(
             &mut book,
             UserId::from_low_u64_be(1),
-            2,
             price,
             amount,
             AskOrBid::Ask,

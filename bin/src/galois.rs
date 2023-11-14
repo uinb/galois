@@ -33,7 +33,7 @@ fn print_banner() {
 /// Overview:
 ///
 ///           sidecar   chain <-+
-///             |         |      \
+///             ^         |      \
 ///             |         |       \
 ///             v         v        \
 ///   +---->  server   scanner      +
@@ -48,11 +48,11 @@ fn print_banner() {
 ///   |              |              |
 ///   |              |              |
 ///   |              v              |
-///   +           storage           |
-///    \           /   \            +
-///     \         /     \          /
-///      \       /       \        /
-///       +-- replyer committer -+
+///   +           rocksdb           +
+///    \           /   \           /
+///     \         /     \         /
+///      \       /       \       /
+///       +-- market committer -+
 ///
 fn start() {
     let (id, coredump) = snapshot::load().unwrap();
@@ -62,7 +62,7 @@ fn start() {
     let (event_tx, event_rx) = std::sync::mpsc::channel();
     let (input_tx, input_rx) = std::sync::mpsc::channel();
     let (reply_tx, reply_rx) = std::sync::mpsc::channel();
-    output::init(output_rx);
+    market::init(output_rx, reply_tx.clone());
     committer::init(connector.clone(), state.clone());
     executor::init(event_rx, output_tx, reply_tx.clone(), coredump);
     sequencer::init(input_rx, event_tx, reply_tx, id);

@@ -16,12 +16,16 @@ use crate::errors::CustomRpcError;
 use crate::{
     backend::BackendConnection,
     config::Config,
-    db::{self, Order},
-    endpoint::TradingCommand,
-    legacy_clearing, AccountId32, Sr25519Pair, Sr25519Public, Sr25519Signature,
+    // TODO remove
+    db,
+    endpoint::{PendingOrderWrapper, TradingCommand},
+    AccountId32,
+    Sr25519Pair,
+    Sr25519Public,
+    Sr25519Signature,
 };
 use dashmap::DashMap;
-use galois_engine::{core::*, fusotao::OffchainSymbol};
+use galois_engine::{core::*, fusotao::OffchainSymbol, orders::PendingOrder};
 use hyper::{Body, Request, Response};
 use parity_scale_codec::{Decode, Encode};
 use rust_decimal::Decimal;
@@ -38,7 +42,10 @@ use std::{
     sync::Arc,
     task::{Context as TaskCtx, Poll},
 };
-use tokio::sync::{mpsc::UnboundedSender, Mutex};
+use tokio::sync::{
+    mpsc::{self, UnboundedSender},
+    Mutex,
+};
 use tower::{Layer, Service};
 use x25519_dalek::StaticSecret;
 
@@ -46,14 +53,15 @@ pub struct Context {
     pub backend: BackendConnection,
     pub x25519: StaticSecret,
     pub db: Pool<MySql>,
-    pub subscribers: Arc<DashMap<String, UnboundedSender<(String, Order)>>>,
+    pub subscribers: Arc<DashMap<String, UnboundedSender<(String, PendingOrderWrapper)>>>,
     pub session_nonce: Arc<DashMap<String, Session>>,
     pub markets: Arc<DashMap<Symbol, (Arc<AtomicBool>, OffchainSymbol)>>,
 }
 
 impl Context {
     pub fn new(config: Config) -> Self {
-        let backend = BackendConnection::new(config.prover);
+        let (broadcast, mut dispatcher) = mpsc::unbounded_channel();
+        let backend = BackendConnection::new(config.prover, broadcast);
         let conn = backend.clone();
         let x25519 = futures::executor::block_on(async move { conn.get_x25519().await }).unwrap();
         let db = futures::executor::block_on(async {
@@ -73,41 +81,24 @@ impl Context {
         })
         .unwrap();
         log::debug!("Loading marketings from backend: {:?}", markets);
-        markets.iter().for_each(|e| {
-            let pool = db.clone();
-            let sub = subscribers.clone();
-            let symbol = e.key().clone();
-            let closed = e.value().0.clone();
-            tokio::spawn(async move {
-                legacy_clearing::update_order_task(sub, pool, symbol, closed).await;
-            });
-        });
-        let conn = backend.clone();
-        let started = markets.clone();
-        let pool = db.clone();
         let sub = subscribers.clone();
         tokio::spawn(async move {
             loop {
-                tokio::time::sleep(std::time::Duration::from_millis(15000)).await;
-                match conn.get_markets().await {
-                    Ok(v) if started.len() != v.len() => {
-                        for m in v.into_iter() {
-                            if !started.contains_key(&m.symbol) {
-                                let closed = Arc::new(AtomicBool::new(false));
-                                let symbol = m.symbol.clone();
-                                started.insert(symbol.clone(), (closed.clone(), m));
-                                let sub = sub.clone();
-                                let pool = pool.clone();
-                                tokio::spawn(async move {
-                                    legacy_clearing::update_order_task(sub, pool, symbol, closed)
-                                        .await;
-                                });
-                            }
-                        }
-                    }
-                    Err(e) => log::error!("fetching markets failed(background task), {:?}", e),
-                    _ => {}
-                }
+                let v = dispatcher.recv().await;
+                // TODO support multi-types broadcasting messages from engine
+
+                // let r = if let Some(u) = sub.get(&user_id) {
+                //     u.value().send((user_id.clone(), (symbol, order).into()))
+                // } else {
+                //     Ok(())
+                // };
+                // match r {
+                //     Err(e) => {
+                //         log::debug!("sending order to channel error: {}", e);
+                //         sub.remove(&user_id);
+                //     }
+                //     Ok(_) => {}
+                // }
             }
         });
         Self {
@@ -371,7 +362,7 @@ impl Session {
         *occupied_nonce.last().expect("at least max;qed") + 1
     }
 }
-/*
+
 #[test]
 pub fn validate_signature_should_work() {
     let nonce = 83143.encode();
@@ -401,4 +392,3 @@ pub fn validate_deser_signature_should_work() {
     );
     assert!(Sr25519Pair::verify(&signature, nonce, &public));
 }
-*/

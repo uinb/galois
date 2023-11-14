@@ -66,12 +66,20 @@ pub struct ServerConfig {
 }
 
 impl ServerConfig {
-    pub fn get_coredump_path(&self) -> String {
-        format!("{}/coredump/", self.data_home)
+    pub fn get_checkpoint_path(&self) -> String {
+        format!("{}/checkpoint/", self.data_home)
     }
 
-    pub fn get_storage_path(&self) -> String {
-        format!("{}/storage/", self.data_home)
+    pub fn get_sequence_path(&self) -> String {
+        format!("{}/sequence/", self.data_home)
+    }
+
+    pub fn get_proof_path(&self) -> String {
+        format!("{}/proof/", self.data_home)
+    }
+
+    pub fn get_output_path(&self) -> String {
+        format!("{}/market/", self.data_home)
     }
 }
 
