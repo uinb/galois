@@ -99,6 +99,13 @@ impl std::str::FromStr for B256 {
     }
 }
 
+impl std::string::ToString for B256 {
+    fn to_string(&self) -> String {
+        use sp_core::crypto::Ss58Codec;
+        self.to_ss58check()
+    }
+}
+
 impl std::fmt::Debug for B256 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use sp_core::crypto::Ss58Codec;
@@ -262,23 +269,21 @@ pub mod v1 {
         }
     }
 
-    impl TryInto<Data> for (DataV1, Vec<PendingOrder>) {
-        type Error = anyhow::Error;
-
-        fn try_into(self) -> Result<Data, Self::Error> {
+    impl Into<Data> for (DataV1, Vec<PendingOrder>) {
+        fn into(self) -> Data {
             let (data, pending_orders) = self;
             let mut orders = UserOrders::new();
             pending_orders.into_iter().for_each(|order| {
                 orders.insert(order);
             });
-            Ok(Data {
+            Data {
                 orderbooks: data.orderbooks,
                 accounts: data.accounts,
                 merkle_tree: data.merkle_tree,
                 current_event_id: data.current_event_id,
                 tvl: data.tvl,
                 orders,
-            })
+            }
         }
     }
 }

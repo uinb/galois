@@ -57,7 +57,7 @@ pub fn init(receiver: FromBackend, sender: ToBackend, shared: Shared) {
     log::info!("bye!");
 }
 
-/// relay the messages from backend to session, need to switch the runtime using async
+/// relay the messages from backend to session, using block_on to switch to async
 fn relay(receiver: FromBackend, sessions: Arc<DashMap<u64, ToSession>>) -> Result<()> {
     loop {
         let (session_id, msg) = receiver.recv()?;
