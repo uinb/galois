@@ -43,10 +43,10 @@ mod v1_to_v2 {
             futures::executor::block_on(async move { Pool::connect_with(option).await.unwrap() });
         let mut pendings = vec![];
         let pool = std::sync::Arc::new(pool);
-        for (symbol, _) in data.orderbooks.iter() {
+        for (symbol, orderbook) in data.orderbooks.iter() {
             let sql = format!(
-                "select * from t_order_{}_{} where f_status in (0, 3)",
-                symbol.0, symbol.1
+                "select * from t_order_{}_{} where f_status in (0, 3) and f_id <= {}",
+                symbol.0, symbol.1, orderbook.max_id,
             );
             let s = *symbol;
             let p = pool.clone();
