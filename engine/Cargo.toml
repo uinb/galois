@@ -8,7 +8,7 @@ repository = "https://github.com/uinb/galois"
 description = "High performance matching system"
 
 [features]
-default = ["v1-to-v2"]
+default = []
 v1-to-v2 = ["sqlx"]
 
 [dependencies]

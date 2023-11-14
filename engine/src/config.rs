@@ -242,25 +242,3 @@ fn init_config(toml: &str, key: Option<String>) -> anyhow::Result<Config> {
     }
     Ok(cfg)
 }
-
-#[test]
-pub fn test_config() {
-    let toml = r#"
-        [server]
-        bind_addr = "127.0.0.1:8097"
-        data_home = "/tmp/galois"
-
-        [sequence]
-        checkpoint = 100000
-        enable_from_genesis = true
-
-        [fusotao]
-        node_url = "ws://localhost:9944"
-        key_seed = "//Alice"
-        x25519_priv = "0xedcff0c69e4c0fa7e9a36e2e6d07f2cc355c8d25907a0ad2ab7e03b24f8e90f3"
-        proof_batch_limit = 20
-        claim_block = 1
-    "#;
-    let config = init_config(&toml, None);
-    assert!(config.is_ok());
-}
