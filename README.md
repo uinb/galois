@@ -5,26 +5,33 @@
 
 ## Introduction
 
-Galois is an extremely high performance matching engine written in Rust which uses event-sourcing pattern to handle tens of thousands of orders per second or even better, depending on the performance of persistence. 
+Galois is an extremely high-performance matching engine written in Rust which uses event-sourcing pattern to handle tens of thousands of orders per second or even better.
+
+The internal structure of Galois looks like below:
 
 ```
+
            sidecar   chain <-+
-             |         |      \
+             ^         |      \
              |         |       \
              v         v        \
-   +-----> server   scanner      +
+   +---->  server   scanner      +
    |          \       /          |
    |\          \     /           |
    | \          \   /            |
-   |  +-<-    sequencer          |
+   |  +--     sequencer          |
    +              |              |
    |\             |              |
    | \            v              |
-   |  +-<-    executor           |
-   +            /   \            +
-    \          /     \          /
-     \        /       \        /
-      +-<- output  committer -+
+   |  +--      executor          |
+   |              |              |
+   |              |              |
+   |              v              |
+   +           rocksdb           +
+    \           /   \           /
+     \         /     \         /
+      \       /       \       /
+       +-- market committer -+
 
 ```
 
