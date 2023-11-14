@@ -43,7 +43,7 @@ impl PendingOrder {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct UserOrders {
     pub orders: HashMap<(UserId, Symbol), HashMap<OrderId, PendingOrder>>,
 }

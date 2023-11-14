@@ -657,6 +657,7 @@ mod test {
             merkle_tree,
             current_event_id: 0,
             tvl: Amount::zero(),
+            orders: Default::default(),
         };
         let cmd0 = AssetsCmd {
             user_id: UserId::from_low_u64_be(1),
@@ -1112,6 +1113,7 @@ mod test {
             merkle_tree,
             current_event_id: 0,
             tvl: Amount::zero(),
+            orders: Default::default(),
         };
 
         // alice ask p=10, a=0.5
@@ -1450,6 +1452,7 @@ mod test {
             merkle_tree,
             current_event_id: 0,
             tvl: Amount::zero(),
+            orders: Default::default(),
         };
 
         // alice ask p=10, a=1.1
