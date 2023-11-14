@@ -62,14 +62,16 @@ fn relay(receiver: FromBackend, sessions: Arc<DashMap<u64, ToSession>>) -> Resul
     loop {
         let (session_id, msg) = receiver.recv()?;
         if session_id == 0 {
-            // TODO
-            continue;
-        }
-        log::debug!("session relayer received msg: {:?}", msg);
-        if let Some(mut session) = sessions.get_mut(&session_id) {
-            let _ = task::block_on(session.send(msg));
+            sessions.iter_mut().for_each(|mut s| {
+                let _ = task::block_on(s.send(msg.clone()));
+            });
         } else {
-            log::info!("received reply, but session {} not found", session_id);
+            log::debug!("session relayer received msg: {:?}", msg);
+            if let Some(mut session) = sessions.get_mut(&session_id) {
+                let _ = task::block_on(session.send(msg));
+            } else {
+                log::info!("received reply, but session {} not found", session_id);
+            }
         }
     }
 }

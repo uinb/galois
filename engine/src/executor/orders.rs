@@ -12,28 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{core::*, matcher::*, orderbook::*, output::*};
+use crate::{core::*, matcher::*, output::*};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PendingOrder {
-    order_id: u64,
-    symbol: Symbol,
-    direction: u8,
-    create_timestamp: u64,
-    amount: Decimal,
-    price: Decimal,
-    status: u8,
-    matched_quote_amount: Decimal,
-    matched_base_amount: Decimal,
-    base_fee: Decimal,
-    quote_fee: Decimal,
+    pub order_id: OrderId,
+    pub user_id: UserId,
+    pub symbol: Symbol,
+    pub direction: u8,
+    pub create_timestamp: u64,
+    pub amount: Decimal,
+    pub price: Decimal,
+    pub status: u8,
+    pub matched_quote_amount: Decimal,
+    pub matched_base_amount: Decimal,
+    pub base_fee: Decimal,
+    pub quote_fee: Decimal,
 }
 
 impl PendingOrder {
-    pub fn reduce(&mut self, cr: &Output) {
+    pub fn update(&mut self, cr: &Output) {
         self.matched_base_amount += cr.base_delta.abs();
         self.matched_quote_amount += cr.quote_delta.abs();
         self.status = cr.state.into();
@@ -68,10 +69,17 @@ impl UserOrders {
             .insert(order.order_id, order);
     }
 
-    pub fn remove(&mut self, user_id: UserId, symbol: Symbol, order_id: OrderId) {
-        self.orders
+    pub fn remove(
+        &mut self,
+        user_id: UserId,
+        symbol: Symbol,
+        order_id: OrderId,
+    ) -> Option<PendingOrder> {
+        let order = self
+            .orders
             .get_mut(&(user_id, symbol))
-            .map(|orders| orders.remove(&order_id));
+            .map(|orders| orders.remove(&order_id))
+            .flatten();
         if self
             .orders
             .get(&(user_id, symbol))
@@ -80,26 +88,35 @@ impl UserOrders {
         {
             self.orders.remove(&(user_id, symbol));
         }
+        order
     }
 
-    pub fn merge(&mut self, cr: &Output) {
+    pub fn merge(&mut self, cr: &Output) -> Option<PendingOrder> {
         match cr.state {
-            State::Placed => {}
-            State::Canceled => {
-                self.remove(cr.user_id, cr.symbol, cr.order_id);
-            }
-            State::Filled => {
-                self.remove(cr.user_id, cr.symbol, cr.order_id);
+            State::Placed => self
+                .orders
+                .get(&(cr.user_id, cr.symbol))
+                .map(|orders| orders.get(&cr.order_id))
+                .flatten()
+                .cloned(),
+            State::Canceled | State::Filled | State::ConditionallyCanceled => {
+                let order = self.remove(cr.user_id, cr.symbol, cr.order_id);
+                order.map(|mut o| {
+                    o.update(&cr);
+                    o
+                })
             }
             State::PartiallyFilled => {
                 self.orders
                     .entry((cr.user_id, cr.symbol))
                     .or_insert(Default::default())
                     .entry(cr.order_id)
-                    .and_modify(|o| o.reduce(&cr));
-            }
-            State::ConditionallyCanceled => {
-                self.remove(cr.user_id, cr.symbol, cr.order_id);
+                    .and_modify(|o| o.update(&cr));
+                self.orders
+                    .get(&(cr.user_id, cr.symbol))
+                    .map(|orders| orders.get(&cr.order_id))
+                    .flatten()
+                    .cloned()
             }
         }
     }

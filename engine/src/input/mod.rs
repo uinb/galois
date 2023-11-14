@@ -189,6 +189,12 @@ impl TryInto<Event> for Input {
                 self.session,
                 self.req_id,
             )),
+            QUERY_USER_ORDERS => Ok(Event::QueryUserOrders(
+                self.cmd.symbol().ok_or(anyhow!(""))?,
+                UserId::from_str(self.cmd.user_id.as_ref().ok_or(anyhow!(""))?)?,
+                self.session,
+                self.req_id,
+            )),
             QUERY_BALANCE => Ok(Event::QueryBalance(
                 UserId::from_str(self.cmd.user_id.as_ref().ok_or(anyhow!(""))?)?,
                 self.cmd.currency.ok_or(anyhow!(""))?,
@@ -226,6 +232,7 @@ pub enum Event {
     QueryBalance(UserId, Currency, u64, u64),
     QueryAccounts(UserId, u64, u64),
     QueryExchangeFee(Symbol, u64, u64),
+    QueryUserOrders(Symbol, UserId, u64, u64),
     // the `EventId` has been executed
     Dump(EventId),
 }
@@ -321,6 +328,7 @@ pub mod cmd {
     pub const GET_X25519_KEY: u32 = 25;
     pub const GET_NONCE_FOR_BROKER: u32 = 26;
     pub const QUERY_FUSOTAO_PROGRESS: u32 = 27;
+    pub const QUERY_USER_ORDERS: u32 = 28;
 }
 
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone, Default)]
@@ -417,7 +425,7 @@ impl Command {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Message {
     pub req_id: u64,
     pub payload: Vec<u8>,

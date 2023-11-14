@@ -35,7 +35,7 @@ use std::{
 use thiserror::Error;
 
 type DriverChannel = Receiver<Event>;
-type MarketChannel = Sender<(bool, Vec<Output>)>;
+type MarketChannel = Sender<Vec<Output>>;
 type ResponseChannel = Sender<(u64, Message)>;
 
 #[derive(Debug, Error)]
@@ -79,7 +79,6 @@ pub fn init(recv: DriverChannel, market: MarketChannel, response: ResponseChanne
     });
 }
 
-// TODO update pending orders
 fn do_execute(
     event: Event,
     data: &mut Data,
@@ -121,6 +120,20 @@ fn do_execute(
                 cmd.amount,
                 cmd.ask_or_bid,
             );
+            data.orders.insert(PendingOrder {
+                order_id: mr.taker.order_id,
+                user_id: cmd.user_id,
+                symbol: cmd.symbol,
+                direction: mr.taker.ask_or_bid.into(),
+                create_timestamp: time,
+                amount: cmd.amount,
+                price: cmd.price,
+                status: OrderState::Placed.into(),
+                matched_quote_amount: Decimal::zero(),
+                matched_base_amount: Decimal::zero(),
+                base_fee: Decimal::zero(),
+                quote_fee: Decimal::zero(),
+            });
             // compatiable with old version since we don't use mysql auto increment id anymore
             if session != 0 {
                 response
@@ -145,6 +158,15 @@ fn do_execute(
                 &mr,
                 time,
             );
+            for cr in out.iter() {
+                let o = data.orders.merge(&cr);
+                if session != 0 {
+                    // broadcast to all sessions
+                    response
+                        .send((0, Message::new(0, to_vec(&o).unwrap_or_default())))
+                        .map_err(|_| EventsError::Interrupted(id))?;
+                }
+            }
             let (maker_fee, taker_fee) = (orderbook.maker_fee, orderbook.taker_fee);
             let proof = prover::prove_trade_cmd(
                 data,
@@ -163,9 +185,7 @@ fn do_execute(
             prover::save_proof(proof)
                 .inspect_err(|e| log::error!("{}", e))
                 .map_err(|_| EventsError::Interrupted(id))?;
-            market
-                .send((session != 0, out))
-                .map_err(|_| EventsError::Interrupted(id))?;
+            market.send(out).map_err(|_| EventsError::Interrupted(id))?;
             Ok(())
         }
         Event::Cancel(id, cmd, time, session, req_id) => {
@@ -230,6 +250,9 @@ fn do_execute(
                 &mr,
                 time,
             );
+            for cr in out.iter() {
+                data.orders.merge(&cr);
+            }
             let proof = prover::prove_trade_cmd(
                 data,
                 cmd.nonce,
@@ -247,9 +270,7 @@ fn do_execute(
             prover::save_proof(proof)
                 .inspect_err(|e| log::error!("{}", e))
                 .map_err(|_| EventsError::Interrupted(id))?;
-            market
-                .send((session != 0, out))
-                .map_err(|_| EventsError::Interrupted(id))?;
+            market.send(out).map_err(|_| EventsError::Interrupted(id))?;
             Ok(())
         }
         Event::TransferOut(id, cmd) => {
@@ -377,6 +398,12 @@ fn do_execute(
                     .map_or(vec![], |order| to_vec(order).unwrap_or_default()),
                 None => vec![],
             };
+            let _ = response.send((session, Message::new(req_id, v)));
+            Ok(())
+        }
+        Event::QueryUserOrders(symbol, user_id, session, req_id) => {
+            let o = data.orders.list(user_id, symbol);
+            let v = to_vec(&o).unwrap_or_default();
             let _ = response.send((session, Message::new(req_id, v)));
             Ok(())
         }

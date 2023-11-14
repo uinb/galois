@@ -38,7 +38,8 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
                 .map_err(handle_error)?;
             let symbol = Symbol::decode(&mut symbol.as_slice())
                 .map_err(|_| anyhow::anyhow!("invalid symbol"))?;
-            db::query_pending_orders(&ctx.db, symbol, &user_id)
+            ctx.backend
+                .query_pending_orders(symbol, &user_id)
                 .await
                 .map(|r| {
                     r.into_iter()
@@ -217,6 +218,39 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
         })
         .unwrap();
     module
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, Eq, PartialEq, Encode)]
+pub struct PendingOrderWrapper {
+    order_id: u64,
+    symbol: Symbol,
+    direction: u8,
+    create_timestamp: u64,
+    amount: String,
+    price: String,
+    status: u16,
+    matched_quote_amount: String,
+    matched_base_amount: String,
+    base_fee: String,
+    quote_fee: String,
+}
+
+impl From<PendingOrder> for PendingOrderWrapper {
+    fn from(order: PendingOrder) -> Self {
+        Self {
+            order_id: order.order_id,
+            symbol: order.symbol,
+            direction: order.direction,
+            create_timestamp: order.create_timestamp,
+            amount: order.amount.to_string(),
+            price: order.price.to_string(),
+            status: order.status.into(),
+            matched_quote_amount: order.matched_quote_amount.to_string(),
+            matched_base_amount: order.matched_base_amount.to_string(),
+            base_fee: order.base_fee.to_string(),
+            quote_fee: order.quote_fee.to_string(),
+        }
+    }
 }
 
 #[derive(Eq, PartialEq, Clone, Encode, Decode, Debug, Serialize, Deserialize)]

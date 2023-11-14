@@ -267,13 +267,17 @@ pub mod v1 {
 
         fn try_into(self) -> Result<Data, Self::Error> {
             let (data, pending_orders) = self;
-            // TODO
+            let mut orders = UserOrders::new();
+            pending_orders.into_iter().for_each(|order| {
+                orders.insert(order);
+            });
             Ok(Data {
                 orderbooks: data.orderbooks,
                 accounts: data.accounts,
                 merkle_tree: data.merkle_tree,
                 current_event_id: data.current_event_id,
                 tvl: data.tvl,
+                orders,
             })
         }
     }
