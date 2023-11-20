@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
     pub prover: String,
-    pub db: String,
+    pub db_dir: String,
     pub bind_addr: String,
 }
 
@@ -27,46 +27,14 @@ pub struct Config {
 pub struct Cli {
     #[arg(short('c'), long("config"), required = true, value_name = "FILE")]
     pub file: std::path::PathBuf,
-    #[arg(long)]
-    pub skip_decrypt: bool,
-}
-
-impl Config {
-    fn decrypt(&mut self, key: &str) -> anyhow::Result<()> {
-        use magic_crypt::MagicCryptTrait;
-        let mc = magic_crypt::new_magic_crypt!(key, 64);
-        let dec = mc.decrypt_base64_to_string(&self.db)?;
-        self.db.replace_range(.., &dec);
-        Ok(())
-    }
-
-    #[allow(dead_code)]
-    fn encrypt(&mut self, key: &str) -> anyhow::Result<()> {
-        use magic_crypt::MagicCryptTrait;
-        let mc = magic_crypt::new_magic_crypt!(key, 64);
-        let enc = mc.encrypt_str_to_base64(&self.db);
-        self.db.replace_range(.., &enc);
-        Ok(())
-    }
 }
 
 pub fn init_config_file() -> anyhow::Result<Config> {
     let opts = Cli::parse();
-    if opts.skip_decrypt {
-        init_config(&std::fs::read_to_string(&opts.file)?, None)
-    } else {
-        let key = std::env::var_os("MAGIC_KEY").ok_or(anyhow::anyhow!("env MAGIC_KEY not set"))?;
-        init_config(
-            &std::fs::read_to_string(&opts.file)?,
-            key.to_str().map(|s| s.to_string()),
-        )
-    }
+    init_config(&std::fs::read_to_string(&opts.file)?)
 }
 
-fn init_config(toml: &str, key: Option<String>) -> anyhow::Result<Config> {
-    let mut cfg: Config = toml::from_str(toml)?;
-    if let Some(key) = key {
-        cfg.decrypt(&key)?;
-    }
+fn init_config(toml: &str) -> anyhow::Result<Config> {
+    let cfg: Config = toml::from_str(toml)?;
     Ok(cfg)
 }

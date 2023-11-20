@@ -12,26 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::errors::CustomRpcError;
 use crate::{
     backend::BackendConnection,
     config::Config,
-    // TODO remove
     db,
     endpoint::{PendingOrderWrapper, TradingCommand},
-    AccountId32,
-    Sr25519Pair,
-    Sr25519Public,
-    Sr25519Signature,
+    errors::CustomRpcError,
+    AccountId32, Sr25519Pair, Sr25519Public, Sr25519Signature,
 };
 use dashmap::DashMap;
 use galois_engine::{core::*, fusotao::OffchainSymbol, orders::PendingOrder};
 use hyper::{Body, Request, Response};
 use parity_scale_codec::{Decode, Encode};
+use rocksdb::DB;
 use rust_decimal::Decimal;
 use sp_core::crypto::{Pair as Crypto, Ss58Codec};
-use sqlx::mysql::MySqlConnectOptions;
-use sqlx::{ConnectOptions, MySql, Pool};
 use std::{
     collections::BTreeSet,
     error::Error,
@@ -52,7 +47,7 @@ use x25519_dalek::StaticSecret;
 pub struct Context {
     pub backend: BackendConnection,
     pub x25519: StaticSecret,
-    pub db: Pool<MySql>,
+    pub db: DB,
     pub subscribers: Arc<DashMap<String, UnboundedSender<(String, PendingOrderWrapper)>>>,
     pub session_nonce: Arc<DashMap<String, Session>>,
     pub markets: Arc<DashMap<Symbol, (Arc<AtomicBool>, OffchainSymbol)>>,
@@ -64,12 +59,7 @@ impl Context {
         let backend = BackendConnection::new(config.prover, broadcast);
         let conn = backend.clone();
         let x25519 = futures::executor::block_on(async move { conn.get_x25519().await }).unwrap();
-        let db = futures::executor::block_on(async {
-            let mut option: MySqlConnectOptions = config.db.parse()?;
-            option.disable_statement_logging();
-            Pool::connect_with(option).await
-        })
-        .unwrap();
+        let db = DB::open_default(&config.db_dir).unwrap();
         let subscribers = Arc::new(DashMap::<
             String,
             UnboundedSender<(String, PendingOrderWrapper)>,
@@ -120,13 +110,6 @@ impl Context {
         }
     }
 
-    pub async fn get_trading_key(&self, user_id: &String) -> anyhow::Result<Vec<u8>> {
-        db::query_trading_key(&self.db, user_id)
-            .await
-            .map(|k| crate::hexstr_to_vec(&k))
-            .flatten()
-    }
-
     pub async fn get_user_nonce(&self, user_id: &String) -> anyhow::Result<u32> {
         let session = self
             .session_nonce
@@ -135,20 +118,22 @@ impl Context {
         Ok(session.value().get_nonce().await)
     }
 
+    // FIXME maybe we could calculate the shared secret on each request
+    /// the users' curve25519 pubkey is one-time, so is the trading key(shared secret of curve25519)
     pub async fn verify_trading_signature(
         &self,
         data: &[u8],
-        user_id: &String,
+        user_id: &AccountId32,
         sig: &[u8],
         nonce: &[u8],
     ) -> anyhow::Result<()> {
         let mut decode = nonce.clone();
         let n = u32::decode(&mut decode)?;
-        let key = self.get_trading_key(user_id).await?;
+        let key = db::query_trading_key(&self.db, user_id)?;
         // FIXME when sidecar reboot, the session_nonce will be empty
         let session = self
             .session_nonce
-            .get(user_id)
+            .get(&user_id.to_ss58check())
             .ok_or(CustomRpcError::user_not_found())?;
         session.value().try_occupy_nonce(n).await?;
         let mut to_be_signed = vec![];

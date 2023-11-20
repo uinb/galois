@@ -26,7 +26,7 @@ parity-scale-codec = { version = "3", features = ["derive"] }
 env_logger = "0.10.1"
 log = { version = "0.4", features = ["serde"] }
 x25519-dalek = "1.1.1"
-sqlx = { version = "0.6.2", features = ["runtime-tokio-rustls", "mysql", "decimal", "chrono"] }
+rocksdb = "0.21"
 hex = "0.4"
 rand = "0.8.5"
 hyper = "0.14"

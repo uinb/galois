@@ -1654,13 +1654,13 @@ dependencies = [
  "magic-crypt",
  "parity-scale-codec",
  "rand 0.8.5",
+ "rocksdb",
  "rust_decimal",
  "serde",
  "serde_json",
  "sp-core",
  "sp-io",
  "sp-keyring",
- "sqlx",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -4778,8 +4778,6 @@ dependencies = [
  "rand 0.8.5",
  "rsa",
  "rust_decimal",
- "rustls",
- "rustls-pemfile",
  "sha1",
  "sha2 0.10.6",
  "smallvec 1.10.0",
@@ -4787,9 +4785,7 @@ dependencies = [
  "sqlx-rt",
  "stringprep",
  "thiserror",
- "tokio-stream",
  "url",
- "webpki-roots",
 ]
 
 [[package]]
@@ -4816,11 +4812,6 @@ name = "sqlx-rt"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "804d3f245f894e61b1e6263c84b23ca675d96753b5abfd5cc8597d86806e8024"
-dependencies = [
- "once_cell",
- "tokio",
- "tokio-rustls",
-]
 
 [[package]]
 name = "ss58-registry"
