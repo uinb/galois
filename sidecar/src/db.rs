@@ -12,33 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use serde::{Deserialize, Serialize};
-use sqlx::{MySql, Pool};
+use crate::AccountId32;
 
-#[derive(Clone, Serialize, Deserialize, Debug, Eq, PartialEq, sqlx::FromRow)]
-pub struct TradingKey {
-    pub f_user_id: String,
-    pub f_trading_key: String,
+pub fn query_trading_key(db: &rocksdb::DB, user_id: &AccountId32) -> anyhow::Result<Vec<u8>> {
+    db.get(user_id)?.ok_or(anyhow::anyhow!("Key expired"))
 }
 
-pub async fn query_trading_key(pool: &Pool<MySql>, user_id: &String) -> anyhow::Result<String> {
-    let r =
-        sqlx::query_as::<_, TradingKey>("select * from t_trading_key where f_user_id=? limit 1")
-            .bind(user_id)
-            .fetch_one(pool)
-            .await?;
-    Ok(r.f_trading_key)
-}
-
-pub async fn save_trading_key(
-    pool: &Pool<MySql>,
-    user_id: &String,
-    key: &String,
+pub fn save_trading_key(
+    db: &rocksdb::DB,
+    user_id: &AccountId32,
+    key: [u8; 32],
 ) -> anyhow::Result<()> {
-    sqlx::query("replace into t_trading_key(f_user_id,f_trading_key) values(?,?)")
-        .bind(user_id)
-        .bind(key)
-        .execute(pool)
-        .await?;
+    db.put(user_id, key)?;
     Ok(())
 }

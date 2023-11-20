@@ -29,7 +29,7 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
         .register_async_method("query_pending_orders", |p, ctx| async move {
             let (symbol, user_id, signature, nonce) =
                 p.parse::<(String, String, String, String)>()?;
-            let user_id = crate::try_into_ss58(user_id)?;
+            let user_id = crate::try_into_account(user_id)?;
             let symbol = crate::hexstr_to_vec(&symbol)?;
             let signature = crate::hexstr_to_vec(&signature)?;
             let nonce = crate::hexstr_to_vec(&nonce)?;
@@ -39,7 +39,7 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
             let symbol = Symbol::decode(&mut symbol.as_slice())
                 .map_err(|_| anyhow::anyhow!("invalid symbol"))?;
             ctx.backend
-                .query_pending_orders(symbol, &user_id)
+                .query_pending_orders(symbol, &user_id.to_ss58check())
                 .await
                 .map(|r| {
                     r.into_iter()
@@ -52,14 +52,14 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
     module
         .register_async_method("query_account", |p, ctx| async move {
             let (user_id, signature, nonce) = p.parse::<(String, String, String)>()?;
-            let user_id = crate::try_into_ss58(user_id)?;
+            let user_id = crate::try_into_account(user_id)?;
             let signature = crate::hexstr_to_vec(&signature)?;
             let nonce = crate::hexstr_to_vec(&nonce)?;
             ctx.verify_trading_signature(&[], &user_id, &signature, &nonce)
                 .await
                 .map_err(handle_error)?;
             ctx.backend
-                .get_account(&user_id)
+                .get_account(&user_id.to_ss58check())
                 .await
                 .map(|r| {
                     r.into_iter()
@@ -73,7 +73,8 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
         .register_async_method("trade", |p, ctx| async move {
             let (user_id, cmd, signature, nonce, relayer) =
                 p.parse::<(String, String, String, String, String)>()?;
-            let user_id = crate::try_into_ss58(user_id)?;
+            let user_id = crate::try_into_account(user_id)?;
+            let ss58 = user_id.to_ss58check();
             let signature = crate::hexstr_to_vec(&signature)?;
             let nonce = crate::hexstr_to_vec(&nonce)?;
             let hex = crate::hexstr_to_vec(&cmd)?;
@@ -82,11 +83,9 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
             ctx.verify_trading_signature(&hex, &user_id, &signature, &nonce)
                 .await
                 .map_err(handle_error)?;
-            ctx.validate_cmd(&user_id, &cmd)
-                .await
-                .map_err(handle_error)?;
+            ctx.validate_cmd(&ss58, &cmd).await.map_err(handle_error)?;
             ctx.backend
-                .submit_trading_command(user_id, cmd, relayer)
+                .submit_trading_command(ss58, cmd, relayer)
                 .await
                 .map(|id| crate::to_hexstr(id))
                 .map_err(handle_error)
@@ -121,8 +120,7 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
                 .map_err(|_| anyhow::anyhow!("Invalid public key"))?;
             let user_x25519_pub = x25519_dalek::PublicKey::from(user_x25519_pub);
             let key = ctx.x25519.diffie_hellman(&user_x25519_pub).to_bytes();
-            let key = format!("0x{}", hex::encode(&key));
-            db::save_trading_key(&ctx.db, &user_id.to_ss58check(), &key).await?;
+            db::save_trading_key(&ctx.db, &user_id, key)?;
             let init_nonce = rand::thread_rng().gen_range(1..10000);
             ctx.session_nonce
                 .insert(user_id.to_ss58check(), Session::new(init_nonce));
@@ -154,8 +152,7 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
                 .map_err(|_| anyhow::anyhow!("Invalid public key"))?;
             let bot_x25519_pub = x25519_dalek::PublicKey::from(bot_x25519_pub);
             let key = ctx.x25519.diffie_hellman(&bot_x25519_pub).to_bytes();
-            let key = format!("0x{}", hex::encode(&key));
-            db::save_trading_key(&ctx.db, &sub_id.to_ss58check(), &key).await?;
+            db::save_trading_key(&ctx.db, &sub_id, key)?;
             let init_nonce = rand::thread_rng().gen_range(1..10000);
             ctx.session_nonce
                 .insert(sub_id.to_ss58check(), Session::new(init_nonce));
@@ -176,7 +173,7 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
         .register_async_method("append_user", |p, ctx| async move {
             let (user_id, signature, nonce, relayer) =
                 p.parse::<(String, String, String, String)>()?;
-            let user_id = crate::try_into_ss58(user_id)?;
+            let user_id = crate::try_into_account(user_id)?;
             let signature = crate::hexstr_to_vec(&signature)?;
             let nonce = crate::hexstr_to_vec(&nonce)?;
             ctx.verify_trading_signature(&[], &user_id, &signature, &nonce)
@@ -187,7 +184,7 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
                 .get(&format!("broker:{}", relayer))
                 .map(|b| b.value().clone())
                 .ok_or_else(|| anyhow::anyhow!("Broker not initialized."))?;
-            ctx.subscribers.insert(user_id, tx);
+            ctx.subscribers.insert(user_id.to_ss58check(), tx);
             Ok(())
         })
         .unwrap();
