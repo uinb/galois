@@ -20,7 +20,7 @@ pub mod orders;
 
 use crate::{
     core::*,
-    input::{Event, Message},
+    input::{self, Event, Message},
     orderbook::*,
     output::Output,
     prover, snapshot,
@@ -64,7 +64,7 @@ pub fn init(recv: DriverChannel, market: MarketChannel, response: ResponseChanne
                     log::debug!("event {} rejected: {}", id, e);
                     let msg = json!({"error": e.to_string()});
                     let v = to_vec(&msg).unwrap_or_default();
-                    let _ = response.send((session, Message::new(req_id, v)));
+                    let _ = response.send((session, Message::new_req(req_id, v)));
                 }
                 Err(EventsError::EventIgnored(id, e)) => {
                     log::info!("event {} ignored: {}", id, e);
@@ -139,7 +139,7 @@ fn do_execute(
                 response
                     .send((
                         session,
-                        Message::new(
+                        Message::new_req(
                             req_id,
                             to_vec(&json!({
                                 "id": mr.taker.order_id
@@ -163,7 +163,13 @@ fn do_execute(
                 if session != 0 {
                     // broadcast to all sessions
                     response
-                        .send((0, Message::new(0, to_vec(&o).unwrap_or_default())))
+                        .send((
+                            0,
+                            Message::new_broadcast(
+                                input::ORDER_MATCHED,
+                                to_vec(&o).unwrap_or_default(),
+                            ),
+                        ))
                         .map_err(|_| EventsError::Interrupted(id))?;
                 }
             }
@@ -231,7 +237,7 @@ fn do_execute(
                 response
                     .send((
                         session,
-                        Message::new(
+                        Message::new_req(
                             req_id,
                             to_vec(&json!({
                                 "id": cmd.order_id
@@ -398,25 +404,25 @@ fn do_execute(
                     .map_or(vec![], |order| to_vec(order).unwrap_or_default()),
                 None => vec![],
             };
-            let _ = response.send((session, Message::new(req_id, v)));
+            let _ = response.send((session, Message::new_req(req_id, v)));
             Ok(())
         }
         Event::QueryUserOrders(symbol, user_id, session, req_id) => {
             let o = data.orders.list(user_id, symbol);
             let v = to_vec(&o).unwrap_or_default();
-            let _ = response.send((session, Message::new(req_id, v)));
+            let _ = response.send((session, Message::new_req(req_id, v)));
             Ok(())
         }
         Event::QueryBalance(user_id, currency, session, req_id) => {
             let a = assets::get_balance_to_owned(&data.accounts, &user_id, currency);
             let v = to_vec(&a).unwrap_or_default();
-            let _ = response.send((session, Message::new(req_id, v)));
+            let _ = response.send((session, Message::new_req(req_id, v)));
             Ok(())
         }
         Event::QueryAccounts(user_id, session, req_id) => {
             let a = assets::get_account_to_owned(&data.accounts, &user_id);
             let v = to_vec(&a).unwrap_or_default();
-            let _ = response.send((session, Message::new(req_id, v)));
+            let _ = response.send((session, Message::new_req(req_id, v)));
             Ok(())
         }
         Event::QueryExchangeFee(symbol, session, req_id) => {
@@ -433,7 +439,7 @@ fn do_execute(
                 }
             }
             let v = to_vec(&v).unwrap_or_default();
-            let _ = response.send((session, Message::new(req_id, v)));
+            let _ = response.send((session, Message::new_req(req_id, v)));
             Ok(())
         }
         Event::Dump(id) => {

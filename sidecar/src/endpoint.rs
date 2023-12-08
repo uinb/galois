@@ -215,6 +215,36 @@ pub fn export_rpc(context: Context) -> RpcModule<Context> {
         })
         .unwrap();
     module
+        .register_subscription(
+            "sub_orderbooks",
+            "",
+            "unsub_orderbooks",
+            |p, mut sink, ctx| {
+                let (broker,) = p.parse::<(String,)>()?;
+                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+                sink.accept()?;
+                let depth = ctx.orderbook_depth.clone();
+                tokio::spawn(async move {
+                    loop {
+                        if let Some(symbol) = rx.recv().await {
+                            if let Some(v) = depth.get(&symbol) {
+                                match sink.send(v.value()) {
+                                    Ok(true) => {}
+                                    Ok(false) => break,
+                                    Err(e) => log::error!("Unable to serialize msg, {:?}", e),
+                                }
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                });
+                ctx.active_brokers.insert(format!("broker:{}", broker), tx);
+                Ok(())
+            },
+        )
+        .unwrap();
+    module
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Eq, PartialEq, Encode)]

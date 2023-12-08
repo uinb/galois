@@ -37,7 +37,7 @@ use x25519_dalek::StaticSecret;
 type ToBackend = Sender<Option<Req>>;
 type FromFrontend = Receiver<Option<Req>>;
 type Notifier = Sender<JsonValue>;
-type Broadcast = UnboundedSender<JsonValue>;
+type Broadcast = UnboundedSender<(u8, JsonValue)>;
 
 #[derive(Clone, Debug)]
 pub struct BackendConnection {
@@ -121,7 +121,8 @@ impl BackendConnection {
                     }
                 };
                 if req_id == 0 {
-                    let _ = broadcast.send(json);
+                    let typ = Message::get_broadcast_type(header);
+                    let _ = broadcast.send((typ, json));
                 } else if let Some((_, noti)) = req.remove(&req_id) {
                     let _ = noti.send(json).await;
                 }
@@ -145,7 +146,7 @@ impl BackendConnection {
                     req_id += 1;
                     let Req { payload, notifier } = req;
                     sink.insert(req_id, notifier);
-                    let msg = Message::new(req_id, payload);
+                    let msg = Message::new_req(req_id, payload);
                     match stream.write_all(&msg.encode()).await {
                         Ok(_) => log::debug!("write to galois -> OK"),
                         Err(e) => log::debug!("write to galois -> {:?}", e),

@@ -46,7 +46,7 @@ pub fn init(
                 }
                 current_id += 1;
             } else {
-                to_server.send((session, Message::new(req_id, vec![])))?;
+                to_server.send((session, Message::new_req(req_id, vec![])))?;
             }
         }
     });
