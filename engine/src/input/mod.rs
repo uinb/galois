@@ -211,6 +211,7 @@ impl TryInto<Event> for Input {
                 self.session,
                 self.req_id,
             )),
+            QUERY_ALL_ORDERBOOKS => Ok(Event::QueryAllOrderbooks(self.session, self.req_id)),
             DUMP => Ok(Event::Dump(self.cmd.event_id.ok_or(anyhow!(""))?)),
             _ => Err(anyhow!("Unsupported Command")),
         }
@@ -233,11 +234,23 @@ pub enum Event {
     QueryAccounts(UserId, u64, u64),
     QueryExchangeFee(Symbol, u64, u64),
     QueryUserOrders(Symbol, UserId, u64, u64),
+    QueryAllOrderbooks(u64, u64),
     // the `EventId` has been executed
     Dump(EventId),
 }
 
-impl Event {}
+impl Event {
+    pub fn should_save(&self) -> bool {
+        matches!(
+            self,
+            Self::Limit(..)
+                | Self::Cancel(..)
+                | Self::TransferOut(..)
+                | Self::TransferIn(..)
+                | Self::UpdateSymbol(..)
+        )
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LimitCmd {
@@ -329,6 +342,7 @@ pub mod cmd {
     pub const GET_NONCE_FOR_BROKER: u32 = 26;
     pub const QUERY_FUSOTAO_PROGRESS: u32 = 27;
     pub const QUERY_USER_ORDERS: u32 = 28;
+    pub const QUERY_ALL_ORDERBOOKS: u32 = 29;
 }
 
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone, Default)]
@@ -404,7 +418,11 @@ impl Command {
     pub const fn is_querying_core_data(&self) -> bool {
         matches!(
             self.cmd,
-            QUERY_ACCOUNTS | QUERY_BALANCE | QUERY_ORDER | QUERY_EXCHANGE_FEE
+            QUERY_ACCOUNTS
+                | QUERY_BALANCE
+                | QUERY_ORDER
+                | QUERY_EXCHANGE_FEE
+                | QUERY_ALL_ORDERBOOKS
         )
     }
 
@@ -418,10 +436,6 @@ impl Command {
                 | QUERY_PROVING_PERF_INDEX
                 | QUERY_SCAN_HEIGHT
         )
-    }
-
-    pub const fn is_internally_generated(&self) -> bool {
-        matches!(self.cmd, DUMP)
     }
 }
 

@@ -20,6 +20,7 @@ use galois_engine::{
     input::{cmd::*, Command, Message},
     orderbook::Order,
     orders::PendingOrder,
+    output::Depth,
 };
 use rust_decimal::Decimal;
 use serde_json::{json, to_vec, Value as JsonValue};
@@ -306,6 +307,15 @@ impl BackendConnection {
             .inspect_err(|e| log::debug!("{:?}", e))
             .map_err(|_| anyhow::anyhow!("Galois not available"))?;
         serde_json::from_value::<Vec<OffchainSymbol>>(r).map_err(|_| anyhow::anyhow!("galois?"))
+    }
+
+    pub async fn get_orderbooks(&self) -> anyhow::Result<Vec<Depth>> {
+        let r = self
+            .request(to_vec(&json!({ "cmd": QUERY_ALL_ORDERBOOKS })).expect("jsonser;qed"))
+            .await
+            .inspect_err(|e| log::debug!("{:?}", e))
+            .map_err(|_| anyhow::anyhow!("Galois not available"))?;
+        serde_json::from_value::<Vec<Depth>>(r).map_err(|_| anyhow::anyhow!("galois?"))
     }
 
     pub async fn get_x25519(&self) -> anyhow::Result<StaticSecret> {

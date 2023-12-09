@@ -21,7 +21,7 @@ use crate::{
     AccountId32, Sr25519Pair, Sr25519Public, Sr25519Signature,
 };
 use dashmap::DashMap;
-use galois_engine::{core::*, fusotao::OffchainSymbol, input, orders::PendingOrder};
+use galois_engine::{core::*, fusotao::OffchainSymbol, input, orders::PendingOrder, output::Depth};
 use hyper::{Body, Request, Response};
 use parity_scale_codec::{Decode, Encode};
 use rocksdb::DB;
@@ -52,9 +52,9 @@ pub struct Context {
     // broker -> channel<symbol> map to notify the active brokers
     pub active_brokers: Arc<DashMap<String, UnboundedSender<Symbol>>>,
     // we simply maintein the symbol -> orderbook_depth map in form of string
-    pub orderbook_depth: Arc<DashMap<Symbol, String>>,
-    pub session_nonce: Arc<DashMap<String, Session>>,
+    pub orderbooks: Arc<DashMap<Symbol, Depth>>,
     pub markets: Arc<DashMap<Symbol, (Arc<AtomicBool>, OffchainSymbol)>>,
+    pub session_nonce: Arc<DashMap<String, Session>>,
 }
 
 impl Context {
@@ -68,21 +68,31 @@ impl Context {
             String,
             UnboundedSender<(String, PendingOrderWrapper)>,
         >::default());
+        let active_brokers = Arc::new(DashMap::default());
         let conn = backend.clone();
         let markets = futures::executor::block_on(async move {
             conn.get_markets().await.map(|markets| {
-                Arc::new(DashMap::from_iter(markets.into_iter().map(|m| {
-                    (m.symbol.clone(), (Arc::new(AtomicBool::new(false)), m))
-                })))
+                let map = DashMap::from_iter(
+                    markets
+                        .into_iter()
+                        .map(|m| (m.symbol.clone(), (Arc::new(AtomicBool::new(false)), m))),
+                );
+                Arc::new(map)
             })
         })
         .unwrap();
         log::debug!("Loading marketings from backend: {:?}", markets);
+        let conn = backend.clone();
+        let orderbooks = futures::executor::block_on(async move {
+            conn.get_orderbooks().await.map(|orderbooks| {
+                let map = DashMap::from_iter(orderbooks.into_iter().map(|d| (d.symbol.clone(), d)));
+                Arc::new(map)
+            })
+        })
+        .unwrap();
         let sub = subscribers.clone();
-        let active_brokers = Arc::new(DashMap::default());
-        let orderbook_depth = Arc::new(DashMap::default());
-        let depth = orderbook_depth.clone();
-        let depth_update_notifier = orderbook_depth.clone();
+        let depth = orderbooks.clone();
+        // let notify_when_depth_updated = active_brokers.clone();
         tokio::spawn(async move {
             loop {
                 let v = dispatcher.recv().await;
@@ -109,7 +119,9 @@ impl Context {
                         }
                     }
                     input::DEPTH_UPDATED => {
-                        // update depth then notify all active brokers
+                        if let Ok(d) = serde_json::from_value::<Depth>(payload) {
+                            depth.insert(d.symbol.clone(), d);
+                        }
                     }
                     _ => {}
                 }
@@ -120,10 +132,10 @@ impl Context {
             x25519,
             db,
             active_brokers,
-            orderbook_depth,
-            session_nonce: Arc::new(DashMap::default()),
+            orderbooks,
             subscribers,
             markets,
+            session_nonce: Arc::new(DashMap::default()),
         }
     }
 

@@ -449,19 +449,23 @@ fn do_execute(
             Ok(())
         }
         Event::QueryExchangeFee(symbol, session, req_id) => {
-            let mut v: HashMap<String, Fee> = HashMap::new();
-            let orderbook = data.orderbooks.get(&symbol);
-            match orderbook {
-                Some(book) => {
-                    v.insert(String::from("maker_fee"), book.maker_fee);
-                    v.insert(String::from("taker_fee"), book.taker_fee);
-                }
-                _ => {
-                    v.insert(String::from("maker_fee"), Decimal::new(0, 0));
-                    v.insert(String::from("taker_fee"), Decimal::new(0, 0));
-                }
-            }
-            let v = to_vec(&v).unwrap_or_default();
+            let (maker, taker) = data
+                .orderbooks
+                .get(&symbol)
+                .map(|b| (b.maker_fee, b.taker_fee))
+                .unwrap_or_default();
+            let map = HashMap::from([("maker_fee", maker), ("taker_fee", taker)]);
+            let v = to_vec(&map).unwrap_or_default();
+            let _ = response.send((session, Message::new_req(req_id, v)));
+            Ok(())
+        }
+        Event::QueryAllOrderbooks(session, req_id) => {
+            let depth = data
+                .orderbooks
+                .iter()
+                .map(|(s, o)| (*s, o).into())
+                .collect::<Vec<Depth>>();
+            let v = to_vec(&depth).unwrap_or_default();
             let _ = response.send((session, Message::new_req(req_id, v)));
             Ok(())
         }

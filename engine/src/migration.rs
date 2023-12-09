@@ -91,7 +91,7 @@ mod v1_to_v2 {
         if !ignore_sequences {
             let r = futures::executor::block_on(async move {
                 let sql = format!(
-                    "select f_id,f_cmd,f_status, f_time from t_sequence where f_event_id > {}",
+                    "select f_id,f_cmd,f_status,f_time from t_sequence where f_event_id > {}",
                     event_id
                 );
                 sqlx::query(&sql)
