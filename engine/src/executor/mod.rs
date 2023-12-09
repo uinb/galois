@@ -22,7 +22,7 @@ use crate::{
     core::*,
     input::{self, Event, Message},
     orderbook::*,
-    output::Output,
+    output::{Depth, Output},
     prover, snapshot,
 };
 use anyhow::anyhow;
@@ -135,6 +135,7 @@ fn do_execute(
                 quote_fee: Decimal::zero(),
             });
             // compatiable with old version since we don't use mysql auto increment id anymore
+            // session=0 indicates replaying from snapshot
             if session != 0 {
                 response
                     .send((
@@ -145,6 +146,17 @@ fn do_execute(
                                 "id": mr.taker.order_id
                             }))
                             .expect("qed;"),
+                        ),
+                    ))
+                    .map_err(|_| EventsError::Interrupted(id))?;
+                let orderbook: &_ = orderbook;
+                let depth: Depth = (cmd.symbol, orderbook).into();
+                response
+                    .send((
+                        0,
+                        Message::new_broadcast(
+                            input::DEPTH_UPDATED,
+                            to_vec(&depth).unwrap_or_default(),
                         ),
                     ))
                     .map_err(|_| EventsError::Interrupted(id))?;
@@ -243,6 +255,17 @@ fn do_execute(
                                 "id": cmd.order_id
                             }))
                             .expect("qed;"),
+                        ),
+                    ))
+                    .map_err(|_| EventsError::Interrupted(id))?;
+                let orderbook: &_ = orderbook;
+                let depth: Depth = (cmd.symbol, orderbook).into();
+                response
+                    .send((
+                        0,
+                        Message::new_broadcast(
+                            input::DEPTH_UPDATED,
+                            to_vec(&depth).unwrap_or_default(),
                         ),
                     ))
                     .map_err(|_| EventsError::Interrupted(id))?;

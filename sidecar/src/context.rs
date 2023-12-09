@@ -109,7 +109,7 @@ impl Context {
                         }
                     }
                     input::DEPTH_UPDATED => {
-                        // update depth then notify the active brokers
+                        // update depth then notify all active brokers
                     }
                     _ => {}
                 }
