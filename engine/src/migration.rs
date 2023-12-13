@@ -30,7 +30,6 @@ pub fn migrate(c: crate::config::MigrateCmd) {
 #[cfg(feature = "v1-to-v2")]
 mod v1_to_v2 {
     use crate::{config::*, core, input::Command};
-    use rust_decimal::Decimal;
     use sqlx::mysql::MySqlConnectOptions;
     use sqlx::{MySql, Pool, Row};
     use std::str::FromStr;
@@ -66,19 +65,13 @@ mod v1_to_v2 {
                                 .get::<sqlx::types::chrono::NaiveDateTime, &str>("f_timestamp")
                                 .timestamp_millis()
                                 as u64,
-                            amount: Decimal::from_str(row.get("f_amount")).unwrap(),
-                            price: Decimal::from_str(row.get("f_price")).unwrap(),
+                            amount: row.get("f_amount"),
+                            price: row.get("f_price"),
                             status: row.get("f_status"),
-                            matched_quote_amount: Decimal::from_str(
-                                row.get("f_matched_quote_amount"),
-                            )
-                            .unwrap(),
-                            matched_base_amount: Decimal::from_str(
-                                row.get("f_matched_base_amount"),
-                            )
-                            .unwrap(),
-                            base_fee: Decimal::from_str(row.get("f_base_fee")).unwrap(),
-                            quote_fee: Decimal::from_str(row.get("f_quote_fee")).unwrap(),
+                            matched_quote_amount: row.get("f_matched_quote_amount"),
+                            matched_base_amount: row.get("f_matched_base_amount"),
+                            base_fee: row.get("f_base_fee"),
+                            quote_fee: row.get("f_quote_fee"),
                         }
                     })
                     .fetch_all(p.as_ref())
