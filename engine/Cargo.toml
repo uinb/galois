@@ -9,7 +9,7 @@ description = "High performance matching system"
 
 [features]
 default = []
-v1-to-v2 = ["sqlx"]
+v1-to-v2 = ["sqlx", "tokio"]
 
 [dependencies]
 rust_decimal = { version = "1.22", features = ["serde-bincode"] }
@@ -21,6 +21,7 @@ serde_json = "1.0"
 rocksdb = "0.21"
 flate2 = { version = "1.0", features = ["zlib"], default-features = false }
 sqlx = { version = "0.6.2", features = ["mysql", "decimal", "chrono", "runtime-tokio-rustls"], optional = true }
+tokio = { version = "1", features = ["full"], optional = true }
 toml = "0.5"
 lazy_static = "1.4"
 linked-hash-map = { version = "0.5.3", features = ["serde_impl"] }
