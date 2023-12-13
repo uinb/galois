@@ -98,7 +98,7 @@ mod v1_to_v2 {
                     .map(|row: sqlx::mysql::MySqlRow| -> (u64, Command, u8) {
                         let mut cmd: Command = serde_json::from_str(row.get("f_cmd")).unwrap();
                         cmd.timestamp = Some(
-                            row.get::<sqlx::types::chrono::NaiveDateTime, &str>("f_time")
+                            row.get::<sqlx::types::chrono::NaiveDateTime, &str>("f_timestamp")
                                 .timestamp_millis() as u64,
                         );
                         (row.get("f_id"), cmd, row.get("f_status"))
