@@ -29,6 +29,9 @@ pub fn init(
         recovery
     );
     if C.dry_run.is_some() {
+        use signal_hook::{consts::SIGINT, iterator::Signals};
+        let mut signals = Signals::new(&[SIGINT]).unwrap();
+        signals.forever().next();
         return;
     }
     std::thread::spawn(move || -> anyhow::Result<()> {
