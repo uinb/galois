@@ -17,8 +17,8 @@ pub fn migrate(c: crate::config::MigrateCmd) {
         if #[cfg(feature = "v1-to-v2")] {
             use tokio::runtime::Runtime;
             let rt = Runtime::new().unwrap();
-            rt.spawn_blocking(|| {
-                v1_to_v2::migrate(c);
+            rt.block_on(async move {
+                v1_to_v2::migrate(c).await;
             });
         } else {
             println!("{:?}", c);
@@ -35,7 +35,7 @@ mod v1_to_v2 {
     use sqlx::{MySql, Pool, Row};
     use std::str::FromStr;
 
-    pub fn migrate(c: MigrateCmd) {
+    pub async fn migrate(c: MigrateCmd) {
         lazy_static::initialize(&C);
         let input_file = c.input_path;
         let output_file = c.output_path;
