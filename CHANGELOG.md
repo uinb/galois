@@ -1,4 +1,4 @@
-# v0.7.0-rc.7
+# v0.7.0-rc.8
 
 - online test of migration
 
