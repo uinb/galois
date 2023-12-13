@@ -62,7 +62,10 @@ mod v1_to_v2 {
                             user_id: core::UserId::from_str(row.get("f_user_id")).unwrap(),
                             symbol: s,
                             direction: row.get("f_order_type"),
-                            create_timestamp: row.get("f_timestamp"),
+                            create_timestamp: row
+                                .get::<sqlx::types::chrono::NaiveDateTime, &str>("f_timestamp")
+                                .timestamp_millis()
+                                as u64,
                             amount: Decimal::from_str(row.get("f_amount")).unwrap(),
                             price: Decimal::from_str(row.get("f_price")).unwrap(),
                             status: row.get("f_status"),
@@ -101,7 +104,10 @@ mod v1_to_v2 {
                 sqlx::query(&sql)
                     .map(|row: sqlx::mysql::MySqlRow| -> (u64, Command, u8) {
                         let mut cmd: Command = serde_json::from_str(row.get("f_cmd")).unwrap();
-                        cmd.timestamp = Some(row.get("f_time"));
+                        cmd.timestamp = Some(
+                            row.get::<sqlx::types::chrono::NaiveDateTime, &str>("f_time")
+                                .timestamp_millis() as u64,
+                        );
                         (row.get("f_id"), cmd, row.get("f_status"))
                     })
                     .fetch_all(pool.as_ref())
