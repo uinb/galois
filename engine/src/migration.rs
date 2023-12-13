@@ -15,7 +15,11 @@
 pub fn migrate(c: crate::config::MigrateCmd) {
     cfg_if::cfg_if! {
         if #[cfg(feature = "v1-to-v2")] {
-            v1_to_v2::migrate(c);
+            use tokio::runtime::Runtime;
+            let rt = Runtime::new().unwrap();
+            rt.spawn_blocking(|| {
+                v1_to_v2::migrate(c);
+            });
         } else {
             println!("{:?}", c);
             panic!("The binary doesn't contain the feature, please re-compile with feature `v1-to-v2` to enable");

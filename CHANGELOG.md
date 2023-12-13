@@ -1,6 +1,6 @@
-# v0.7.0-rc.0
+# v0.7.0-rc.1
 
-- bump v0.7.0-rc.0, see[]()
+- online test of migration
 
 # v0.5.1
 
