@@ -91,7 +91,7 @@ mod v1_to_v2 {
         if !ignore_sequences {
             let mut cursor = event_id;
             loop {
-                new = migrate_sequences(&pool, cursor, 1000).await;
+                let new = migrate_sequences(&pool, cursor, 1000).await;
                 log::info!("migrating sequences {} to {}", cursor, new);
                 if cursor == new {
                     break;
