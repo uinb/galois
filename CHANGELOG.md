@@ -1,3 +1,7 @@
+# v0.6.2
+
+- manually dump so we could migrate the snapshot to v0.7.x
+
 # v0.6.1
 
 - enable amm

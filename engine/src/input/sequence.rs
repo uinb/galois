@@ -165,6 +165,7 @@ impl TryInto<Event> for Sequence {
                 },
                 self.timestamp,
             )),
+            DUMP => Ok(Event::Dump(self.id, self.timestamp)),
             // CANCEL_ALL => Ok(Event::CancelAll(
             //     self.id,
             //     self.cmd.symbol().ok_or(anyhow!(""))?,
@@ -345,6 +346,7 @@ pub enum Event {
     TransferIn(EventId, AssetsCmd, Timestamp),
     UpdateSymbol(EventId, SymbolCmd, Timestamp),
     CancelAll(EventId, Symbol, Timestamp),
+    Dump(EventId, Timestamp),
 }
 
 impl Event {
@@ -364,6 +366,7 @@ impl Event {
             Event::TransferIn(id, _, _) => *id,
             Event::UpdateSymbol(id, _, _) => *id,
             Event::CancelAll(id, _, _) => *id,
+            Event::Dump(id, _) => *id,
         }
     }
 }

@@ -337,6 +337,10 @@ fn do_event(
             }
             Ok(())
         }
+        Event::Dump(id, time) => {
+            snapshot::dump(id, time, data);
+            Ok(())
+        }
     }
 }
 
