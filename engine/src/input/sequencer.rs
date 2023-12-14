@@ -48,10 +48,10 @@ pub fn init(
                     if current_id % C.sequence.checkpoint == 0 {
                         to_executor.send(Event::Dump(current_id))?;
                     }
-                    current_id += 1;
                 } else {
                     to_executor.send(event)?;
                 }
+                current_id += 1;
             } else {
                 to_server.send((session, Message::new_req(req_id, vec![])))?;
             }
