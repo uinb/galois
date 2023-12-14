@@ -104,24 +104,22 @@ mod v1_to_v2 {
     }
 
     async fn migrate_sequences(pool: &Pool<MySql>, event_id: u64, limit: usize) -> u64 {
-        let r = futures::executor::block_on(async move {
-            let sql = format!(
-                "select f_id,f_cmd,f_status,f_timestamp from t_sequence where f_id > {} limit {}",
-                event_id, limit
-            );
-            sqlx::query(&sql)
-                .map(|row: sqlx::mysql::MySqlRow| -> (u64, Command, u8) {
-                    let mut cmd: Command = serde_json::from_str(row.get("f_cmd")).unwrap();
-                    cmd.timestamp = Some(
-                        row.get::<sqlx::types::time::OffsetDateTime, &str>("f_timestamp")
-                            .unix_timestamp() as u64,
-                    );
-                    (row.get("f_id"), cmd, row.get("f_status"))
-                })
-                .fetch_all(pool)
-                .await
-                .unwrap()
-        });
+        let sql = format!(
+            "select f_id,f_cmd,f_status,f_timestamp from t_sequence where f_id > {} limit {}",
+            event_id, limit
+        );
+        let r = sqlx::query(&sql)
+            .map(|row: sqlx::mysql::MySqlRow| -> (u64, Command, u8) {
+                let mut cmd: Command = serde_json::from_str(row.get("f_cmd")).unwrap();
+                cmd.timestamp = Some(
+                    row.get::<sqlx::types::time::OffsetDateTime, &str>("f_timestamp")
+                        .unix_timestamp() as u64,
+                );
+                (row.get("f_id"), cmd, row.get("f_status"))
+            })
+            .fetch_all(pool)
+            .await
+            .unwrap();
         let mut cursor = event_id;
         for cmd in r {
             if cmd.2 != 2 {
