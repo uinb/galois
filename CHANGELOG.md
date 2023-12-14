@@ -1,24 +1,25 @@
+# v0.7.0
+
+- remove redis & mysql
+- add rocksdb
+- add migration support from v0.6.x to v0.7.x
+- rewrite sequencer & order manager: read and write events/orders from/to rocksdb
+- rewrite prover: read and write proofs from/to rocksdb
+
 # v0.7.0-rc.13
 
 - online test of migration
 
+# v0.6.2
+
+- initiate dump command from external storage to support migration
+
 # v0.5.1
 
-- enable polygon
-
-# v0.5.0-rc3
-
-- update sidecar
-
-# v0.5.0-rc2
-
-- road to decentralize
-
-# v0.5.0-dev
-
-- extend fusotao events scanning to support markets/x25519_key
+- add polygon chain id
+- extend fusotao events scanning procedure to support markets/x25519_key
 - remove mmap
-- seperate some shared data reading from core data
+- seperate some shared data from core data
 - add broker signature support
 - encrypt config file
 - merge sidecar
@@ -27,21 +28,15 @@
 
 - reduce output flush delay
 
-# v0.4.0
+# ~v0.4.0~
 
 (don't use this version)
 - add: verify compress
 - add: some refactor
 - remove: unused features
-
-# v0.4.0-rc.1
-
 - update rpc client
-
-# v0.4.0-rc.0
-
 - remove some features
-- some refactor 
+- refactor some code
 
 # v0.3.8
 
@@ -50,12 +45,7 @@
 
 # v0.3.4-test.1
 
-- release v0.3.4-test.1
-
-# v0.3.4-test
-
-- release 0.3.4-test
-- add verify compress
+- verify compressed proofs
 
 # v0.3.3
 
@@ -63,20 +53,20 @@
 
 # v0.3.1
 
-- release 0.3.1
+- release 0.3.1, see the previous dozens of RELEASE CANDIDATES
 
 # v0.3.1-rc.13
 - reduce logs in loop
-
-# v0.3.1-rc.12
 - update submit proof
-- disable to update fee when ppi is too high
+- disable updating fees when PPI is too high
 
 # v0.3.1-test.2
 - update submit proof
 
 # v0.3.1-rc.10
-- add query scan height
+- update proof-submitting procedure
+- refactor scanning procedure
+
 # v0.3.1-rc.4
 - update redis tls config
 
@@ -105,17 +95,9 @@
 
 - enable rejecting authorizing
 
-# v0.2.5-rc.7
-
-- copy unit tests
-
 # v0.2.5-rc.5
 
 - wait for proofs InBlock
-
-# v0.2.5-rc.4
-
-- use inner counter instead of Arc
 
 # v0.2.4
 
@@ -123,7 +105,7 @@
 
 # v0.2.3
 
-- Proving Performance Index
+- add Proving Performance Index(PPI)
 
 # v0.2.2
 
@@ -131,11 +113,11 @@
 
 # v0.2.1
 
-- merge makers in a proof
+- merge makers in a single proof
 
 # v0.2.0
 
-- self-trade prevention
+- add self-trade prevention
 
 # v0.1.3
 
