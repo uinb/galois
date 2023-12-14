@@ -15,7 +15,11 @@
 pub fn migrate(c: crate::config::MigrateCmd) {
     cfg_if::cfg_if! {
         if #[cfg(feature = "v1-to-v2")] {
-            v1_to_v2::migrate(c);
+            use tokio::runtime::Runtime;
+            let rt = Runtime::new().unwrap();
+            rt.block_on(async move {
+                v1_to_v2::migrate(c).await;
+            });
         } else {
             println!("{:?}", c);
             panic!("The binary doesn't contain the feature, please re-compile with feature `v1-to-v2` to enable");
@@ -26,12 +30,11 @@ pub fn migrate(c: crate::config::MigrateCmd) {
 #[cfg(feature = "v1-to-v2")]
 mod v1_to_v2 {
     use crate::{config::*, core, input::Command};
-    use rust_decimal::Decimal;
     use sqlx::mysql::MySqlConnectOptions;
     use sqlx::{MySql, Pool, Row};
     use std::str::FromStr;
 
-    pub fn migrate(c: MigrateCmd) {
+    pub async fn migrate(c: MigrateCmd) {
         lazy_static::initialize(&C);
         let input_file = c.input_path;
         let output_file = c.output_path;
@@ -58,20 +61,17 @@ mod v1_to_v2 {
                             user_id: core::UserId::from_str(row.get("f_user_id")).unwrap(),
                             symbol: s,
                             direction: row.get("f_order_type"),
-                            create_timestamp: row.get("f_timestamp"),
-                            amount: Decimal::from_str(row.get("f_amount")).unwrap(),
-                            price: Decimal::from_str(row.get("f_price")).unwrap(),
+                            create_timestamp: row
+                                .get::<sqlx::types::chrono::NaiveDateTime, &str>("f_timestamp")
+                                .timestamp_millis()
+                                as u64,
+                            amount: row.get("f_amount"),
+                            price: row.get("f_price"),
                             status: row.get("f_status"),
-                            matched_quote_amount: Decimal::from_str(
-                                row.get("f_matched_quote_amount"),
-                            )
-                            .unwrap(),
-                            matched_base_amount: Decimal::from_str(
-                                row.get("f_matched_base_amount"),
-                            )
-                            .unwrap(),
-                            base_fee: Decimal::from_str(row.get("f_base_fee")).unwrap(),
-                            quote_fee: Decimal::from_str(row.get("f_quote_fee")).unwrap(),
+                            matched_quote_amount: row.get("f_matched_quote_amount"),
+                            matched_base_amount: row.get("f_matched_base_amount"),
+                            base_fee: row.get("f_base_fee"),
+                            quote_fee: row.get("f_quote_fee"),
                         }
                     })
                     .fetch_all(p.as_ref())
@@ -88,27 +88,45 @@ mod v1_to_v2 {
             .open(output_file)
             .unwrap();
         data.into_raw(file).unwrap();
+        log::info!("coredump file migrated");
         if !ignore_sequences {
-            let r = futures::executor::block_on(async move {
-                let sql = format!(
-                    "select f_id,f_cmd,f_status, f_time from t_sequence where f_event_id > {}",
-                    event_id
-                );
-                sqlx::query(&sql)
-                    .map(|row: sqlx::mysql::MySqlRow| -> (u64, Command, u8) {
-                        let mut cmd: Command = serde_json::from_str(row.get("f_cmd")).unwrap();
-                        cmd.timestamp = Some(row.get("f_time"));
-                        (row.get("f_id"), cmd, row.get("f_status"))
-                    })
-                    .fetch_all(pool.as_ref())
-                    .await
-                    .unwrap()
-            });
-            for cmd in r {
-                if cmd.2 != 2 {
-                    crate::sequencer::save(cmd.0, serde_json::to_vec(&cmd.1).unwrap()).unwrap();
+            let mut cursor = event_id;
+            log::info!("starting to migrate event from {}", cursor);
+            loop {
+                let new = migrate_sequences(&pool, cursor, 1000).await;
+                log::info!("migrating sequences {} to {}", cursor, new);
+                if cursor == new {
+                    break;
                 }
+                cursor = new;
             }
         }
+    }
+
+    async fn migrate_sequences(pool: &Pool<MySql>, event_id: u64, limit: usize) -> u64 {
+        let sql = format!(
+            "select f_id,f_cmd,f_status,f_timestamp from t_sequence where f_id > {} limit {}",
+            event_id, limit
+        );
+        let r = sqlx::query(&sql)
+            .map(|row: sqlx::mysql::MySqlRow| -> (u64, Command, u8) {
+                let mut cmd: Command = serde_json::from_str(row.get("f_cmd")).unwrap();
+                cmd.timestamp = Some(
+                    row.get::<sqlx::types::time::OffsetDateTime, &str>("f_timestamp")
+                        .unix_timestamp() as u64,
+                );
+                (row.get("f_id"), cmd, row.get("f_status"))
+            })
+            .fetch_all(pool)
+            .await
+            .unwrap();
+        let mut cursor = event_id;
+        for cmd in r {
+            if cmd.2 != 2 {
+                crate::sequencer::save(cmd.0, serde_json::to_vec(&cmd.1).unwrap()).unwrap();
+                cursor = cmd.0;
+            }
+        }
+        cursor
     }
 }

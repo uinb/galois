@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::core::{Amount, Fee, OrderId, Price, Symbol, UserId};
+use crate::core::{Amount, Fee, OrderId, Price, UserId};
 use linked_hash_map::LinkedHashMap;
-use rust_decimal::{prelude::Zero, Decimal};
+use rust_decimal::prelude::Zero;
 use serde::{Deserialize, Serialize};
 use std::collections::{btree_map::OccupiedEntry, BTreeMap, HashMap};
 
@@ -116,7 +116,7 @@ impl OrderPage {
         }
     }
 
-    pub fn as_level(&self, base_scale: u32, quote_scale: u32, total: Amount) -> Level {
+    pub fn merge(&self, base_scale: u32, quote_scale: u32, total: Amount) -> Level {
         let mut amount = self.amount;
         let mut price = self.price;
         amount.rescale(base_scale);
@@ -167,14 +167,6 @@ pub struct OrderBook {
     pub max_id: OrderId,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
-pub struct Depth {
-    pub asks: Vec<Level>,
-    pub bids: Vec<Level>,
-    pub depth: usize,
-    pub symbol: Symbol,
-}
-
 impl OrderBook {
     pub fn new(
         base_scale: u32,
@@ -219,29 +211,6 @@ impl OrderBook {
             self.asks.values().fold(Amount::zero(), |x, a| x + a.amount),
             self.bids.values().fold(Amount::zero(), |x, b| x + b.amount),
         )
-    }
-
-    pub fn as_depth(&self, level: usize, symbol: Symbol) -> Depth {
-        let mut asks = Vec::<Level>::new();
-        let mut bids = Vec::<Level>::new();
-        let mut ask_total = Decimal::zero();
-        for (_, ask) in self.asks.iter().take(level) {
-            let level = ask.as_level(self.base_scale, self.quote_scale, ask_total);
-            ask_total = level.2;
-            asks.push(level);
-        }
-        let mut bid_total = Decimal::zero();
-        for (_, bid) in self.bids.iter().rev().take(level) {
-            let level = bid.as_level(self.base_scale, self.quote_scale, bid_total);
-            bid_total = level.2;
-            bids.push(level);
-        }
-        Depth {
-            asks,
-            bids,
-            depth: level,
-            symbol,
-        }
     }
 
     pub fn insert(&mut self, order: Order, ask_or_bid: AskOrBid) {

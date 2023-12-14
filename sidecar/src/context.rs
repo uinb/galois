@@ -21,7 +21,7 @@ use crate::{
     AccountId32, Sr25519Pair, Sr25519Public, Sr25519Signature,
 };
 use dashmap::DashMap;
-use galois_engine::{core::*, fusotao::OffchainSymbol, orders::PendingOrder};
+use galois_engine::{core::*, fusotao::OffchainSymbol, input, orders::PendingOrder, output::Depth};
 use hyper::{Body, Request, Response};
 use parity_scale_codec::{Decode, Encode};
 use rocksdb::DB;
@@ -49,8 +49,12 @@ pub struct Context {
     pub x25519: StaticSecret,
     pub db: DB,
     pub subscribers: Arc<DashMap<String, UnboundedSender<(String, PendingOrderWrapper)>>>,
-    pub session_nonce: Arc<DashMap<String, Session>>,
+    // broker -> channel<symbol> map to notify the active brokers
+    pub active_brokers: Arc<DashMap<String, UnboundedSender<Symbol>>>,
+    // we simply maintein the symbol -> orderbook_depth map in form of string
+    pub orderbooks: Arc<DashMap<Symbol, Depth>>,
     pub markets: Arc<DashMap<Symbol, (Arc<AtomicBool>, OffchainSymbol)>>,
+    pub session_nonce: Arc<DashMap<String, Session>>,
 }
 
 impl Context {
@@ -64,39 +68,62 @@ impl Context {
             String,
             UnboundedSender<(String, PendingOrderWrapper)>,
         >::default());
+        let active_brokers = Arc::new(DashMap::default());
         let conn = backend.clone();
         let markets = futures::executor::block_on(async move {
             conn.get_markets().await.map(|markets| {
-                Arc::new(DashMap::from_iter(markets.into_iter().map(|m| {
-                    (m.symbol.clone(), (Arc::new(AtomicBool::new(false)), m))
-                })))
+                let map = DashMap::from_iter(
+                    markets
+                        .into_iter()
+                        .map(|m| (m.symbol.clone(), (Arc::new(AtomicBool::new(false)), m))),
+                );
+                Arc::new(map)
             })
         })
         .unwrap();
         log::debug!("Loading marketings from backend: {:?}", markets);
+        let conn = backend.clone();
+        let orderbooks = futures::executor::block_on(async move {
+            conn.get_orderbooks().await.map(|orderbooks| {
+                let map = DashMap::from_iter(orderbooks.into_iter().map(|d| (d.symbol.clone(), d)));
+                Arc::new(map)
+            })
+        })
+        .unwrap();
         let sub = subscribers.clone();
+        let depth = orderbooks.clone();
+        // let notify_when_depth_updated = active_brokers.clone();
         tokio::spawn(async move {
             loop {
                 let v = dispatcher.recv().await;
                 if v.is_none() {
                     continue;
                 }
-                let v = v.unwrap();
-                // TODO support multi-types broadcasting messages from engine
-                if let Ok(o) = serde_json::from_value::<PendingOrder>(v) {
-                    let user_id = o.user_id.to_string();
-                    let r = if let Some(u) = sub.get(&user_id) {
-                        u.value().send((user_id.clone(), o.into()))
-                    } else {
-                        Ok(())
-                    };
-                    match r {
-                        Err(e) => {
-                            log::debug!("sending order to channel error: {}", e);
-                            sub.remove(&user_id);
+                let (typ, payload) = v.unwrap();
+                match typ {
+                    input::ORDER_MATCHED => {
+                        if let Ok(o) = serde_json::from_value::<PendingOrder>(payload) {
+                            let user_id = o.user_id.to_string();
+                            let r = if let Some(u) = sub.get(&user_id) {
+                                u.value().send((user_id.clone(), o.into()))
+                            } else {
+                                Ok(())
+                            };
+                            match r {
+                                Err(e) => {
+                                    log::debug!("sending order to channel error: {}", e);
+                                    sub.remove(&user_id);
+                                }
+                                Ok(_) => {}
+                            }
                         }
-                        Ok(_) => {}
                     }
+                    input::DEPTH_UPDATED => {
+                        if let Ok(d) = serde_json::from_value::<Depth>(payload) {
+                            depth.insert(d.symbol.clone(), d);
+                        }
+                    }
+                    _ => {}
                 }
             }
         });
@@ -104,9 +131,11 @@ impl Context {
             backend,
             x25519,
             db,
-            session_nonce: Arc::new(DashMap::default()),
+            active_brokers,
+            orderbooks,
             subscribers,
             markets,
+            session_nonce: Arc::new(DashMap::default()),
         }
     }
 
@@ -361,9 +390,6 @@ pub fn validate_signature_should_work() {
     let key: [u8; 32] = hex::decode(seed).unwrap().try_into().unwrap();
     let p = Sr25519Pair::from_seed(&key);
     let signature = p.sign(&nonce);
-    println!("pubkey: 0x{}", hex::encode(&p.public()));
-    println!("nonce: 0x{}", hex::encode(&nonce));
-    println!("signature: 0x{}", hex::encode(&signature));
     assert!(Sr25519Pair::verify(&signature, nonce, &p.public()));
 }
 
@@ -375,11 +401,5 @@ pub fn validate_deser_signature_should_work() {
     let public = Sr25519Public::from_raw(*AccountId32::from_ss58check(ss58).unwrap().as_ref());
     let signature = hex::decode(&signature.trim_start_matches("0x")).unwrap();
     let signature = Sr25519Signature::decode(&mut &signature[..]).unwrap();
-    println!("pubkey: 0x{}", hex::encode(&public));
-    println!("nonce: 0x{}", hex::encode(&nonce));
-    println!(
-        "signature: 0x{}",
-        hex::encode::<&[u8; 64]>(signature.as_ref())
-    );
     assert!(Sr25519Pair::verify(&signature, nonce, &public));
 }

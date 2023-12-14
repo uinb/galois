@@ -29,6 +29,9 @@ pub fn init(
         recovery
     );
     if C.dry_run.is_some() {
+        use signal_hook::{consts::SIGINT, iterator::Signals};
+        let mut signals = Signals::new(&[SIGINT]).unwrap();
+        signals.forever().next();
         return;
     }
     std::thread::spawn(move || -> anyhow::Result<()> {
@@ -38,15 +41,19 @@ pub fn init(
             let (session, req_id) = (input.session, input.req_id);
             input.sequence = current_id;
             let cmd = serde_json::to_vec(&input.cmd)?;
-            if let Ok(event) = input.try_into() {
-                save(current_id, cmd)?;
-                to_executor.send(event)?;
-                if current_id % C.sequence.checkpoint == 0 {
-                    to_executor.send(Event::Dump(current_id))?;
+            if let Ok(event) = <Input as TryInto<Event>>::try_into(input) {
+                if event.should_save() {
+                    save(current_id, cmd)?;
+                    to_executor.send(event)?;
+                    if current_id % C.sequence.checkpoint == 0 {
+                        to_executor.send(Event::Dump(current_id))?;
+                    }
+                } else {
+                    to_executor.send(event)?;
                 }
                 current_id += 1;
             } else {
-                to_server.send((session, Message::new(req_id, vec![])))?;
+                to_server.send((session, Message::new_req(req_id, vec![])))?;
             }
         }
     });

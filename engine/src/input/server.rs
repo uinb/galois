@@ -214,7 +214,7 @@ async fn handle_req(
     if cmd.is_querying_share_data() {
         let w = shared.handle_req(&cmd)?;
         to_session
-            .send(Message::new(req_id, w))
+            .send(Message::new_req(req_id, w))
             .await
             .map_err(|e| anyhow::anyhow!("read loop -> write loop -> {:?}", e))?;
         Ok(())

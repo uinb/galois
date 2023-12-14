@@ -20,6 +20,7 @@ use galois_engine::{
     input::{cmd::*, Command, Message},
     orderbook::Order,
     orders::PendingOrder,
+    output::Depth,
 };
 use rust_decimal::Decimal;
 use serde_json::{json, to_vec, Value as JsonValue};
@@ -37,7 +38,7 @@ use x25519_dalek::StaticSecret;
 type ToBackend = Sender<Option<Req>>;
 type FromFrontend = Receiver<Option<Req>>;
 type Notifier = Sender<JsonValue>;
-type Broadcast = UnboundedSender<JsonValue>;
+type Broadcast = UnboundedSender<(u8, JsonValue)>;
 
 #[derive(Clone, Debug)]
 pub struct BackendConnection {
@@ -121,7 +122,8 @@ impl BackendConnection {
                     }
                 };
                 if req_id == 0 {
-                    let _ = broadcast.send(json);
+                    let typ = Message::get_broadcast_type(header);
+                    let _ = broadcast.send((typ, json));
                 } else if let Some((_, noti)) = req.remove(&req_id) {
                     let _ = noti.send(json).await;
                 }
@@ -145,7 +147,7 @@ impl BackendConnection {
                     req_id += 1;
                     let Req { payload, notifier } = req;
                     sink.insert(req_id, notifier);
-                    let msg = Message::new(req_id, payload);
+                    let msg = Message::new_req(req_id, payload);
                     match stream.write_all(&msg.encode()).await {
                         Ok(_) => log::debug!("write to galois -> OK"),
                         Err(e) => log::debug!("write to galois -> {:?}", e),
@@ -305,6 +307,15 @@ impl BackendConnection {
             .inspect_err(|e| log::debug!("{:?}", e))
             .map_err(|_| anyhow::anyhow!("Galois not available"))?;
         serde_json::from_value::<Vec<OffchainSymbol>>(r).map_err(|_| anyhow::anyhow!("galois?"))
+    }
+
+    pub async fn get_orderbooks(&self) -> anyhow::Result<Vec<Depth>> {
+        let r = self
+            .request(to_vec(&json!({ "cmd": QUERY_ALL_ORDERBOOKS })).expect("jsonser;qed"))
+            .await
+            .inspect_err(|e| log::debug!("{:?}", e))
+            .map_err(|_| anyhow::anyhow!("Galois not available"))?;
+        serde_json::from_value::<Vec<Depth>>(r).map_err(|_| anyhow::anyhow!("galois?"))
     }
 
     pub async fn get_x25519(&self) -> anyhow::Result<StaticSecret> {

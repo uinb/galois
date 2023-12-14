@@ -20,9 +20,9 @@ pub mod orders;
 
 use crate::{
     core::*,
-    input::{Event, Message},
+    input::{self, Event, Message},
     orderbook::*,
-    output::Output,
+    output::{Depth, Output},
     prover, snapshot,
 };
 use anyhow::anyhow;
@@ -64,7 +64,7 @@ pub fn init(recv: DriverChannel, market: MarketChannel, response: ResponseChanne
                     log::debug!("event {} rejected: {}", id, e);
                     let msg = json!({"error": e.to_string()});
                     let v = to_vec(&msg).unwrap_or_default();
-                    let _ = response.send((session, Message::new(req_id, v)));
+                    let _ = response.send((session, Message::new_req(req_id, v)));
                 }
                 Err(EventsError::EventIgnored(id, e)) => {
                     log::info!("event {} ignored: {}", id, e);
@@ -135,16 +135,28 @@ fn do_execute(
                 quote_fee: Decimal::zero(),
             });
             // compatiable with old version since we don't use mysql auto increment id anymore
+            // session=0 indicates replaying from snapshot
             if session != 0 {
                 response
                     .send((
                         session,
-                        Message::new(
+                        Message::new_req(
                             req_id,
                             to_vec(&json!({
                                 "id": mr.taker.order_id
                             }))
                             .expect("qed;"),
+                        ),
+                    ))
+                    .map_err(|_| EventsError::Interrupted(id))?;
+                let orderbook: &_ = orderbook;
+                let depth: Depth = (cmd.symbol, orderbook).into();
+                response
+                    .send((
+                        0,
+                        Message::new_broadcast(
+                            input::DEPTH_UPDATED,
+                            to_vec(&depth).unwrap_or_default(),
                         ),
                     ))
                     .map_err(|_| EventsError::Interrupted(id))?;
@@ -163,7 +175,13 @@ fn do_execute(
                 if session != 0 {
                     // broadcast to all sessions
                     response
-                        .send((0, Message::new(0, to_vec(&o).unwrap_or_default())))
+                        .send((
+                            0,
+                            Message::new_broadcast(
+                                input::ORDER_MATCHED,
+                                to_vec(&o).unwrap_or_default(),
+                            ),
+                        ))
                         .map_err(|_| EventsError::Interrupted(id))?;
                 }
             }
@@ -231,12 +249,23 @@ fn do_execute(
                 response
                     .send((
                         session,
-                        Message::new(
+                        Message::new_req(
                             req_id,
                             to_vec(&json!({
                                 "id": cmd.order_id
                             }))
                             .expect("qed;"),
+                        ),
+                    ))
+                    .map_err(|_| EventsError::Interrupted(id))?;
+                let orderbook: &_ = orderbook;
+                let depth: Depth = (cmd.symbol, orderbook).into();
+                response
+                    .send((
+                        0,
+                        Message::new_broadcast(
+                            input::DEPTH_UPDATED,
+                            to_vec(&depth).unwrap_or_default(),
                         ),
                     ))
                     .map_err(|_| EventsError::Interrupted(id))?;
@@ -398,42 +427,46 @@ fn do_execute(
                     .map_or(vec![], |order| to_vec(order).unwrap_or_default()),
                 None => vec![],
             };
-            let _ = response.send((session, Message::new(req_id, v)));
+            let _ = response.send((session, Message::new_req(req_id, v)));
             Ok(())
         }
         Event::QueryUserOrders(symbol, user_id, session, req_id) => {
             let o = data.orders.list(user_id, symbol);
             let v = to_vec(&o).unwrap_or_default();
-            let _ = response.send((session, Message::new(req_id, v)));
+            let _ = response.send((session, Message::new_req(req_id, v)));
             Ok(())
         }
         Event::QueryBalance(user_id, currency, session, req_id) => {
             let a = assets::get_balance_to_owned(&data.accounts, &user_id, currency);
             let v = to_vec(&a).unwrap_or_default();
-            let _ = response.send((session, Message::new(req_id, v)));
+            let _ = response.send((session, Message::new_req(req_id, v)));
             Ok(())
         }
         Event::QueryAccounts(user_id, session, req_id) => {
             let a = assets::get_account_to_owned(&data.accounts, &user_id);
             let v = to_vec(&a).unwrap_or_default();
-            let _ = response.send((session, Message::new(req_id, v)));
+            let _ = response.send((session, Message::new_req(req_id, v)));
             Ok(())
         }
         Event::QueryExchangeFee(symbol, session, req_id) => {
-            let mut v: HashMap<String, Fee> = HashMap::new();
-            let orderbook = data.orderbooks.get(&symbol);
-            match orderbook {
-                Some(book) => {
-                    v.insert(String::from("maker_fee"), book.maker_fee);
-                    v.insert(String::from("taker_fee"), book.taker_fee);
-                }
-                _ => {
-                    v.insert(String::from("maker_fee"), Decimal::new(0, 0));
-                    v.insert(String::from("taker_fee"), Decimal::new(0, 0));
-                }
-            }
-            let v = to_vec(&v).unwrap_or_default();
-            let _ = response.send((session, Message::new(req_id, v)));
+            let (maker, taker) = data
+                .orderbooks
+                .get(&symbol)
+                .map(|b| (b.maker_fee, b.taker_fee))
+                .unwrap_or_default();
+            let map = HashMap::from([("maker_fee", maker), ("taker_fee", taker)]);
+            let v = to_vec(&map).unwrap_or_default();
+            let _ = response.send((session, Message::new_req(req_id, v)));
+            Ok(())
+        }
+        Event::QueryAllOrderbooks(session, req_id) => {
+            let depth = data
+                .orderbooks
+                .iter()
+                .map(|(s, o)| (*s, o).into())
+                .collect::<Vec<Depth>>();
+            let v = to_vec(&depth).unwrap_or_default();
+            let _ = response.send((session, Message::new_req(req_id, v)));
             Ok(())
         }
         Event::Dump(id) => {

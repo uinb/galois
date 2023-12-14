@@ -68,7 +68,7 @@ pub struct MigrateCmd {
         help = "The old coredump file path"
     )]
     pub input_path: String,
-    #[arg(long, action=clap::ArgAction::SetFalse, help = "Migrate coredump file only if set")]
+    #[arg(long, action=clap::ArgAction::SetTrue, help = "Migrate coredump file only if set")]
     pub core_only: bool,
 }
 

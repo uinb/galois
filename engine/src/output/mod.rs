@@ -13,6 +13,9 @@
 // limitations under the License.
 
 use crate::core::*;
+use crate::executor::orderbook::Level;
+use rust_decimal::{prelude::Zero, Decimal};
+use serde::{Deserialize, Serialize};
 
 pub mod market;
 
@@ -35,4 +38,35 @@ pub struct Output {
     pub base_available: Amount,
     pub base_frozen: Amount,
     pub timestamp: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
+pub struct Depth {
+    pub asks: Vec<Level>,
+    pub bids: Vec<Level>,
+    pub symbol: Symbol,
+}
+
+impl From<(Symbol, &OrderBook)> for Depth {
+    fn from(orderbook: (Symbol, &OrderBook)) -> Self {
+        let mut asks = Vec::<Level>::new();
+        let mut bids = Vec::<Level>::new();
+        let mut ask_total = Decimal::zero();
+        for (_, ask) in orderbook.1.asks.iter() {
+            let level = ask.merge(orderbook.1.base_scale, orderbook.1.quote_scale, ask_total);
+            ask_total = level.2;
+            asks.push(level);
+        }
+        let mut bid_total = Decimal::zero();
+        for (_, bid) in orderbook.1.bids.iter().rev() {
+            let level = bid.merge(orderbook.1.base_scale, orderbook.1.quote_scale, bid_total);
+            bid_total = level.2;
+            bids.push(level);
+        }
+        Depth {
+            asks,
+            bids,
+            symbol: orderbook.0,
+        }
+    }
 }
