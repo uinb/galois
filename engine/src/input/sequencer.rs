@@ -80,6 +80,7 @@ fn ensure_fully_loaded(init_at: u64, tx: Sender<Event>) -> anyhow::Result<u64> {
         let event = input
             .try_into()
             .map_err(|_| anyhow::anyhow!("id {} is invalid", current_id))?;
+        log::info!("loading historic event {}", current_id);
         // LIMIT|CANCEL(session=0, req_id=0) represent historic events, shouldn't reply
         match C.dry_run {
             Some(n) if n >= current_id => tx.send(event)?,

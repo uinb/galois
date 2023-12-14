@@ -88,8 +88,10 @@ mod v1_to_v2 {
             .open(output_file)
             .unwrap();
         data.into_raw(file).unwrap();
+        log::info!("coredump file migrated");
         if !ignore_sequences {
             let mut cursor = event_id;
+            log::info!("starting to migrate event from {}", cursor);
             loop {
                 let new = migrate_sequences(&pool, cursor, 1000).await;
                 log::info!("migrating sequences {} to {}", cursor, new);
