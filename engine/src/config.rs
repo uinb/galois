@@ -78,7 +78,7 @@ pub struct Config {
     pub sequence: SequenceConfig,
     pub fusotao: FusotaoConfig,
     #[cfg(feature = "v1-to-v2")]
-    pub mysql: MysqlConfig,
+    pub mysql: Option<MysqlConfig>,
     #[serde(skip_serializing)]
     pub dry_run: Option<u64>,
 }
@@ -231,6 +231,13 @@ pub fn print_config(f: &std::path::PathBuf) -> anyhow::Result<()> {
     let toml = std::fs::read_to_string(f)?;
     let mut cfg: Config = toml::from_str(&toml)?;
     cfg.fusotao.encrypt(&key)?;
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "v1-to-v2")] {
+            if let Some(ref mut c) = cfg.mysql {
+                c.encrypt(&key)?;
+            }
+        }
+    }
     println!("{}", toml::to_string(&cfg)?);
     Ok(())
 }
@@ -239,6 +246,13 @@ fn init_config(toml: &str, key: Option<String>) -> anyhow::Result<Config> {
     let mut cfg: Config = toml::from_str(toml)?;
     if let Some(key) = key {
         cfg.fusotao.decrypt(&key)?;
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "v1-to-v2")] {
+                if let Some(ref mut c) = cfg.mysql {
+                    c.decrypt(&key)?;
+                }
+            }
+        }
     }
     Ok(cfg)
 }

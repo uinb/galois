@@ -41,7 +41,7 @@ mod v1_to_v2 {
         let ignore_sequences = c.core_only;
         let f = std::fs::File::open(input_file).unwrap();
         let data = core::v1::DataV1::from_raw(f).unwrap();
-        let option: MySqlConnectOptions = C.mysql.url.parse().unwrap();
+        let option: MySqlConnectOptions = C.mysql.clone().unwrap().url.parse().unwrap();
         let pool: Pool<MySql> =
             futures::executor::block_on(async move { Pool::connect_with(option).await.unwrap() });
         let mut pendings = vec![];
